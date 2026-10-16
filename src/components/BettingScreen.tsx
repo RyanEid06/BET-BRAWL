@@ -2,23 +2,23 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  * 
- * Bet & BRAWL: 15-Second Secret Spectator Betting Phase
+ * Bet & BRAWL: 15-Second Secret Spectator Betting Phase (Mobile-Clean UI)
  */
 
 import React, { useState, useEffect } from 'react';
 import type { Player, FighterOdds, SecretBet } from '../engine/types.ts';
 import { sound } from '../engine/audio.ts';
 import { calculatePotentialReturn } from '../engine/odds.ts';
-import { Clock, TrendingUp, CheckCircle, Flame, ShieldAlert } from 'lucide-react';
+import { Clock, CheckCircle, Flame } from 'lucide-react';
 
 interface Props {
   fighterA: Player;
   fighterB: Player;
   odds: Record<string, FighterOdds>;
   currentBets: SecretBet[];
-  clientPlayer: Player;
+  myPlayer: Player;
   onPlaceBet: (fighterId: string, amount: number) => void;
-  onTimeExpired: () => void;
+  bettingTimeRemaining: number;
 }
 
 export const BettingScreen: React.FC<Props> = ({
@@ -26,251 +26,202 @@ export const BettingScreen: React.FC<Props> = ({
   fighterB,
   odds,
   currentBets,
-  clientPlayer,
+  myPlayer,
   onPlaceBet,
-  onTimeExpired,
+  bettingTimeRemaining,
 }) => {
-  const [timeLeft, setTimeLeft] = useState<number>(15);
   const [selectedFighterId, setSelectedFighterId] = useState<string>(fighterA.id);
   const [betAmount, setBetAmount] = useState<number>(100);
-  const [hasBet, setHasBet] = useState<boolean>(false);
 
-  const isFighter = clientPlayer.id === fighterA.id || clientPlayer.id === fighterB.id;
-  const existingBet = currentBets.find(b => b.bettorId === clientPlayer.id);
+  const isFighter = myPlayer.id === fighterA.id || myPlayer.id === fighterB.id;
+  const existingBet = currentBets.find(b => b.bettorId === myPlayer.id);
 
-  const oddsA = odds[fighterA.id] || { decimalOdds: 2.0, fractionalOdds: '1/1', impliedWinProb: 0.5 };
-  const oddsB = odds[fighterB.id] || { decimalOdds: 2.0, fractionalOdds: '1/1', impliedWinProb: 0.5 };
+  const oddsA = odds[fighterA.id] || { decimalOdds: 2.0, smoothedWinRate: 0.5 };
+  const oddsB = odds[fighterB.id] || { decimalOdds: 2.0, smoothedWinRate: 0.5 };
 
   const currentSelectedOdds = selectedFighterId === fighterA.id ? oddsA.decimalOdds : oddsB.decimalOdds;
   const potentialReturn = calculatePotentialReturn(betAmount, currentSelectedOdds);
-
-  // 15-second countdown timer
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setTimeLeft(prev => {
-        const nextVal = Math.max(0, prev - 1);
-        if (nextVal <= 4 && nextVal > 0) {
-          sound.playCountdown(false);
-        }
-        return nextVal;
-      });
-    }, 1000);
-
-    return () => clearInterval(timer);
-  }, []);
-
-  useEffect(() => {
-    if (timeLeft === 0) {
-      sound.playCountdown(true);
-      onTimeExpired();
-    }
-  }, [timeLeft, onTimeExpired]);
+  const netProfit = potentialReturn - betAmount;
 
   const handleConfirmBet = () => {
-    if (hasBet || isFighter || clientPlayer.coins < betAmount) return;
+    if (existingBet || isFighter || myPlayer.coins < betAmount) return;
     sound.playBetPlaced();
     onPlaceBet(selectedFighterId, betAmount);
-    setHasBet(true);
   };
 
   const totalPot = currentBets.reduce((sum, b) => sum + b.amount, 0);
 
   return (
-    <div className="w-full max-w-4xl mx-auto p-4 md:p-6 space-y-6">
-      {/* Top Countdown & Pot Header */}
-      <div className="bg-slate-900/90 border border-slate-700 rounded-3xl p-4 md:p-5 shadow-2xl flex items-center justify-between">
+    <div className="w-full max-w-lg mx-auto p-3 sm:p-4 space-y-4">
+      {/* Top Header: Countdown & Pot */}
+      <div className="bg-slate-900/90 border border-slate-700 rounded-2xl p-3 sm:p-4 shadow-xl flex items-center justify-between">
         <div>
-          <div className="text-xs font-mono text-slate-400 uppercase tracking-wider">
-            15s SECRET BETTING WINDOW
-          </div>
-          <h2 className="text-xl md:text-2xl font-black font-display text-white mt-0.5">
-            PLACE YOUR WAGERS
-          </h2>
+          <div className="text-[11px] font-mono text-slate-400 uppercase">15s SECRET WAGER</div>
+          <h2 className="text-lg sm:text-xl font-black font-display text-white">PLACE YOUR BET</h2>
         </div>
 
-        <div className="flex items-center gap-4">
-          <div className="text-right hidden sm:block">
-            <div className="text-[11px] font-mono text-slate-400">SPECTATOR POOL</div>
-            <div className="text-lg font-mono font-bold text-amber-400">
-              💰 {totalPot.toLocaleString()} coins
+        <div className="flex items-center gap-3">
+          <div className="text-right">
+            <div className="text-[10px] font-mono text-slate-400">POOL</div>
+            <div className="text-sm font-mono font-bold text-amber-400">
+              {totalPot} coins
             </div>
           </div>
 
-          {/* Huge Ticking Clock */}
           <div
-            className={`flex items-center gap-2 px-4 py-2 rounded-2xl font-mono text-2xl font-black border-2 transition-all shadow-lg ${
-              timeLeft <= 5
-                ? 'bg-rose-950/80 border-rose-500 text-rose-300 animate-pulse glow-crimson'
-                : 'bg-cyan-950/60 border-cyan-500 text-cyan-300 glow-cyan'
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-mono text-xl font-black border-2 transition-all ${
+              bettingTimeRemaining <= 5
+                ? 'bg-rose-950/90 border-rose-500 text-rose-300 animate-pulse glow-crimson'
+                : 'bg-cyan-950/80 border-cyan-500 text-cyan-300 glow-cyan'
             }`}
           >
-            <Clock className="w-6 h-6" />
-            <span>00:{timeLeft < 10 ? `0${timeLeft}` : timeLeft}</span>
+            <Clock className="w-4 h-4" />
+            <span>00:{bettingTimeRemaining < 10 ? `0${bettingTimeRemaining}` : bettingTimeRemaining}</span>
           </div>
         </div>
       </div>
 
-      {/* Dynamic Odds Showdown Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* Fighter A Card */}
-        <div
-          onClick={() => !isFighter && !hasBet && setSelectedFighterId(fighterA.id)}
-          className={`p-5 rounded-3xl border-2 transition-all cursor-pointer relative overflow-hidden ${
+      {/* Simplified Mobile-Friendly Fighter Cards */}
+      <div className="grid grid-cols-2 gap-3">
+        {/* Fighter A */}
+        <button
+          type="button"
+          disabled={isFighter || !!existingBet}
+          onClick={() => setSelectedFighterId(fighterA.id)}
+          className={`p-3.5 rounded-2xl border-2 transition-all text-left relative cursor-pointer ${
             selectedFighterId === fighterA.id && !isFighter
-              ? 'bg-gradient-to-br from-cyan-950/90 to-slate-900 border-cyan-400 glow-cyan scale-[1.01]'
-              : 'bg-slate-900/70 border-slate-800 hover:border-slate-700'
+              ? 'bg-cyan-950/70 border-cyan-400 shadow-md glow-cyan'
+              : 'bg-slate-900/80 border-slate-800'
           }`}
         >
           {selectedFighterId === fighterA.id && !isFighter && (
-            <div className="absolute top-3 right-3 text-cyan-400">
-              <CheckCircle className="w-5 h-5 fill-cyan-400/20" />
+            <div className="absolute top-2.5 right-2.5 text-cyan-400">
+              <CheckCircle className="w-4 h-4 fill-cyan-400/20" />
             </div>
           )}
-
-          <div className="flex items-center gap-3 mb-3">
-            <span className="text-4xl p-2 bg-slate-950 rounded-xl border border-slate-700">
-              {fighterA.avatar}
-            </span>
-            <div>
-              <div className="font-display font-black text-xl text-white">{fighterA.name}</div>
-              <div className="text-xs font-mono text-slate-400">
-                Win Rate: <b className="text-cyan-400">{Math.round((oddsA.smoothedWinRate || 0.5) * 100)}%</b>
-              </div>
-            </div>
+          <div className="text-3xl mb-1">{fighterA.avatar}</div>
+          <div className="font-bold text-sm text-white truncate">{fighterA.name}</div>
+          <div className="text-[11px] font-mono text-slate-400">
+            {fighterA.matchesWon}W · {fighterA.matchesPlayed - fighterA.matchesWon}L
           </div>
-
-          {/* Big Odds Display */}
-          <div className="bg-slate-950/90 p-3 rounded-2xl border border-slate-800 flex items-center justify-between font-mono">
-            <div>
-              <div className="text-[10px] text-slate-400">DYNAMIC PAYOUT</div>
-              <div className="text-3xl font-black text-cyan-400 text-glow-cyan">
-                {oddsA.decimalOdds.toFixed(2)}x
-              </div>
-            </div>
-            <div className="text-right">
-              <div className="text-[10px] text-slate-400">FRACTIONAL / PROB</div>
-              <div className="text-sm font-bold text-slate-300">
-                {oddsA.fractionalOdds} · {Math.round(oddsA.impliedWinProb * 100)}%
-              </div>
-            </div>
+          <div className="mt-2 pt-2 border-t border-slate-800 flex justify-between items-baseline">
+            <span className="text-[10px] font-mono text-slate-400">PAYOUT:</span>
+            <span className="text-xl font-mono font-black text-cyan-400">{oddsA.decimalOdds.toFixed(2)}x</span>
           </div>
-        </div>
+        </button>
 
-        {/* Fighter B Card */}
-        <div
-          onClick={() => !isFighter && !hasBet && setSelectedFighterId(fighterB.id)}
-          className={`p-5 rounded-3xl border-2 transition-all cursor-pointer relative overflow-hidden ${
+        {/* Fighter B */}
+        <button
+          type="button"
+          disabled={isFighter || !!existingBet}
+          onClick={() => setSelectedFighterId(fighterB.id)}
+          className={`p-3.5 rounded-2xl border-2 transition-all text-left relative cursor-pointer ${
             selectedFighterId === fighterB.id && !isFighter
-              ? 'bg-gradient-to-bl from-rose-950/90 to-slate-900 border-rose-500 glow-crimson scale-[1.01]'
-              : 'bg-slate-900/70 border-slate-800 hover:border-slate-700'
+              ? 'bg-rose-950/70 border-rose-500 shadow-md glow-crimson'
+              : 'bg-slate-900/80 border-slate-800'
           }`}
         >
           {selectedFighterId === fighterB.id && !isFighter && (
-            <div className="absolute top-3 right-3 text-rose-400">
-              <CheckCircle className="w-5 h-5 fill-rose-400/20" />
+            <div className="absolute top-2.5 right-2.5 text-rose-400">
+              <CheckCircle className="w-4 h-4 fill-rose-400/20" />
             </div>
           )}
-
-          <div className="flex items-center gap-3 mb-3">
-            <span className="text-4xl p-2 bg-slate-950 rounded-2xl border border-slate-700">
-              {fighterB.avatar}
-            </span>
-            <div>
-              <div className="font-display font-black text-xl text-white">{fighterB.name}</div>
-              <div className="text-xs font-mono text-slate-400">
-                Win Rate: <b className="text-rose-400">{Math.round((oddsB.smoothedWinRate || 0.5) * 100)}%</b>
-              </div>
-            </div>
+          <div className="text-3xl mb-1">{fighterB.avatar}</div>
+          <div className="font-bold text-sm text-white truncate">{fighterB.name}</div>
+          <div className="text-[11px] font-mono text-slate-400">
+            {fighterB.matchesWon}W · {fighterB.matchesPlayed - fighterB.matchesWon}L
           </div>
-
-          {/* Big Odds Display */}
-          <div className="bg-slate-950/90 p-3 rounded-2xl border border-slate-800 flex items-center justify-between font-mono">
-            <div>
-              <div className="text-[10px] text-slate-400">DYNAMIC PAYOUT</div>
-              <div className="text-3xl font-black text-rose-400 text-glow-crimson">
-                {oddsB.decimalOdds.toFixed(2)}x
-              </div>
-            </div>
-            <div className="text-right">
-              <div className="text-[10px] text-slate-400">FRACTIONAL / PROB</div>
-              <div className="text-sm font-bold text-slate-300">
-                {oddsB.fractionalOdds} · {Math.round(oddsB.impliedWinProb * 100)}%
-              </div>
-            </div>
+          <div className="mt-2 pt-2 border-t border-slate-800 flex justify-between items-baseline">
+            <span className="text-[10px] font-mono text-slate-400">PAYOUT:</span>
+            <span className="text-xl font-mono font-black text-rose-400">{oddsB.decimalOdds.toFixed(2)}x</span>
           </div>
-        </div>
+        </button>
       </div>
 
-      {/* Secret Betting Controls (for Spectators) */}
+      {/* Spectator Betting Controls */}
       {!isFighter ? (
-        <div className="bg-slate-900/90 border border-slate-700 rounded-3xl p-5 shadow-2xl space-y-4">
-          <div className="flex items-center justify-between text-xs font-mono text-slate-400">
-            <span>YOUR BANKROLL: <b className="text-amber-400 text-sm">{clientPlayer.coins} coins</b></span>
-            <span>POTENTIAL PAYOUT: <b className="text-emerald-400 text-sm">+{potentialReturn} coins</b></span>
+        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 shadow-xl space-y-3">
+          {/* Honest Financial Summary */}
+          <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800 flex justify-between items-center text-xs font-mono">
+            <div>
+              <span className="text-slate-400">Bank: </span>
+              <span className="text-amber-400 font-bold">{myPlayer.coins}c</span>
+            </div>
+            <div>
+              <span className="text-slate-400">Return: </span>
+              <span className="text-white font-bold">{potentialReturn}c</span>
+            </div>
+            <div>
+              <span className="text-slate-400">Net: </span>
+              <span className="text-emerald-400 font-bold">+{netProfit}c</span>
+            </div>
           </div>
 
-          {/* Quick chip buttons */}
-          <div className="flex flex-wrap gap-2">
+          {/* Quick Chip Buttons */}
+          <div className="flex gap-1.5">
             {[50, 100, 200, 500].map(amt => (
               <button
                 key={amt}
-                disabled={hasBet || clientPlayer.coins < amt}
+                type="button"
+                disabled={!!existingBet || myPlayer.coins < amt}
                 onClick={() => {
                   setBetAmount(amt);
                   sound.playTap(true);
                 }}
-                className={`flex-1 py-2.5 rounded-xl text-xs font-mono font-bold transition-all ${
+                className={`flex-1 py-2 rounded-xl text-xs font-mono font-bold transition-all cursor-pointer ${
                   betAmount === amt
-                    ? 'bg-amber-500 text-slate-950 glow-gold'
+                    ? 'bg-amber-500 text-slate-950 font-black glow-gold'
                     : 'bg-slate-950 border border-slate-700 text-slate-300 hover:border-slate-500'
                 }`}
               >
-                {amt}c
+                {amt}
               </button>
             ))}
             <button
-              disabled={hasBet || clientPlayer.coins <= 0}
+              type="button"
+              disabled={!!existingBet || myPlayer.coins <= 0}
               onClick={() => {
-                setBetAmount(clientPlayer.coins);
+                setBetAmount(myPlayer.coins);
                 sound.playTap(true);
               }}
-              className="py-2.5 px-4 rounded-xl text-xs font-mono font-black bg-rose-950 border border-rose-600 text-rose-300 hover:bg-rose-900"
+              className="px-3 py-2 rounded-xl text-xs font-mono font-black bg-rose-950 border border-rose-600 text-rose-300 hover:bg-rose-900 cursor-pointer"
             >
-              ALL IN!
+              ALL IN
             </button>
           </div>
 
-          {/* Confirm Bet CTA */}
+          {/* Confirm Bet Button */}
           <button
+            type="button"
             onClick={handleConfirmBet}
-            disabled={hasBet || clientPlayer.coins < betAmount}
-            className={`w-full py-4 rounded-2xl font-display font-black text-xl uppercase tracking-wider transition-all transform active:scale-95 shadow-xl flex items-center justify-center gap-2 ${
-              hasBet
+            disabled={!!existingBet || myPlayer.coins < betAmount}
+            className={`w-full py-3.5 rounded-xl font-display font-black text-base uppercase tracking-wider transition-all transform active:scale-95 shadow-xl flex items-center justify-center gap-2 ${
+              existingBet
                 ? 'bg-emerald-950 text-emerald-400 border border-emerald-600 cursor-default'
                 : 'bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 text-slate-950 glow-gold cursor-pointer'
             }`}
           >
-            {hasBet ? (
+            {existingBet ? (
               <>
-                <CheckCircle className="w-5 h-5" />
-                <span>SECRET WAGER LOCKED IN ({betAmount} coins)!</span>
+                <CheckCircle className="w-4 h-4" />
+                <span>WAGER LOCKED: {existingBet.amount}c on {existingBet.fighterId === fighterA.id ? fighterA.name : fighterB.name}</span>
               </>
             ) : (
               <>
-                <Flame className="w-5 h-5" />
-                <span>LOCK IN SECRET WAGER ({betAmount}c on {selectedFighterId === fighterA.id ? fighterA.name : fighterB.name})</span>
+                <Flame className="w-4 h-4" />
+                <span>BET {betAmount}c ON {selectedFighterId === fighterA.id ? fighterA.name : fighterB.name}</span>
               </>
             )}
           </button>
         </div>
       ) : (
-        <div className="p-6 rounded-3xl bg-slate-900 border-2 border-amber-500/50 shadow-2xl text-center space-y-2">
-          <div className="text-3xl">🥊</div>
-          <h3 className="text-xl font-black font-display text-amber-300">
+        <div className="p-4 rounded-2xl bg-slate-900 border border-amber-500/40 text-center space-y-1">
+          <div className="text-2xl">🥊</div>
+          <h3 className="text-base font-black font-display text-amber-300">
             YOU ARE IN THIS BRAWL!
           </h3>
-          <p className="text-slate-300 text-xs max-w-md mx-auto">
-            You cannot bet on your own match. Warm up your reflexes while the spectators wager their bankrolls on you!
+          <p className="text-slate-400 text-xs">
+            Fighters cannot bet on their own match. Prep your thumbs!
           </p>
         </div>
       )}

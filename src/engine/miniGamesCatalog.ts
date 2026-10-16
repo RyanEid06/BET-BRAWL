@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  * 
- * Bet & BRAWL: Mini-Game Catalog & Data Definitions
+ * Bet & BRAWL: Mini-Game Catalog & Authoritative Data
  */
 
 import type { MiniGameMeta, MiniGameId } from './types.ts';
@@ -12,39 +12,39 @@ export const MINI_GAMES: Record<MiniGameId, MiniGameMeta> = {
     id: 'millisecond_stop',
     name: 'Millisecond Stop',
     tagline: 'Internal Clock Showdown',
-    durationSeconds: 10,
-    description: 'The timer counts toward 05.000s. At 03.000s, the display blinds out! Tap as close to 05.000s as you can.',
+    durationSeconds: 9,
+    description: 'The timer counts toward 05.000s. At 03.000s the display blinds out into ??.??? Tap as close to 05.000s as you can.',
     rules: [
       'Watch the live counter until 03.000s',
       'At 03.000s the clock blinds out into ??.???',
-      'Hit SLAM as close to 05.000s as possible',
-      'Smallest delta from 5.000s wins the Brawl'
+      'Tap SLAM as close to 05.000s as possible',
+      'Closest tap to 5.000s wins the Brawl'
     ],
   },
   rapid_red_green: {
     id: 'rapid_red_green',
     name: 'Rapid Red Light, Green Light',
-    tagline: 'Fingers of Fury',
+    tagline: 'Reflex Sprint',
     durationSeconds: 15,
-    description: 'Screens flip between Green and Red unpredictably. Tap on Green for distance (+1); tapping Red penalizes (-3). First to 50 or highest score wins.',
+    description: 'Screens flip between Green and Red unpredictably. Mash on Green (+1), freeze on Red (-3). First to 40 or leader at 15s wins.',
     rules: [
-      'Mash TAP rapidly while the screen is GREEN (+1 point)',
-      'FREEZE immediately on RED light',
+      'Tap rapidly while GREEN (+1 point)',
+      'FREEZE immediately when RED appears',
       'Tapping on RED deducts 3 points!',
-      'First fighter to 50 points or leader at time-up wins'
+      'First to 40 points or leader at time-up wins'
     ],
   },
   speed_math: {
     id: 'speed_math',
     name: 'Speed Math',
     tagline: 'Mental Sprint',
-    durationSeconds: 15,
-    description: 'A rapid 3-question arithmetic race. Fastest fighter to lock 3 correct answers wins the pot.',
+    durationSeconds: 16,
+    description: 'A rapid 3-question arithmetic race. Fastest fighter to lock 3 correct answers wins.',
     rules: [
       'Solve 3 mental math problems back to back',
-      'Four answer choices per question',
-      'Mistakes incur a 1.5s freeze penalty',
-      'First fighter to 3 correct answers takes the crown'
+      'Pick from 4 answer choices',
+      'Mistakes cause a 1.5s freeze penalty',
+      'First fighter to 3 correct answers wins'
     ],
   },
   higher_lower: {
@@ -52,11 +52,11 @@ export const MINI_GAMES: Record<MiniGameId, MiniGameMeta> = {
     name: 'Higher or Lower',
     tagline: 'Stat Showdown',
     durationSeconds: 18,
-    description: 'Compare crazy real-world stats. Is the second item higher or lower than the first? First to 3 correct wins.',
+    description: 'Compare stable real-world stats. Is the second item higher or lower than the first? First to 3 correct wins.',
     rules: [
       'Read the baseline statistic on the card',
-      'Guess whether the challenger item is HIGHER or LOWER',
-      'First fighter to lock 3 correct predictions wins'
+      'Guess whether the challenger is HIGHER or LOWER',
+      'First fighter to 3 correct locks wins'
     ],
   },
   blind_pinpoint: {
@@ -64,112 +64,235 @@ export const MINI_GAMES: Record<MiniGameId, MiniGameMeta> = {
     name: 'Blind Pinpoint',
     tagline: 'Geoguess-Lite',
     durationSeconds: 15,
-    description: 'A country silhouette appears with a target city name. Tap where you think the city sits. Closest in km wins.',
+    description: 'A target city is displayed on an equirectangular world map. Tap where you think it is located. Closest distance in km wins.',
     rules: [
-      'Inspect the target country silhouette',
-      'Pinpoint the secret city location with your finger',
-      'Distance error is measured in kilometers',
-      'Closest pin wins the round'
+      'Read the target world city and country',
+      'Tap your pin on the world map',
+      'Distance error is calculated with the Haversine formula in genuine km',
+      'Smallest distance error wins'
     ],
   },
-  coin_flip_double: {
-    id: 'coin_flip_double',
-    name: 'Coin Flip Double-Down',
-    tagline: 'Bluff & Risk',
-    durationSeconds: 12,
-    description: 'Heads or Tails flip with a 5-second bluff window. Press Double Risk to double the pot stakes!',
+  quick_draw: {
+    id: 'quick_draw',
+    name: 'Quick Draw',
+    tagline: 'Fastest Finger',
+    durationSeconds: 10,
+    description: 'Watch the screen closely. When "GO!" flashes, tap instantly! Tapping before "GO!" is an instant false-start disqualification.',
     rules: [
-      'Pick Heads or Tails before the toss',
-      'Hit "DOUBLE RISK" during the 5s bluff phase to double the match pot',
-      'Watch the 3D coin spin and land',
-      'Correct prediction claims the doubled bounty'
+      'Wait on high alert during the "WAIT..." phase',
+      'DO NOT tap early (instant false-start foul!)',
+      'When "DRAW!" flashes, tap as fast as humanly possible',
+      'Fastest valid reaction time wins'
     ],
   },
 };
 
-export const SPEED_MATH_SETS = [
-  [
-    { q: '18 + 27', choices: [45, 43, 47, 55], correct: 45 },
-    { q: '12 × 4', choices: [48, 44, 46, 52], correct: 48 },
-    { q: '91 − 34', choices: [57, 53, 67, 59], correct: 57 },
-  ],
-  [
-    { q: '36 + 49', choices: [85, 83, 75, 95], correct: 85 },
-    { q: '15 × 3', choices: [45, 35, 55, 40], correct: 45 },
-    { q: '84 − 29', choices: [55, 53, 65, 45], correct: 55 },
-  ],
-  [
-    { q: '24 + 38', choices: [62, 52, 64, 58], correct: 62 },
-    { q: '14 × 4', choices: [56, 46, 54, 60], correct: 56 },
-    { q: '100 − 47', choices: [53, 57, 43, 63], correct: 53 },
-  ],
-];
+// -------------------------------------------------------------
+// SPEED MATH RANDOM GENERATOR
+// -------------------------------------------------------------
 
-export const HIGHER_LOWER_QUESTIONS = [
+export interface MathQuestion {
+  q: string;
+  choices: number[];
+  correct: number;
+}
+
+export function generateMathQuestions(count = 3): MathQuestion[] {
+  const questions: MathQuestion[] = [];
+  const operators = ['+', '-', '×'];
+
+  for (let i = 0; i < count; i++) {
+    const op = operators[Math.floor(Math.random() * operators.length)];
+    let a = 0;
+    let b = 0;
+    let correct = 0;
+
+    if (op === '+') {
+      a = Math.floor(15 + Math.random() * 45);
+      b = Math.floor(15 + Math.random() * 45);
+      correct = a + b;
+    } else if (op === '-') {
+      a = Math.floor(40 + Math.random() * 55);
+      b = Math.floor(12 + Math.random() * 35);
+      correct = a - b;
+    } else {
+      a = Math.floor(6 + Math.random() * 10);
+      b = Math.floor(4 + Math.random() * 9);
+      correct = a * b;
+    }
+
+    const wrongDeltas = [-10, -2, 2, 10, -1, 1, -3, 3];
+    const shuffled = wrongDeltas.sort(() => Math.random() - 0.5);
+    const choicesSet = new Set<number>([correct]);
+
+    for (const delta of shuffled) {
+      if (choicesSet.size >= 4) break;
+      const wrong = correct + delta;
+      if (wrong > 0 && wrong !== correct) {
+        choicesSet.add(wrong);
+      }
+    }
+
+    // Ensure 4 choices
+    while (choicesSet.size < 4) {
+      choicesSet.add(correct + Math.floor((Math.random() - 0.5) * 20));
+    }
+
+    const choices = Array.from(choicesSet).sort(() => Math.random() - 0.5);
+    questions.push({ q: `${a} ${op} ${b}`, choices, correct });
+  }
+
+  return questions;
+}
+
+// -------------------------------------------------------------
+// STABLE HIGHER OR LOWER TRIVIA BANK
+// -------------------------------------------------------------
+
+export interface HigherLowerTrivia {
+  baseItem: string;
+  baseStat: string;
+  baseValue: number;
+  challengerItem: string;
+  challengerStat: string;
+  challengerValue: number;
+  isHigher: boolean;
+}
+
+export const STABLE_HIGHER_LOWER_BANK: HigherLowerTrivia[] = [
   {
     baseItem: 'France Population',
     baseStat: '68 Million',
+    baseValue: 68,
     challengerItem: 'United Kingdom Population',
-    actualHigher: false, // UK ~ 67 Million (Lower)
-    revealStat: '67.7 Million (Lower)',
+    challengerStat: '67.7 Million',
+    challengerValue: 67.7,
+    isHigher: false,
   },
   {
     baseItem: 'Eiffel Tower Height',
     baseStat: '330 Meters',
+    baseValue: 330,
     challengerItem: 'Empire State Building Height',
-    actualHigher: true, // Empire State ~ 381 Meters (Higher)
-    revealStat: '381 Meters (Higher)',
+    challengerStat: '381 Meters',
+    challengerValue: 381,
+    isHigher: true,
   },
   {
-    baseItem: 'Despacito YouTube Views',
-    baseStat: '8.4 Billion Views',
-    challengerItem: 'Baby Shark YouTube Views',
-    actualHigher: true, // Baby Shark ~ 14.8 Billion (Higher)
-    revealStat: '14.8 Billion Views (Higher)',
-  },
-  {
-    baseItem: 'Speed of Sound',
+    baseItem: 'Speed of Sound in Air',
     baseStat: '1,235 km/h',
+    baseValue: 1235,
     challengerItem: 'Cruising Speed of Boeing 747',
-    actualHigher: false, // 747 ~ 920 km/h (Lower)
-    revealStat: '920 km/h (Lower)',
+    challengerStat: '920 km/h',
+    challengerValue: 920,
+    isHigher: false,
   },
   {
-    baseItem: 'Average Earth Distance to Moon',
-    baseStat: '384,400 km',
-    challengerItem: 'Earth Equatorial Circumference',
-    actualHigher: false, // Earth circumference ~ 40,075 km (Lower)
-    revealStat: '40,075 km (Lower)',
+    baseItem: 'Mount Everest Elevation',
+    baseStat: '8,849 Meters',
+    baseValue: 8849,
+    challengerItem: 'Mount Kilimanjaro Elevation',
+    challengerStat: '5,895 Meters',
+    challengerValue: 5895,
+    isHigher: false,
+  },
+  {
+    baseItem: 'Tokyo Population (Metro)',
+    baseStat: '37 Million',
+    baseValue: 37,
+    challengerItem: 'New York City Population (Metro)',
+    challengerStat: '19.5 Million',
+    challengerValue: 19.5,
+    isHigher: false,
+  },
+  {
+    baseItem: 'Apollo 11 Moon Landing',
+    baseStat: 'Year 1969',
+    baseValue: 1969,
+    challengerItem: 'First Commercial Jet Flight',
+    challengerStat: 'Year 1952',
+    challengerValue: 1952,
+    isHigher: false,
+  },
+  {
+    baseItem: 'Great Pyramid of Giza Height',
+    baseStat: '139 Meters',
+    baseValue: 139,
+    challengerItem: 'Statue of Liberty Total Height',
+    challengerStat: '93 Meters',
+    challengerValue: 93,
+    isHigher: false,
+  },
+  {
+    baseItem: 'Amazon River Length',
+    baseStat: '6,400 km',
+    baseValue: 6400,
+    challengerItem: 'Nile River Length',
+    challengerStat: '6,650 km',
+    challengerValue: 6650,
+    isHigher: true,
   },
 ];
 
-export const BLIND_PINPOINT_CHALLENGES = [
-  {
-    country: 'France',
-    city: 'Paris',
-    targetNormX: 0.52,
-    targetNormY: 0.32,
-    mapWidthKm: 950,
-  },
-  {
-    country: 'United States',
-    city: 'Los Angeles',
-    targetNormX: 0.15,
-    targetNormY: 0.58,
-    mapWidthKm: 4500,
-  },
-  {
-    country: 'Japan',
-    city: 'Tokyo',
-    targetNormX: 0.68,
-    targetNormY: 0.62,
-    mapWidthKm: 2800,
-  },
-  {
-    country: 'Australia',
-    city: 'Sydney',
-    targetNormX: 0.85,
-    targetNormY: 0.75,
-    mapWidthKm: 3900,
-  },
+// -------------------------------------------------------------
+// GENUINE BLIND PINPOINT (HAVERSINE KM FORMULA)
+// -------------------------------------------------------------
+
+export interface CityLocation {
+  city: string;
+  country: string;
+  lat: number;   // -90 to 90
+  lon: number;   // -180 to 180
+}
+
+export const WORLD_CITIES: CityLocation[] = [
+  { city: 'Paris', country: 'France', lat: 48.8566, lon: 2.3522 },
+  { city: 'Tokyo', country: 'Japan', lat: 35.6762, lon: 139.6503 },
+  { city: 'New York', country: 'United States', lat: 40.7128, lon: -74.0060 },
+  { city: 'Cairo', country: 'Egypt', lat: 30.0444, lon: 31.2357 },
+  { city: 'Sydney', country: 'Australia', lat: -33.8688, lon: 151.2093 },
+  { city: 'Rio de Janeiro', country: 'Brazil', lat: -22.9068, lon: -43.1729 },
+  { city: 'London', country: 'United Kingdom', lat: 51.5074, lon: -0.1278 },
+  { city: 'Cape Town', country: 'South Africa', lat: -33.9249, lon: 18.4241 },
 ];
+
+/**
+ * Calculates genuine great-circle distance between two coordinates in kilometers.
+ */
+export function calculateHaversineKm(
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number
+): number {
+  const R = 6371; // Earth's mean radius in km
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return Math.round(R * c);
+}
+
+/**
+ * Converts normalized 0..1 map coordinates (equirectangular projection)
+ * to latitude and longitude.
+ */
+export function normCoordsToLatLon(normX: number, normY: number): { lat: number; lon: number } {
+  const lon = normX * 360 - 180;
+  const lat = 90 - normY * 180;
+  return { lat, lon };
+}
+
+/**
+ * Converts latitude and longitude to normalized 0..1 map coordinates.
+ */
+export function latLonToNormCoords(lat: number, lon: number): { normX: number; normY: number } {
+  const normX = (lon + 180) / 360;
+  const normY = (90 - lat) / 180;
+  return { normX, normY };
+}

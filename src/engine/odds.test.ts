@@ -3,46 +3,86 @@ import assert from 'node:assert/strict';
 import {
   calculateSmoothedWinRate,
   calculateDynamicOdds,
-  decimalToFractional,
+  validateBetPlacement,
   calculatePotentialReturn,
-  computeRoundPayouts
+  computeRoundPayouts,
 } from './odds.ts';
-import type { Player, SecretBet } from './types.ts';
+import type { Player, SecretBet, RoundState } from './types.ts';
+import { MINI_GAMES } from './miniGamesCatalog.ts';
 
-const mockPlayerA: Player = {
-  id: 'p1',
+const mockFighterA: Player = {
+  id: 'f1',
+  sessionToken: 'tok_f1',
   name: 'Viper',
   avatar: '🐍',
   color: '#ef4444',
   isHost: true,
   isReady: true,
+  connected: true,
   coins: 1000,
   matchesWon: 4,
   matchesPlayed: 5,
-  totalBetsPlaced: 3,
-  totalBetsWon: 2,
-  totalCoinsWonInBets: 400,
-  totalCoinsLostInBets: 100,
-  highestSingleBet: 250,
-  highestSinglePayout: 500,
+  totalBetsPlaced: 0,
+  totalBetsWon: 0,
+  totalCoinsWonInBets: 0,
+  totalCoinsLostInBets: 0,
+  highestSingleBet: 0,
+  highestSinglePayout: 0,
 };
 
-const mockPlayerB: Player = {
-  id: 'p2',
+const mockFighterB: Player = {
+  id: 'f2',
+  sessionToken: 'tok_f2',
   name: 'Titan',
   avatar: '🦾',
   color: '#3b82f6',
   isHost: false,
   isReady: true,
+  connected: true,
   coins: 1000,
   matchesWon: 1,
   matchesPlayed: 5,
-  totalBetsPlaced: 2,
-  totalBetsWon: 1,
-  totalCoinsWonInBets: 150,
-  totalCoinsLostInBets: 100,
-  highestSingleBet: 100,
-  highestSinglePayout: 250,
+  totalBetsPlaced: 0,
+  totalBetsWon: 0,
+  totalCoinsWonInBets: 0,
+  totalCoinsLostInBets: 0,
+  highestSingleBet: 0,
+  highestSinglePayout: 0,
+};
+
+const mockSpectator: Player = {
+  id: 's1',
+  sessionToken: 'tok_s1',
+  name: 'Lucky',
+  avatar: '🎲',
+  color: '#10b981',
+  isHost: false,
+  isReady: true,
+  connected: true,
+  coins: 800,
+  matchesWon: 0,
+  matchesPlayed: 0,
+  totalBetsPlaced: 0,
+  totalBetsWon: 0,
+  totalCoinsWonInBets: 0,
+  totalCoinsLostInBets: 0,
+  highestSingleBet: 0,
+  highestSinglePayout: 0,
+};
+
+const mockRound: RoundState = {
+  roundNumber: 1,
+  maxRounds: 8,
+  miniGame: MINI_GAMES.millisecond_stop,
+  fighterIds: ['f1', 'f2'],
+  matchPot: 250,
+  odds: {},
+  bets: [],
+  bettingTimeRemaining: 15,
+  gameTimeRemaining: 9,
+  winnerId: null,
+  fighterScores: {},
+  payouts: [],
 };
 
 test('Laplace smoothing handles zero matches without division by zero', () => {
@@ -51,95 +91,137 @@ test('Laplace smoothing handles zero matches without division by zero', () => {
 });
 
 test('Smoothed win rate calculates accurately for experienced players', () => {
-  // Player A: 4 wins / 5 played -> (4+1)/(5+2) = 5/7 ~ 0.714
   const rateA = calculateSmoothedWinRate(4, 5);
   assert.ok(Math.abs(rateA - 0.714) < 0.01);
 
-  // Player B: 1 win / 5 played -> (1+1)/(5+2) = 2/7 ~ 0.285
   const rateB = calculateSmoothedWinRate(1, 5);
   assert.ok(Math.abs(rateB - 0.285) < 0.01);
 });
 
 test('Dynamic odds assigns underdog higher multiplier and favorite lower multiplier', () => {
-  const odds = calculateDynamicOdds(mockPlayerA, mockPlayerB, []);
-  
-  const oddsA = odds[mockPlayerA.id].decimalOdds;
-  const oddsB = odds[mockPlayerB.id].decimalOdds;
+  const odds = calculateDynamicOdds(mockFighterA, mockFighterB, []);
+  const oddsA = odds[mockFighterA.id].decimalOdds;
+  const oddsB = odds[mockFighterB.id].decimalOdds;
 
-  // Favorite (A) should have lower odds than Underdog (B)
-  assert.ok(oddsA < oddsB, `Expected favorite A (${oddsA}) to have lower odds than B (${oddsB})`);
+  assert.ok(oddsA < oddsB, `Expected favorite A (${oddsA}) < underdog B (${oddsB})`);
   assert.ok(oddsA >= 1.10, 'Odds must never drop below 1.10x floor');
   assert.ok(oddsB <= 9.50, 'Odds must not exceed max ceiling');
 });
 
-test('Pari-mutuel bet shift adjusts odds dynamically when spectators place heavy bets', () => {
-  // Initial odds without bets
-  const initialOdds = calculateDynamicOdds(mockPlayerA, mockPlayerB, []);
-
-  // Now 4 spectators bet heavily on Player B (the underdog)
-  const heavyBetsOnB: SecretBet[] = [
-    { bettorId: 's1', fighterId: mockPlayerB.id, amount: 300, oddsAtBet: 3.0, timestamp: 1, potentialReturn: 900 },
-    { bettorId: 's2', fighterId: mockPlayerB.id, amount: 400, oddsAtBet: 3.0, timestamp: 2, potentialReturn: 1200 },
-    { bettorId: 's3', fighterId: mockPlayerB.id, amount: 300, oddsAtBet: 3.0, timestamp: 3, potentialReturn: 900 },
-  ];
-
-  const shiftedOdds = calculateDynamicOdds(mockPlayerA, mockPlayerB, heavyBetsOnB);
-
-  // Because heavy pool bets poured into B, B's odds should compress downward compared to initial
-  assert.ok(
-    shiftedOdds[mockPlayerB.id].decimalOdds < initialOdds[mockPlayerB.id].decimalOdds,
-    'Heavy bets on B should compress B payout odds'
-  );
+// Strict Bet Validation Tests
+test('validateBetPlacement rejects bets outside BETTING_WINDOW', () => {
+  const err = validateBetPlacement(mockSpectator, 'f1', 100, mockRound, 'LOBBY');
+  assert.equal(err, 'Betting window is closed');
 });
 
-test('Fractional odds conversion formats correctly', () => {
-  assert.equal(decimalToFractional(2.0), '1/1');
-  assert.equal(decimalToFractional(1.5), '1/2');
-  assert.equal(decimalToFractional(3.0), '2/1');
+test('validateBetPlacement rejects bets when timer expired', () => {
+  const expiredRound = { ...mockRound, bettingTimeRemaining: 0 };
+  const err = validateBetPlacement(mockSpectator, 'f1', 100, expiredRound, 'BETTING_WINDOW');
+  assert.equal(err, 'Betting time has expired');
 });
 
-test('Potential return calculation computes floor return', () => {
-  assert.equal(calculatePotentialReturn(100, 2.45), 245);
-  assert.equal(calculatePotentialReturn(50, 1.33), 66);
+test('validateBetPlacement rejects non-positive, non-integer, or non-finite amounts', () => {
+  assert.ok(validateBetPlacement(mockSpectator, 'f1', 0, mockRound, 'BETTING_WINDOW') !== null);
+  assert.ok(validateBetPlacement(mockSpectator, 'f1', -50, mockRound, 'BETTING_WINDOW') !== null);
+  assert.ok(validateBetPlacement(mockSpectator, 'f1', 50.5, mockRound, 'BETTING_WINDOW') !== null);
+  assert.ok(validateBetPlacement(mockSpectator, 'f1', NaN, mockRound, 'BETTING_WINDOW') !== null);
+  assert.ok(validateBetPlacement(mockSpectator, 'f1', Infinity, mockRound, 'BETTING_WINDOW') !== null);
 });
 
-test('computeRoundPayouts awards match pot to winner and returns to correct bettor', () => {
-  const spectator: Player = {
-    id: 's1',
-    name: 'Lucky',
-    avatar: '🎲',
-    color: '#10b981',
-    isHost: false,
-    isReady: true,
-    coins: 900, // placed 100c bet already deducted
-    matchesWon: 0,
-    matchesPlayed: 0,
-    totalBetsPlaced: 1,
-    totalBetsWon: 0,
-    totalCoinsWonInBets: 0,
-    totalCoinsLostInBets: 0,
-    highestSingleBet: 100,
-    highestSinglePayout: 0,
+test('validateBetPlacement rejects bets exceeding bankroll', () => {
+  const err = validateBetPlacement(mockSpectator, 'f1', 1200, mockRound, 'BETTING_WINDOW');
+  assert.ok(err?.includes('Insufficient coins'));
+});
+
+test('validateBetPlacement rejects fighters betting on own match', () => {
+  const errA = validateBetPlacement(mockFighterA, 'f1', 100, mockRound, 'BETTING_WINDOW');
+  const errB = validateBetPlacement(mockFighterB, 'f2', 100, mockRound, 'BETTING_WINDOW');
+  assert.ok(errA?.includes('Fighters cannot place bets'));
+  assert.ok(errB?.includes('Fighters cannot place bets'));
+});
+
+test('validateBetPlacement rejects betting on a non-competing player', () => {
+  const err = validateBetPlacement(mockSpectator, 'unknown_id', 100, mockRound, 'BETTING_WINDOW');
+  assert.equal(err, 'Invalid target fighter');
+});
+
+test('validateBetPlacement rejects duplicate bets from same spectator in one round', () => {
+  const roundWithBet: RoundState = {
+    ...mockRound,
+    bets: [
+      {
+        bettorId: mockSpectator.id,
+        fighterId: 'f1',
+        amount: 100,
+        oddsAtBet: 1.5,
+        timestamp: Date.now(),
+        potentialReturn: 150,
+      },
+    ],
   };
 
+  const err = validateBetPlacement(mockSpectator, 'f2', 100, roundWithBet, 'BETTING_WINDOW');
+  assert.ok(err?.includes('already placed a bet'));
+});
+
+// Payout and Net Profit/Loss Tests
+test('computeRoundPayouts computes honest net profit on win and negative net on loss', () => {
+  const spectatorWin: Player = { ...mockSpectator, id: 's_win', coins: 800 }; // 200c staked
+  const spectatorLose: Player = { ...mockSpectator, id: 's_lose', coins: 900 }; // 100c staked
+
   const bets: SecretBet[] = [
-    { bettorId: 's1', fighterId: mockPlayerA.id, amount: 100, oddsAtBet: 1.5, timestamp: 1, potentialReturn: 150 },
+    { bettorId: 's_win', fighterId: 'f1', amount: 200, oddsAtBet: 1.80, timestamp: 1, potentialReturn: 360 },
+    { bettorId: 's_lose', fighterId: 'f2', amount: 100, oddsAtBet: 2.20, timestamp: 2, potentialReturn: 220 },
   ];
 
-  const matchPot = 250;
   const result = computeRoundPayouts(
-    mockPlayerA.id,
-    [mockPlayerA.id, mockPlayerB.id],
-    matchPot,
+    'f1', // Fighter A wins
+    false,
+    ['f1', 'f2'],
+    250,
     bets,
-    [mockPlayerA, mockPlayerB, spectator]
+    [mockFighterA, mockFighterB, spectatorWin, spectatorLose]
   );
 
-  const updatedWinner = result.updatedPlayers.find(p => p.id === mockPlayerA.id);
-  const updatedSpectator = result.updatedPlayers.find(p => p.id === 's1');
+  const winningPayout = result.payouts.find(p => p.playerId === 's_win')!;
+  const losingPayout = result.payouts.find(p => p.playerId === 's_lose')!;
+  const fighterPayout = result.payouts.find(p => p.playerId === 'f1')!;
 
-  assert.equal(updatedWinner?.coins, 1000 + 250, 'Winner gets match pot');
-  assert.equal(updatedWinner?.matchesWon, 5, 'Winner match count incremented');
-  assert.equal(updatedSpectator?.coins, 900 + 150, 'Spectator gets 150c payout');
-  assert.equal(updatedSpectator?.totalBetsWon, 1, 'Spectator won count incremented');
+  // Winning bet
+  assert.equal(winningPayout.type, 'BET_WIN');
+  assert.equal(winningPayout.totalReturn, 360);
+  assert.equal(winningPayout.netChange, 160); // +160 net profit!
+  assert.equal(winningPayout.newBankroll, 800 + 360);
+  assert.ok(winningPayout.summary.includes('+160 profit'));
+
+  // Losing bet
+  assert.equal(losingPayout.type, 'BET_LOSS');
+  assert.equal(losingPayout.totalReturn, 0);
+  assert.equal(losingPayout.netChange, -100); // Honest -100 loss!
+  assert.ok(losingPayout.summary.includes('-100 loss'));
+
+  // Fighter bounty
+  assert.equal(fighterPayout.type, 'FIGHTER_BOUNTY');
+  assert.equal(fighterPayout.netChange, 250);
+});
+
+test('computeRoundPayouts handles tie by splitting pot and refunding bets', () => {
+  const bets: SecretBet[] = [
+    { bettorId: 's1', fighterId: 'f1', amount: 150, oddsAtBet: 1.80, timestamp: 1, potentialReturn: 270 },
+  ];
+
+  const result = computeRoundPayouts(
+    null,
+    true, // isTie
+    ['f1', 'f2'],
+    250,
+    bets,
+    [mockFighterA, mockFighterB, { ...mockSpectator, coins: 650 }]
+  );
+
+  const refund = result.payouts.find(p => p.playerId === 's1')!;
+  assert.equal(refund.netChange, 0);
+  assert.equal(refund.totalReturn, 150);
+  assert.equal(refund.newBankroll, 650 + 150); // Refunded
+  assert.ok(refund.summary.includes('refunded'));
 });

@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  * 
- * Bet & BRAWL: Network & Game Protocol Type Definitions
+ * Bet & BRAWL: Network & Game Protocol Type Definitions (v2.0 Real Wi-Fi)
  */
 
 export type MiniGameId = 
@@ -11,7 +11,7 @@ export type MiniGameId =
   | 'speed_math' 
   | 'higher_lower' 
   | 'blind_pinpoint' 
-  | 'coin_flip_double';
+  | 'quick_draw';
 
 export interface MiniGameMeta {
   id: MiniGameId;
@@ -23,25 +23,27 @@ export interface MiniGameMeta {
 }
 
 export type GamePhase =
-  | 'ROOM_DISCOVERY'       // Local Wi-Fi discovery / connection
-  | 'LOBBY'                // 6-9 players joining, ready checks
-  | 'FIGHTER_REVEAL'       // VS splash announcing 2 selected brawlers
-  | 'BETTING_WINDOW'       // 15s secret spectator betting phase with live odds
+  | 'ENTRY'                // Start screen: Host vs Join
+  | 'LOBBY'                // Waiting for 6-9 players, ready checks, QR display
+  | 'FIGHTER_REVEAL'       // VS splash announcing 2 selected brawlers + instructions
+  | 'BETTING_WINDOW'       // 15s secret spectator betting phase with dynamic odds
   | 'MINIGAME_COUNTDOWN'   // 3.. 2.. 1.. BRAWL!
-  | 'MINIGAME_ACTIVE'      // Real-time 15-30s mini-game execution
-  | 'PAYOUT_RECAP'         // Winner takes match pot, spectator returns distributed
-  | 'FINAL_PODIUM';        // Kahoot podium with 1st, 2nd, 3rd & special awards
+  | 'MINIGAME_ACTIVE'      // Real-time mini-game execution
+  | 'PAYOUT_RECAP'         // Winner takes match pot, spectator payouts/losses
+  | 'FINAL_PODIUM';        // Kahoot podium with 1st, 2nd, 3rd & genuine session awards
 
 export interface Player {
   id: string;
+  sessionToken: string;
   name: string;
   avatar: string;
   color: string;
   isHost: boolean;
   isReady: boolean;
-  isBot?: boolean;
+  connected: boolean;
+  isBot?: boolean; // ONLY in ?debug=1 mode
   coins: number;
-  // Performance stats for dynamic odds
+  // Current session stats ONLY (All start at 0)
   matchesWon: number;
   matchesPlayed: number;
   totalBetsPlaced: number;
@@ -54,9 +56,7 @@ export interface Player {
 
 export interface FighterOdds {
   fighterId: string;
-  decimalOdds: number;      // e.g. 2.45
-  fractionalOdds: string;   // e.g. "7/5"
-  impliedWinProb: number;   // 0.0 - 1.0
+  decimalOdds: number;      // e.g. 1.85x
   smoothedWinRate: number;  // Laplace smoothed
   totalPoolCoins: number;   // Total coins bet on this fighter
   bettorCount: number;
@@ -71,126 +71,34 @@ export interface SecretBet {
   potentialReturn: number;
 }
 
+export interface RoundPayoutItem {
+  playerId: string;
+  playerName: string;
+  avatar: string;
+  type: 'FIGHTER_BOUNTY' | 'BET_WIN' | 'BET_LOSS';
+  stake?: number;
+  totalReturn?: number;
+  netChange: number;        // e.g. +250, +185, -100
+  newBankroll: number;
+  summary: string;          // e.g. "360 returned · +160 profit" or "-100 loss"
+}
+
 export interface RoundState {
   roundNumber: number;
   maxRounds: number;
   miniGame: MiniGameMeta;
   fighterIds: [string, string];
-  matchPot: number; // Virtual stakes awarded to winning fighter
+  matchPot: number; // Virtual stakes awarded to winning fighter (+250c)
   odds: Record<string, FighterOdds>;
   bets: SecretBet[];
   bettingTimeRemaining: number;
   gameTimeRemaining: number;
   winnerId: string | null;
+  tieResult?: boolean;
   fighterScores: Record<string, number>;
-  payouts: Array<{
-    playerId: string;
-    coinsChange: number;
-    reason: string;
-    newTotal: number;
-  }>;
-}
-
-// -------------------------------------------------------------
-// WEBSOCKET PROTOCOL SCHEMAS
-// -------------------------------------------------------------
-
-export type WebSocketMessageType =
-  | 'ROOM_CREATED'
-  | 'PLAYER_JOINED'
-  | 'PLAYER_LEFT'
-  | 'LOBBY_STATE'
-  | 'START_GAME'
-  | 'ROUND_INIT'
-  | 'BET_PLACED'
-  | 'ODDS_SYNC'
-  | 'MINIGAME_START'
-  | 'INPUT_EVENT'
-  | 'MINIGAME_TICK'
-  | 'GAME_OVER'
-  | 'PAYOUT_SYNC'
-  | 'FINAL_LEADERBOARD';
-
-export interface BaseSocketMessage {
-  type: WebSocketMessageType;
-  timestamp: number;
-  roomId: string;
-}
-
-export interface RoomCreatedPayload extends BaseSocketMessage {
-  type: 'ROOM_CREATED';
-  hostId: string;
-  roomCode: string;
-  localIp: string;
-  port: number;
-}
-
-export interface PlayerJoinedPayload extends BaseSocketMessage {
-  type: 'PLAYER_JOINED';
-  player: Player;
-}
-
-export interface LobbyStatePayload extends BaseSocketMessage {
-  type: 'LOBBY_STATE';
-  players: Player[];
-  roomCode: string;
-  canStart: boolean;
-  totalRounds: number;
-}
-
-export interface RoundInitPayload extends BaseSocketMessage {
-  type: 'ROUND_INIT';
-  roundNumber: number;
-  maxRounds: number;
-  fighterIds: [string, string];
-  miniGame: MiniGameMeta;
-  initialOdds: Record<string, FighterOdds>;
-  bettingDuration: number;
-}
-
-export interface BetPlacedPayload extends BaseSocketMessage {
-  type: 'BET_PLACED';
-  bettorId: string;
-  fighterId: string;
-  amount: number;
-}
-
-export interface OddsSyncPayload extends BaseSocketMessage {
-  type: 'ODDS_SYNC';
-  odds: Record<string, FighterOdds>;
-  totalPot: number;
-}
-
-export interface MiniGameStartPayload extends BaseSocketMessage {
-  type: 'MINIGAME_START';
-  miniGameId: MiniGameId;
-  fighters: [Player, Player];
-  duration: number;
-}
-
-export interface InputEventPayload extends BaseSocketMessage {
-  type: 'INPUT_EVENT';
-  playerId: string;
-  action: string;
-  value?: number | string | boolean;
-}
-
-export interface GameOverPayload extends BaseSocketMessage {
-  type: 'GAME_OVER';
-  winnerId: string;
-  scores: Record<string, number>;
-}
-
-export interface PayoutSyncPayload extends BaseSocketMessage {
-  type: 'PAYOUT_SYNC';
-  winnerId: string;
-  payouts: Array<{
-    playerId: string;
-    coinsChange: number;
-    reason: string;
-    newTotal: number;
-  }>;
-  leaderboard: Player[];
+  payouts: RoundPayoutItem[];
+  // Mini-game specific authoritative server config/seed
+  gameConfig?: Record<string, unknown>;
 }
 
 export interface Award {
@@ -204,21 +112,54 @@ export interface Award {
   metric: string;
 }
 
-export interface FinalLeaderboardPayload extends BaseSocketMessage {
-  type: 'FINAL_LEADERBOARD';
-  rankings: Player[];
-  awards: Award[];
+// -------------------------------------------------------------
+// REAL WEBSOCKET PROTOCOL SCHEMAS
+// -------------------------------------------------------------
+
+export type ClientMessageType =
+  | 'CREATE_ROOM'
+  | 'JOIN_ROOM'
+  | 'TOGGLE_READY'
+  | 'START_GAME'
+  | 'PLACE_BET'
+  | 'FIGHTER_INPUT'
+  | 'REPORT_MINIGAME_RESULT'
+  | 'NEXT_ROUND'
+  | 'RESTART_GAME'
+  | 'DEBUG_ADD_BOT'
+  | 'PING';
+
+export interface ClientMessage {
+  type: ClientMessageType;
+  sessionToken?: string;
+  roomCode?: string;
+  payload?: any;
 }
 
-export type AnyWebSocketMessage =
-  | RoomCreatedPayload
-  | PlayerJoinedPayload
-  | LobbyStatePayload
-  | RoundInitPayload
-  | BetPlacedPayload
-  | OddsSyncPayload
-  | MiniGameStartPayload
-  | InputEventPayload
-  | GameOverPayload
-  | PayoutSyncPayload
-  | FinalLeaderboardPayload;
+export type ServerMessageType =
+  | 'JOIN_SUCCESS'
+  | 'JOIN_ERROR'
+  | 'ROOM_STATE'
+  | 'ROUND_INIT'
+  | 'ODDS_SYNC'
+  | 'MINIGAME_START'
+  | 'MINIGAME_TICK'
+  | 'GAME_OVER'
+  | 'PAYOUT_SYNC'
+  | 'FINAL_LEADERBOARD'
+  | 'BET_REJECTED'
+  | 'ROOM_CLOSED'
+  | 'PONG';
+
+export interface ServerMessage {
+  type: ServerMessageType;
+  timestamp: number;
+  payload: any;
+}
+
+export interface RoomNetworkInfo {
+  localIp: string;
+  port: number;
+  roomCode: string;
+  fullJoinUrl: string;
+}

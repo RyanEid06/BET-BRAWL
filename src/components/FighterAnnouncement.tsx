@@ -2,13 +2,13 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  * 
- * Bet & BRAWL: Fighter Reveal & Mini-Game VS Splash
+ * Bet & BRAWL: Fighter Reveal with Clear How-to-Play Guide
  */
 
 import React, { useEffect, useState } from 'react';
 import type { Player, MiniGameMeta } from '../engine/types.ts';
 import { sound } from '../engine/audio.ts';
-import { Swords, ArrowRight } from 'lucide-react';
+import { ArrowRight, HelpCircle } from 'lucide-react';
 
 interface Props {
   roundNumber: number;
@@ -16,6 +16,7 @@ interface Props {
   fighterA: Player;
   fighterB: Player;
   miniGame: MiniGameMeta;
+  isHost: boolean;
   onContinueToBetting: () => void;
 }
 
@@ -25,9 +26,10 @@ export const FighterAnnouncement: React.FC<Props> = ({
   fighterA,
   fighterB,
   miniGame,
+  isHost,
   onContinueToBetting,
 }) => {
-  const [countdown, setCountdown] = useState<number>(4);
+  const [countdown, setCountdown] = useState<number>(5);
 
   useEffect(() => {
     sound.playCountdown(true);
@@ -46,62 +48,63 @@ export const FighterAnnouncement: React.FC<Props> = ({
   }, [countdown, onContinueToBetting]);
 
   return (
-    <div className="relative w-full max-w-4xl mx-auto p-4 md:p-6 min-h-[520px] flex flex-col justify-between items-center text-center">
-      {/* Top Round Badge */}
+    <div className="relative w-full max-w-xl mx-auto p-4 flex flex-col justify-between items-center text-center space-y-4">
+      {/* Round & Game Header */}
       <div className="space-y-1">
-        <span className="px-4 py-1.5 rounded-full bg-cyan-950 text-cyan-300 border border-cyan-700/60 font-mono text-xs font-bold tracking-widest uppercase">
+        <span className="px-3 py-1 rounded-full bg-cyan-950 text-cyan-300 border border-cyan-700/60 font-mono text-xs font-bold uppercase">
           ROUND {roundNumber} OF {totalRounds}
         </span>
-        <h2 className="text-3xl md:text-4xl font-black font-display text-white tracking-wide mt-2">
+        <h2 className="text-2xl sm:text-3xl font-black font-display text-white tracking-wide mt-1">
           {miniGame.name.toUpperCase()}
         </h2>
-        <p className="text-slate-400 text-sm max-w-md mx-auto">{miniGame.tagline}</p>
+        <p className="text-slate-400 text-xs">{miniGame.tagline}</p>
       </div>
 
       {/* VS Splash Cards */}
-      <div className="w-full grid grid-cols-1 md:grid-cols-2 gap-6 my-6 relative items-center">
-        {/* Fighter A (Blue Corner) */}
-        <div className="p-6 rounded-3xl bg-gradient-to-br from-cyan-950/80 to-slate-900 border-2 border-cyan-400 shadow-2xl flex flex-col items-center space-y-3 glow-cyan">
-          <span className="text-xs font-mono font-bold text-cyan-300 uppercase tracking-widest">
-            BLUE CORNER
-          </span>
-          <div className="text-6xl p-4 bg-slate-950 rounded-2xl border border-cyan-500/50 shadow-inner">
+      <div className="w-full grid grid-cols-2 gap-3 relative items-center">
+        {/* Fighter A */}
+        <div className="p-4 rounded-2xl bg-cyan-950/40 border-2 border-cyan-400 shadow-lg flex flex-col items-center space-y-2 glow-cyan">
+          <span className="text-[10px] font-mono font-bold text-cyan-300 uppercase">BLUE CORNER</span>
+          <div className="text-5xl p-2 bg-slate-950 rounded-2xl border border-cyan-500/40">
             {fighterA.avatar}
           </div>
-          <h3 className="text-2xl font-black text-white font-display">{fighterA.name}</h3>
-          <div className="flex gap-4 text-xs font-mono text-slate-300">
-            <span>Record: <b className="text-cyan-300">{fighterA.matchesWon}W - {fighterA.matchesPlayed - fighterA.matchesWon}L</b></span>
-            <span>Bank: <b className="text-amber-400">{fighterA.coins}c</b></span>
+          <h3 className="text-lg font-black text-white font-display truncate max-w-full">{fighterA.name}</h3>
+          <div className="text-xs font-mono text-cyan-300 font-bold">
+            {fighterA.matchesWon}W · {fighterA.matchesPlayed - fighterA.matchesWon}L
           </div>
         </div>
 
-        {/* Center VS Emblem */}
-        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-20 hidden md:flex items-center justify-center w-16 h-16 rounded-full bg-slate-950 border-2 border-amber-400 shadow-2xl glow-gold text-amber-400 font-display font-black text-2xl">
-          VS
-        </div>
-
-        {/* Fighter B (Red Corner) */}
-        <div className="p-6 rounded-3xl bg-gradient-to-bl from-rose-950/80 to-slate-900 border-2 border-rose-500 shadow-2xl flex flex-col items-center space-y-3 glow-crimson">
-          <span className="text-xs font-mono font-bold text-rose-300 uppercase tracking-widest">
-            RED CORNER
-          </span>
-          <div className="text-6xl p-4 bg-slate-950 rounded-2xl border border-rose-500/50 shadow-inner">
+        {/* Fighter B */}
+        <div className="p-4 rounded-2xl bg-rose-950/40 border-2 border-rose-500 shadow-lg flex flex-col items-center space-y-2 glow-crimson">
+          <span className="text-[10px] font-mono font-bold text-rose-300 uppercase">RED CORNER</span>
+          <div className="text-5xl p-2 bg-slate-950 rounded-2xl border border-rose-500/40">
             {fighterB.avatar}
           </div>
-          <h3 className="text-2xl font-black text-white font-display">{fighterB.name}</h3>
-          <div className="flex gap-4 text-xs font-mono text-slate-300">
-            <span>Record: <b className="text-rose-300">{fighterB.matchesWon}W - {fighterB.matchesPlayed - fighterB.matchesWon}L</b></span>
-            <span>Bank: <b className="text-amber-400">{fighterB.coins}c</b></span>
+          <h3 className="text-lg font-black text-white font-display truncate max-w-full">{fighterB.name}</h3>
+          <div className="text-xs font-mono text-rose-300 font-bold">
+            {fighterB.matchesWon}W · {fighterB.matchesPlayed - fighterB.matchesWon}L
           </div>
         </div>
       </div>
 
-      {/* Rules pill & Skip button */}
-      <div className="w-full max-w-lg bg-slate-900/80 p-4 rounded-2xl border border-slate-800 space-y-3">
-        <div className="text-xs font-mono text-slate-400">
-          Rules: {miniGame.rules[0]}
+      {/* Essential 2-3 Step How to Play Guide */}
+      <div className="w-full bg-slate-900/90 p-4 rounded-2xl border border-slate-800 text-left space-y-2">
+        <div className="flex items-center gap-1.5 text-xs font-mono font-bold text-amber-400">
+          <HelpCircle className="w-4 h-4" />
+          <span>HOW TO PLAY:</span>
         </div>
+        <ul className="space-y-1.5 text-xs text-slate-300">
+          {miniGame.rules.slice(0, 3).map((rule, idx) => (
+            <li key={idx} className="flex items-start gap-2">
+              <span className="text-amber-400 font-bold font-mono">{idx + 1}.</span>
+              <span>{rule}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
 
+      {/* Ready / Continue Action */}
+      <div className="w-full">
         <button
           onClick={() => {
             sound.playCoin();

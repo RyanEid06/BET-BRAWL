@@ -2,17 +2,19 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  * 
- * Bet & BRAWL: Payout & Round Recap Screen
+ * Bet & BRAWL: Payout & Round Recap Screen (Player-Focused)
  */
 
 import React from 'react';
 import type { Player, RoundState } from '../engine/types.ts';
-import { Trophy, ArrowRight, Coins, TrendingUp } from 'lucide-react';
+import { ArrowRight, Trophy, Coins } from 'lucide-react';
 import { sound } from '../engine/audio.ts';
 
 interface Props {
   round: RoundState;
   players: Player[];
+  myPlayer: Player | null;
+  isHost: boolean;
   onNextRound: () => void;
   isFinalRound: boolean;
 }
@@ -20,113 +22,148 @@ interface Props {
 export const PayoutRecapModal: React.FC<Props> = ({
   round,
   players,
+  myPlayer,
+  isHost,
   onNextRound,
   isFinalRound,
 }) => {
   const winner = players.find(p => p.id === round.winnerId);
   const sortedLeaderboard = [...players].sort((a, b) => b.coins - a.coins);
 
+  // Find current player's personal outcome for this round
+  const myPayout = myPlayer ? round.payouts.find(p => p.playerId === myPlayer.id) : null;
+  const isFighter = myPlayer && (myPlayer.id === round.fighterIds[0] || myPlayer.id === round.fighterIds[1]);
+
   return (
-    <div className="w-full max-w-4xl mx-auto p-4 md:p-6 space-y-6">
-      {/* Winner Hero Splash */}
-      <div className="bg-gradient-to-r from-amber-950/90 via-slate-900 to-amber-950/90 border-2 border-amber-400/80 rounded-3xl p-6 shadow-2xl text-center space-y-3 glow-gold">
-        <span className="px-4 py-1 rounded-full bg-amber-950 text-amber-300 border border-amber-600/60 font-mono text-xs font-bold tracking-widest uppercase">
-          ROUND {round.roundNumber} COMPLETE
+    <div className="w-full max-w-lg mx-auto p-3 sm:p-4 space-y-4">
+      {/* 1. Winner Hero Splash */}
+      <div className="bg-gradient-to-r from-amber-950/90 via-slate-900 to-amber-950/90 border-2 border-amber-400/80 rounded-2xl p-4 shadow-xl text-center space-y-2 glow-gold">
+        <span className="px-3 py-0.5 rounded-full bg-amber-950 text-amber-300 border border-amber-600/60 font-mono text-[11px] font-bold uppercase">
+          ROUND {round.roundNumber} RESULT
         </span>
 
-        <div className="flex items-center justify-center gap-3">
-          <span className="text-6xl p-2 bg-slate-950 rounded-2xl border border-amber-400">
-            {winner?.avatar || '👑'}
-          </span>
-          <div className="text-left">
-            <div className="text-xs font-mono text-amber-400 uppercase font-bold">BRAWL VICTOR</div>
-            <h2 className="text-3xl font-black font-display text-white">{winner?.name}</h2>
-            <div className="text-sm font-mono text-emerald-400 font-bold flex items-center gap-1">
-              <Coins className="w-4 h-4" /> Match Pot: +{round.matchPot} coins!
+        {round.tieResult ? (
+          <div className="py-2">
+            <h2 className="text-2xl font-black font-display text-amber-300">IT'S A DRAW!</h2>
+            <p className="text-xs font-mono text-slate-300">Match pot split &amp; spectator wagers refunded</p>
+          </div>
+        ) : (
+          <div className="flex items-center justify-center gap-3 py-1">
+            <span className="text-5xl p-2 bg-slate-950 rounded-2xl border border-amber-400">
+              {winner?.avatar || '👑'}
+            </span>
+            <div className="text-left">
+              <div className="text-[11px] font-mono text-amber-400 font-bold uppercase">BRAWL VICTOR</div>
+              <h2 className="text-2xl font-black font-display text-white">{winner?.name}</h2>
+              <div className="text-xs font-mono text-emerald-400 font-bold flex items-center gap-1">
+                <Coins className="w-3.5 h-3.5" /> +{round.matchPot}c Victory Bounty
+              </div>
             </div>
           </div>
-        </div>
+        )}
       </div>
 
-      {/* Payouts & Bets Breakdown */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* Spectator Payout Feed */}
-        <div className="bg-slate-900/80 border border-slate-700 rounded-3xl p-5 shadow-xl space-y-3">
-          <div className="flex items-center justify-between text-xs font-mono text-slate-400 border-b border-slate-800 pb-2">
-            <span className="flex items-center gap-1.5 text-cyan-400 font-bold">
-              <TrendingUp className="w-4 h-4" /> SPECTATOR WAGERS
-            </span>
-            <span>{round.bets.length} Bets Placed</span>
-          </div>
-
-          <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
-            {round.payouts.length > 0 ? (
-              round.payouts.map((payout, idx) => (
-                <div
-                  key={idx}
-                  className="p-3 bg-slate-950 rounded-xl border border-slate-800 flex items-center justify-between text-xs"
-                >
-                  <div className="text-slate-300 font-medium">{payout.reason}</div>
-                  <div
-                    className={`font-mono font-bold px-2 py-0.5 rounded ${
-                      payout.coinsChange > 0
-                        ? 'bg-emerald-950 text-emerald-400 border border-emerald-700'
-                        : 'bg-rose-950 text-rose-400 border border-rose-800'
-                    }`}
-                  >
-                    {payout.coinsChange > 0 ? `+${payout.coinsChange}c` : '0c'}
-                  </div>
-                </div>
-              ))
-            ) : (
-              <div className="text-xs font-mono text-slate-500 text-center py-4">
-                No spectator wagers placed this round.
+      {/* 2. Prominent Personal Wager / Match Outcome */}
+      {myPlayer && (
+        <div className="bg-slate-900/90 border border-slate-700 rounded-2xl p-3.5 shadow-lg text-center">
+          <div className="text-[11px] font-mono text-slate-400 uppercase mb-1">YOUR ROUND OUTCOME</div>
+          {isFighter ? (
+            round.winnerId === myPlayer.id ? (
+              <div className="text-emerald-400 font-black text-xl font-display">
+                VICTORY! You earned the +{round.matchPot} coin match pot!
               </div>
-            )}
+            ) : round.tieResult ? (
+              <div className="text-amber-400 font-bold text-base font-display">
+                TIE! You received a +{Math.floor(round.matchPot / 2)} coin split bounty.
+              </div>
+            ) : (
+              <div className="text-rose-400 font-bold text-base font-display">
+                DEFEAT! Better luck in your next brawl.
+              </div>
+            )
+          ) : myPayout ? (
+            myPayout.type === 'BET_WIN' ? (
+              <div className="space-y-0.5">
+                <div className="text-emerald-400 font-black text-xl font-display">
+                  +{myPayout.netChange} COINS PROFIT!
+                </div>
+                <div className="text-xs font-mono text-slate-300">
+                  {myPayout.totalReturn} coins returned on {myPayout.stake}c wager
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-0.5">
+                <div className="text-rose-400 font-black text-xl font-display">
+                  -{Math.abs(myPayout.netChange)} COINS LOSS
+                </div>
+                <div className="text-xs font-mono text-slate-400">
+                  Better read the arena next round!
+                </div>
+              </div>
+            )
+          ) : (
+            <div className="text-xs font-mono text-slate-400">
+              You sat out the wagers this round.
+            </div>
+          )}
+
+          <div className="mt-2 pt-2 border-t border-slate-800 text-xs font-mono">
+            New Bankroll: <span className="text-amber-400 font-bold">{myPlayer.coins.toLocaleString()} coins</span>
           </div>
         </div>
+      )}
 
-        {/* Live Standings Preview */}
-        <div className="bg-slate-900/80 border border-slate-700 rounded-3xl p-5 shadow-xl space-y-3">
-          <div className="flex items-center justify-between text-xs font-mono text-slate-400 border-b border-slate-800 pb-2">
-            <span className="flex items-center gap-1.5 text-amber-400 font-bold">
-              <Trophy className="w-4 h-4" /> LIVE BANKROLL STANDINGS
-            </span>
-            <span>After Round {round.roundNumber}</span>
-          </div>
+      {/* 3. Compact Room Standings */}
+      <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-3.5 shadow-lg space-y-2">
+        <div className="flex items-center justify-between text-xs font-mono text-slate-400 border-b border-slate-800 pb-1.5">
+          <span className="flex items-center gap-1.5 text-amber-400 font-bold">
+            <Trophy className="w-3.5 h-3.5" /> ROOM STANDINGS
+          </span>
+          <span>Round {round.roundNumber} / {round.maxRounds}</span>
+        </div>
 
-          <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
-            {sortedLeaderboard.map((p, rank) => (
-              <div
-                key={p.id}
-                className="p-2.5 bg-slate-950 rounded-xl border border-slate-800/80 flex items-center justify-between text-xs"
-              >
-                <div className="flex items-center gap-2">
-                  <span className="font-mono font-bold text-slate-400 w-4">{rank + 1}.</span>
-                  <span>{p.avatar}</span>
-                  <span className="font-bold text-white">{p.name}</span>
-                </div>
-                <div className="font-mono font-bold text-amber-400">
-                  {p.coins.toLocaleString()}c
-                </div>
+        <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+          {sortedLeaderboard.map((p, rank) => (
+            <div
+              key={p.id}
+              className={`p-2 rounded-xl flex items-center justify-between text-xs font-mono ${
+                p.id === myPlayer?.id
+                  ? 'bg-cyan-950/40 border border-cyan-500/40'
+                  : 'bg-slate-950/70 border border-slate-800/60'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-slate-500 w-4">{rank + 1}.</span>
+                <span>{p.avatar}</span>
+                <span className="font-bold text-white font-sans">{p.name}</span>
+                {p.id === myPlayer?.id && <span className="text-[10px] text-cyan-400 font-mono">(YOU)</span>}
               </div>
-            ))}
-          </div>
+              <div className="font-mono font-bold text-amber-400">
+                {p.coins.toLocaleString()}c
+              </div>
+            </div>
+          ))}
         </div>
       </div>
 
       {/* Next Round Action */}
-      <div className="flex justify-center pt-2">
-        <button
-          onClick={() => {
-            sound.playCoin();
-            onNextRound();
-          }}
-          className="w-full max-w-md py-4 rounded-2xl font-display font-black text-xl uppercase tracking-wider bg-gradient-to-r from-cyan-500 via-amber-500 to-rose-500 hover:from-cyan-400 hover:to-rose-400 text-slate-950 shadow-2xl transition-all transform active:scale-95 glow-gold border border-amber-300 flex items-center justify-center gap-2 cursor-pointer"
-        >
-          <span>{isFinalRound ? 'REVEAL FINAL PODIUM 🏆' : `PROCEED TO ROUND ${round.roundNumber + 1}`}</span>
-          <ArrowRight className="w-5 h-5" />
-        </button>
+      <div className="pt-1">
+        {isHost ? (
+          <button
+            onClick={() => {
+              sound.playCoin();
+              onNextRound();
+            }}
+            className="w-full py-4 rounded-xl font-display font-black text-lg uppercase tracking-wider bg-gradient-to-r from-cyan-500 via-amber-500 to-rose-500 hover:from-cyan-400 hover:to-rose-400 text-slate-950 shadow-xl transition-all transform active:scale-95 glow-gold border border-amber-300 flex items-center justify-center gap-2 cursor-pointer"
+          >
+            <span>{isFinalRound ? 'REVEAL FINAL PODIUM 🏆' : `PROCEED TO ROUND ${round.roundNumber + 1}`}</span>
+            <ArrowRight className="w-4 h-4" />
+          </button>
+        ) : (
+          <div className="p-3 bg-slate-900 rounded-xl border border-slate-800 text-center text-xs font-mono text-slate-400">
+            Waiting for the host to advance to the next round...
+          </div>
+        )}
       </div>
     </div>
   );

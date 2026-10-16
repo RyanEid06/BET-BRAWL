@@ -14,7 +14,8 @@ interface Props {
   fighterB: Player;
   isPlayerFighter: boolean;
   playerFighterSlot: 'A' | 'B' | 'spectator';
-  onComplete: (winnerId: string, scores: Record<string, number>) => void;
+  onComplete: (winnerId: string | null, scores: Record<string, number>, isTie?: boolean) => void;
+  onSendInput?: (action: string, value: number) => void;
 }
 
 export const MillisecondStopGame: React.FC<Props> = ({
@@ -23,25 +24,25 @@ export const MillisecondStopGame: React.FC<Props> = ({
   isPlayerFighter,
   playerFighterSlot,
   onComplete,
+  onSendInput,
 }) => {
   const [elapsed, setElapsed] = useState<number>(0);
-  const [isBlinded, setIsBlinded] = useState<boolean>(false);
   const [stoppedA, setStoppedA] = useState<number | null>(null);
   const [stoppedB, setStoppedB] = useState<number | null>(null);
   const [completed, setCompleted] = useState<boolean>(false);
 
-  const startTimeRef = useRef<number>(Date.now());
+  // IMMUTABLE high-resolution start time: initialized ONCE on mount
+  const startTimeRef = useRef<number>(performance.now());
   const timerFrameRef = useRef<number | null>(null);
+  const completedRef = useRef<boolean>(false);
 
-  // Target time is exactly 5.000 seconds
   const TARGET_TIME = 5.0;
 
-  // Bot opponent timing simulation
+  // Bot opponent timing simulation (variance around 4.85 - 5.20s)
   useEffect(() => {
-    // Generate opponent stop time around 4.80 - 5.25 seconds
-    const botVariation = (Math.random() - 0.48) * 0.45;
+    const botVariation = (Math.random() - 0.48) * 0.38;
     const botTarget = 5.0 + botVariation;
-    const botDelay = botTarget * 1000;
+    const botDelayMs = botTarget * 1000;
 
     const botTimer = setTimeout(() => {
       if (playerFighterSlot === 'A') {
@@ -49,60 +50,56 @@ export const MillisecondStopGame: React.FC<Props> = ({
       } else if (playerFighterSlot === 'B') {
         setStoppedA(botTarget);
       } else {
-        // Spectator view: both are bots
-        setStoppedA(5.0 + (Math.random() - 0.45) * 0.4);
-        setStoppedB(5.0 + (Math.random() - 0.52) * 0.4);
+        // Spectator view: simulate both
+        setStoppedA(5.0 + (Math.random() - 0.46) * 0.32);
+        setStoppedB(5.0 + (Math.random() - 0.52) * 0.32);
       }
-    }, botDelay);
+    }, botDelayMs);
 
     return () => clearTimeout(botTimer);
   }, [playerFighterSlot]);
 
-  // Main 60fps timer loop
+  // Main 60fps timer loop: depends ONLY on empty dependency array so it NEVER resets!
   useEffect(() => {
-    startTimeRef.current = Date.now();
+    startTimeRef.current = performance.now();
 
     const loop = () => {
-      const now = Date.now();
+      if (completedRef.current) return;
+      const now = performance.now();
       const currentElapsed = (now - startTimeRef.current) / 1000;
       setElapsed(currentElapsed);
 
-      if (currentElapsed >= 3.0 && !isBlinded) {
-        setIsBlinded(true);
+      if (currentElapsed < 7.5) {
+        timerFrameRef.current = requestAnimationFrame(loop);
       }
-
-      // Hard timeout at 7.5 seconds
-      if (currentElapsed >= 7.5) {
-        return;
-      }
-
-      timerFrameRef.current = requestAnimationFrame(loop);
     };
 
     timerFrameRef.current = requestAnimationFrame(loop);
     return () => {
       if (timerFrameRef.current) cancelAnimationFrame(timerFrameRef.current);
     };
-  }, [isBlinded]);
+  }, []); // Run once on mount! Never restart on state changes!
+
+  // Derived display state: blinded strictly when elapsed >= 3.0
+  const isBlinded = elapsed >= 3.0;
 
   // Handle player stop press
   const handleStop = () => {
-    if (completed) return;
+    if (completed || completedRef.current) return;
     const currentPress = elapsed;
 
     sound.playTap(true);
 
     if (playerFighterSlot === 'A' && stoppedA === null) {
       setStoppedA(currentPress);
+      if (onSendInput) onSendInput('STOP', currentPress);
     } else if (playerFighterSlot === 'B' && stoppedB === null) {
       setStoppedB(currentPress);
-    } else if (!isPlayerFighter) {
-      // Spectator tapping just plays sound
-      sound.playCoin();
+      if (onSendInput) onSendInput('STOP', currentPress);
     }
   };
 
-  // Bind spacebar / enter
+  // Bind Spacebar / Enter
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.code === 'Space' || e.code === 'Enter') {
@@ -114,32 +111,39 @@ export const MillisecondStopGame: React.FC<Props> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [elapsed, stoppedA, stoppedB, completed]);
 
-  // Evaluate winner when both have stopped or after timeout
+  // Evaluate winner when both have stopped
   useEffect(() => {
     if (completed) return;
 
     if (stoppedA !== null && stoppedB !== null) {
+      completedRef.current = true;
       setCompleted(true);
+
       const deltaA = Math.abs(stoppedA - TARGET_TIME);
       const deltaB = Math.abs(stoppedB - TARGET_TIME);
 
-      const winnerId = deltaA <= deltaB ? fighterA.id : fighterB.id;
+      const isTie = Math.abs(deltaA - deltaB) < 0.001;
+      const winnerId = isTie ? null : deltaA < deltaB ? fighterA.id : fighterB.id;
+
       sound.playFanfare();
 
       setTimeout(() => {
-        onComplete(winnerId, {
-          [fighterA.id]: Math.round(deltaA * 1000) / 1000,
-          [fighterB.id]: Math.round(deltaB * 1000) / 1000,
-        });
-      }, 3000);
+        onComplete(
+          winnerId,
+          {
+            [fighterA.id]: Math.round(stoppedA * 1000) / 1000,
+            [fighterB.id]: Math.round(stoppedB * 1000) / 1000,
+          },
+          isTie
+        );
+      }, 2600);
     }
   }, [stoppedA, stoppedB, completed, fighterA, fighterB, onComplete]);
 
-  // Format time display
   const formatTime = (t: number) => t.toFixed(3);
 
   return (
-    <div className="flex flex-col items-center justify-between w-full max-w-xl mx-auto p-4 py-8 bg-slate-950/80 rounded-3xl border border-cyan-500/30 text-white min-h-[480px]">
+    <div className="flex flex-col items-center justify-between w-full max-w-xl mx-auto p-4 py-6 bg-slate-950/90 rounded-3xl border border-cyan-500/30 text-white min-h-[460px]">
       {/* Top Banner */}
       <div className="text-center space-y-1">
         <span className="px-3 py-1 bg-cyan-950 text-cyan-300 border border-cyan-700/60 rounded-full text-xs font-mono font-bold tracking-wider">
@@ -151,12 +155,11 @@ export const MillisecondStopGame: React.FC<Props> = ({
       </div>
 
       {/* Main Clock Face */}
-      <div className="relative flex flex-col items-center justify-center w-72 h-44 rounded-2xl bg-black border-2 border-slate-700 shadow-2xl p-4 overflow-hidden">
-        {/* Glow backdrop */}
+      <div className="relative flex flex-col items-center justify-center w-72 h-40 rounded-2xl bg-black border-2 border-slate-700 shadow-2xl p-4 overflow-hidden">
         <div className={`absolute inset-0 transition-opacity duration-300 ${isBlinded ? 'bg-red-950/20' : 'bg-cyan-950/20'}`} />
 
-        <div className="text-xs uppercase font-mono tracking-widest text-slate-400 mb-2">
-          {isBlinded ? 'BLIND ZONE ACTIVE' : 'PRECISION CLOCK'}
+        <div className="text-[11px] uppercase font-mono tracking-widest text-slate-400 mb-1">
+          {isBlinded ? 'BLIND ZONE ACTIVE' : 'PRECISION TIMER'}
         </div>
 
         <div className="text-5xl font-mono font-black text-center tracking-wider text-glow-cyan">
@@ -180,7 +183,7 @@ export const MillisecondStopGame: React.FC<Props> = ({
         {/* Fighter A */}
         <div
           className={`p-3 rounded-2xl border transition-all ${
-            stoppedA !== null ? 'border-cyan-400 bg-cyan-950/40 shadow-lg' : 'border-slate-800 bg-slate-900/40'
+            stoppedA !== null ? 'border-cyan-400 bg-cyan-950/40' : 'border-slate-800 bg-slate-900/40'
           }`}
         >
           <div className="flex items-center gap-2 mb-1">
@@ -194,14 +197,14 @@ export const MillisecondStopGame: React.FC<Props> = ({
           </div>
           <div className="font-mono text-base font-bold">
             {stoppedA !== null ? (
-              <div className="space-y-0.5">
+              <div>
                 <div className="text-cyan-300">{formatTime(stoppedA)}s</div>
                 <div className="text-[10px] text-amber-300">
                   Δ {Math.abs(stoppedA - TARGET_TIME).toFixed(3)}s error
                 </div>
               </div>
             ) : (
-              <span className="text-xs text-slate-500 animate-pulse">Waiting for slam...</span>
+              <span className="text-xs text-slate-500">Timing slam...</span>
             )}
           </div>
         </div>
@@ -209,7 +212,7 @@ export const MillisecondStopGame: React.FC<Props> = ({
         {/* Fighter B */}
         <div
           className={`p-3 rounded-2xl border transition-all ${
-            stoppedB !== null ? 'border-amber-400 bg-amber-950/40 shadow-lg' : 'border-slate-800 bg-slate-900/40'
+            stoppedB !== null ? 'border-amber-400 bg-amber-950/40' : 'border-slate-800 bg-slate-900/40'
           }`}
         >
           <div className="flex items-center gap-2 mb-1">
@@ -223,20 +226,20 @@ export const MillisecondStopGame: React.FC<Props> = ({
           </div>
           <div className="font-mono text-base font-bold">
             {stoppedB !== null ? (
-              <div className="space-y-0.5">
+              <div>
                 <div className="text-amber-300">{formatTime(stoppedB)}s</div>
                 <div className="text-[10px] text-cyan-300">
                   Δ {Math.abs(stoppedB - TARGET_TIME).toFixed(3)}s error
                 </div>
               </div>
             ) : (
-              <span className="text-xs text-slate-500 animate-pulse">Waiting for slam...</span>
+              <span className="text-xs text-slate-500">Timing slam...</span>
             )}
           </div>
         </div>
       </div>
 
-      {/* Slam Button / Action Area */}
+      {/* Slam Button */}
       <div className="w-full flex flex-col items-center gap-2">
         {isPlayerFighter ? (
           <button
@@ -246,10 +249,10 @@ export const MillisecondStopGame: React.FC<Props> = ({
               (playerFighterSlot === 'B' && stoppedB !== null) ||
               completed
             }
-            className={`w-full py-5 rounded-2xl font-display font-black text-2xl uppercase tracking-wider transition-all transform active:scale-95 shadow-xl ${
+            className={`w-full py-5 rounded-2xl font-display font-black text-2xl uppercase tracking-wider transition-all transform active:scale-95 shadow-xl cursor-pointer ${
               (playerFighterSlot === 'A' && stoppedA !== null) || (playerFighterSlot === 'B' && stoppedB !== null)
                 ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700'
-                : 'bg-gradient-to-r from-red-600 via-rose-500 to-amber-500 hover:from-red-500 hover:to-amber-400 text-white shadow-red-500/30 glow-crimson border-2 border-red-400'
+                : 'bg-gradient-to-r from-red-600 via-rose-500 to-amber-500 text-white shadow-red-500/30 glow-crimson border-2 border-red-400'
             }`}
           >
             {(playerFighterSlot === 'A' && stoppedA !== null) || (playerFighterSlot === 'B' && stoppedB !== null)
@@ -259,7 +262,7 @@ export const MillisecondStopGame: React.FC<Props> = ({
         ) : (
           <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 text-center w-full">
             <span className="text-xs font-mono text-cyan-300">
-              👁️ SPECTATOR VIEW: Both fighters are timing their slams!
+              👁️ SPECTATOR VIEW: Both fighters timing their buzzer slams!
             </span>
           </div>
         )}

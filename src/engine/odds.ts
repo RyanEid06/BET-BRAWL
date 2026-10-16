@@ -4,12 +4,13 @@
  * 
  * Bet & BRAWL: Dynamic Odds & Payout Engine
  * 
- * Implements the core mathematical formulas:
+ * Implements:
  *   Odds_PlayerA = 1 + (WinRate_PlayerB / WinRate_PlayerA) * RiskFactor
- * combined with Laplace smoothing and live pari-mutuel pool balancing.
+ * combined with Laplace smoothing, live spectator pool weighting,
+ * strict bet validation, and honest net profit/loss calculations.
  */
 
-import type { FighterOdds, Player, SecretBet } from './types.ts';
+import type { FighterOdds, Player, SecretBet, RoundState, RoundPayoutItem } from './types.ts';
 
 export interface OddsCalculationConfig {
   riskFactor?: number;      // Default 1.0 (scales underdog vs favorite disparity)
@@ -45,40 +46,8 @@ export function calculateSmoothedWinRate(
 }
 
 /**
- * Converts decimal odds to common fractional representation.
- */
-export function decimalToFractional(decimalOdds: number): string {
-  const profit = Math.max(0.1, decimalOdds - 1);
-  if (Math.abs(profit - 1.0) < 0.05) return '1/1';
-  if (Math.abs(profit - 0.5) < 0.05) return '1/2';
-  if (Math.abs(profit - 1.5) < 0.05) return '3/2';
-  if (Math.abs(profit - 2.0) < 0.05) return '2/1';
-  if (Math.abs(profit - 2.5) < 0.05) return '5/2';
-  if (Math.abs(profit - 3.0) < 0.05) return '3/1';
-  if (Math.abs(profit - 4.0) < 0.05) return '4/1';
-  if (Math.abs(profit - 5.0) < 0.05) return '5/1';
-
-  // Approximate fraction with denominator up to 10
-  let bestNum = Math.round(profit);
-  let bestDen = 1;
-  let minError = Math.abs(profit - bestNum);
-
-  for (let den = 2; den <= 8; den++) {
-    const num = Math.round(profit * den);
-    const error = Math.abs(profit - num / den);
-    if (error < minError) {
-      minError = error;
-      bestNum = num;
-      bestDen = den;
-    }
-  }
-
-  return `${bestNum}/${bestDen}`;
-}
-
-/**
  * Calculates dynamic odds for two competing fighters, factoring in
- * historical win rates and current live spectator bets in the pool.
+ * session win rates and current live spectator bets in the pool.
  */
 export function calculateDynamicOdds(
   fighterA: Player,
@@ -88,7 +57,7 @@ export function calculateDynamicOdds(
 ): Record<string, FighterOdds> {
   const cfg = { ...DEFAULT_CONFIG, ...config };
 
-  // 1. Calculate smoothed win rates
+  // 1. Calculate smoothed win rates from genuine session stats
   const winRateA = calculateSmoothedWinRate(
     fighterA.matchesWon,
     fighterA.matchesPlayed,
@@ -132,7 +101,7 @@ export function calculateDynamicOdds(
 
   // 4. Pari-mutuel blend if bets have been placed
   if (totalPool > 0) {
-    const virtualSeed = 300; // Stabilizing seed coins
+    const virtualSeed = 300;
     const effectiveTotal = totalPool + virtualSeed * 2;
     const effectiveA = poolCoinsA + virtualSeed;
     const effectiveB = poolCoinsB + virtualSeed;
@@ -150,19 +119,10 @@ export function calculateDynamicOdds(
   finalOddsA = Math.max(cfg.minOdds, Math.min(cfg.maxOdds, Math.round(finalOddsA * 100) / 100));
   finalOddsB = Math.max(cfg.minOdds, Math.min(cfg.maxOdds, Math.round(finalOddsB * 100) / 100));
 
-  // Implied probabilities (sum normalized)
-  const rawProbA = 1 / finalOddsA;
-  const rawProbB = 1 / finalOddsB;
-  const probSum = rawProbA + rawProbB;
-  const impliedWinProbA = Math.round((rawProbA / probSum) * 100) / 100;
-  const impliedWinProbB = Math.round((rawProbB / probSum) * 100) / 100;
-
   return {
     [fighterA.id]: {
       fighterId: fighterA.id,
       decimalOdds: finalOddsA,
-      fractionalOdds: decimalToFractional(finalOddsA),
-      impliedWinProb: impliedWinProbA,
       smoothedWinRate: Math.round(winRateA * 100) / 100,
       totalPoolCoins: poolCoinsA,
       bettorCount: countA,
@@ -170,13 +130,50 @@ export function calculateDynamicOdds(
     [fighterB.id]: {
       fighterId: fighterB.id,
       decimalOdds: finalOddsB,
-      fractionalOdds: decimalToFractional(finalOddsB),
-      impliedWinProb: impliedWinProbB,
       smoothedWinRate: Math.round(winRateB * 100) / 100,
       totalPoolCoins: poolCoinsB,
       bettorCount: countB,
     },
   };
+}
+
+/**
+ * Validates a secret bet request server-side before execution.
+ * Returns null if valid, or a descriptive error string if invalid.
+ */
+export function validateBetPlacement(
+  bettor: Player | undefined,
+  fighterId: string,
+  amount: number,
+  round: RoundState | null,
+  currentPhase: string
+): string | null {
+  if (currentPhase !== 'BETTING_WINDOW') {
+    return 'Betting window is closed';
+  }
+  if (!round || round.bettingTimeRemaining <= 0) {
+    return 'Betting time has expired';
+  }
+  if (!bettor) {
+    return 'Player not found';
+  }
+  if (!Number.isInteger(amount) || amount <= 0 || !Number.isFinite(amount)) {
+    return 'Bet amount must be a positive whole number';
+  }
+  if (bettor.coins < amount) {
+    return `Insufficient coins: bankroll is ${bettor.coins}`;
+  }
+  if (bettor.id === round.fighterIds[0] || bettor.id === round.fighterIds[1]) {
+    return 'Fighters cannot place bets on their own brawl';
+  }
+  if (fighterId !== round.fighterIds[0] && fighterId !== round.fighterIds[1]) {
+    return 'Invalid target fighter';
+  }
+  if (round.bets.some(b => b.bettorId === bettor.id)) {
+    return 'You have already placed a bet for this round';
+  }
+
+  return null;
 }
 
 /**
@@ -188,29 +185,76 @@ export function calculatePotentialReturn(amount: number, decimalOdds: number): n
 
 /**
  * Computes all payouts at the conclusion of a round.
+ * Distinctly separates fighter bounties, gross returns, and net profit/loss.
  */
 export function computeRoundPayouts(
-  winnerId: string,
+  winnerId: string | null,
+  isTie: boolean,
   fighterIds: [string, string],
   matchPot: number,
   bets: SecretBet[],
   players: Player[]
 ): {
-  payouts: Array<{
-    playerId: string;
-    coinsChange: number;
-    reason: string;
-    newTotal: number;
-  }>;
+  payouts: RoundPayoutItem[];
   updatedPlayers: Player[];
 } {
   const playerMap = new Map<string, Player>(players.map(p => [p.id, { ...p }]));
-  const payouts: Array<{
-    playerId: string;
-    coinsChange: number;
-    reason: string;
-    newTotal: number;
-  }> = [];
+  const payouts: RoundPayoutItem[] = [];
+
+  const fighterA = playerMap.get(fighterIds[0]);
+  const fighterB = playerMap.get(fighterIds[1]);
+
+  if (isTie || !winnerId) {
+    // Tie handling: split match pot, refund bets
+    if (fighterA) {
+      const splitPot = Math.floor(matchPot / 2);
+      fighterA.coins += splitPot;
+      fighterA.matchesPlayed += 1;
+      payouts.push({
+        playerId: fighterA.id,
+        playerName: fighterA.name,
+        avatar: fighterA.avatar,
+        type: 'FIGHTER_BOUNTY',
+        netChange: splitPot,
+        newBankroll: fighterA.coins,
+        summary: `TIE SPLIT: +${splitPot} coins`,
+      });
+    }
+    if (fighterB) {
+      const splitPot = Math.floor(matchPot / 2);
+      fighterB.coins += splitPot;
+      fighterB.matchesPlayed += 1;
+      payouts.push({
+        playerId: fighterB.id,
+        playerName: fighterB.name,
+        avatar: fighterB.avatar,
+        type: 'FIGHTER_BOUNTY',
+        netChange: splitPot,
+        newBankroll: fighterB.coins,
+        summary: `TIE SPLIT: +${splitPot} coins`,
+      });
+    }
+
+    // Refund bets on tie
+    for (const bet of bets) {
+      const bettor = playerMap.get(bet.bettorId);
+      if (!bettor) continue;
+      bettor.coins += bet.amount; // Refund
+      payouts.push({
+        playerId: bettor.id,
+        playerName: bettor.name,
+        avatar: bettor.avatar,
+        type: 'BET_WIN',
+        stake: bet.amount,
+        totalReturn: bet.amount,
+        netChange: 0,
+        newBankroll: bettor.coins,
+        summary: `BRAWL TIE: ${bet.amount} coins refunded`,
+      });
+    }
+
+    return { payouts, updatedPlayers: Array.from(playerMap.values()) };
+  }
 
   // 1. Process winning fighter match pot
   const winningFighter = playerMap.get(winnerId);
@@ -223,9 +267,12 @@ export function computeRoundPayouts(
     winningFighter.matchesPlayed += 1;
     payouts.push({
       playerId: winningFighter.id,
-      coinsChange: matchPot,
-      reason: `BRAWL VICTORY: Match Pot (+${matchPot}c)`,
-      newTotal: winningFighter.coins,
+      playerName: winningFighter.name,
+      avatar: winningFighter.avatar,
+      type: 'FIGHTER_BOUNTY',
+      netChange: matchPot,
+      newBankroll: winningFighter.coins,
+      summary: `BRAWL VICTOR (+${matchPot}c bounty)`,
     });
   }
 
@@ -239,10 +286,10 @@ export function computeRoundPayouts(
     if (!bettor) continue;
 
     if (bet.fighterId === winnerId) {
-      // Won bet! Total return = amount * oddsAtBet
+      // Won bet! Total return = floor(amount * oddsAtBet)
       const totalReturn = Math.floor(bet.amount * bet.oddsAtBet);
       const netGain = totalReturn - bet.amount;
-      bettor.coins += totalReturn; // bet amount was deducted when bet was placed
+      bettor.coins += totalReturn; // (stake was deducted when bet was placed)
       bettor.totalBetsWon += 1;
       bettor.totalCoinsWonInBets += netGain;
 
@@ -252,18 +299,28 @@ export function computeRoundPayouts(
 
       payouts.push({
         playerId: bettor.id,
-        coinsChange: totalReturn,
-        reason: `Winning Bet: ${bet.amount}c on ${winningFighter?.name || 'Winner'} @ ${bet.oddsAtBet.toFixed(2)}x`,
-        newTotal: bettor.coins,
+        playerName: bettor.name,
+        avatar: bettor.avatar,
+        type: 'BET_WIN',
+        stake: bet.amount,
+        totalReturn,
+        netChange: netGain,
+        newBankroll: bettor.coins,
+        summary: `${totalReturn} returned · +${netGain} profit`,
       });
     } else {
-      // Lost bet
+      // Lost bet: Stake was already deducted, net loss is -stake
       bettor.totalCoinsLostInBets += bet.amount;
       payouts.push({
         playerId: bettor.id,
-        coinsChange: 0, // already deducted at placement
-        reason: `Lost Bet: ${bet.amount}c on ${losingFighter?.name || 'Opponent'}`,
-        newTotal: bettor.coins,
+        playerName: bettor.name,
+        avatar: bettor.avatar,
+        type: 'BET_LOSS',
+        stake: bet.amount,
+        totalReturn: 0,
+        netChange: -bet.amount,
+        newBankroll: bettor.coins,
+        summary: `-${bet.amount} loss on ${losingFighter?.name || 'Fighter'}`,
       });
     }
   }

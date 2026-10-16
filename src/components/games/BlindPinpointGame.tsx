@@ -2,20 +2,28 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  * 
- * Bet & BRAWL: Mini-Game 5 - Blind Pinpoint (Geoguess-Lite)
+ * Bet & BRAWL: Mini-Game 5 - Blind Pinpoint (Genuine Equirectangular World Map & Haversine km)
  */
 
 import React, { useState, useEffect, useRef } from 'react';
 import type { Player } from '../../engine/types.ts';
 import { sound } from '../../engine/audio.ts';
-import { BLIND_PINPOINT_CHALLENGES } from '../../engine/miniGamesCatalog.ts';
+import {
+  WORLD_CITIES,
+  calculateHaversineKm,
+  normCoordsToLatLon,
+  latLonToNormCoords,
+  CityLocation,
+} from '../../engine/miniGamesCatalog.ts';
 
 interface Props {
   fighterA: Player;
   fighterB: Player;
   isPlayerFighter: boolean;
   playerFighterSlot: 'A' | 'B' | 'spectator';
-  onComplete: (winnerId: string, scores: Record<string, number>) => void;
+  gameConfig?: Record<string, unknown>;
+  onComplete: (winnerId: string | null, scores: Record<string, number>, isTie?: boolean) => void;
+  onSendInput?: (action: string, value: number) => void;
 }
 
 export const BlindPinpointGame: React.FC<Props> = ({
@@ -23,13 +31,17 @@ export const BlindPinpointGame: React.FC<Props> = ({
   fighterB,
   isPlayerFighter,
   playerFighterSlot,
+  gameConfig,
   onComplete,
+  onSendInput,
 }) => {
-  const [challenge] = useState(() => BLIND_PINPOINT_CHALLENGES[Math.floor(Math.random() * BLIND_PINPOINT_CHALLENGES.length)]);
+  const targetCity: CityLocation = (gameConfig?.targetCity as CityLocation) || WORLD_CITIES[0];
+  const targetNorm = latLonToNormCoords(targetCity.lat, targetCity.lon);
+
   const [pinA, setPinA] = useState<{ x: number; y: number } | null>(null);
   const [pinB, setPinB] = useState<{ x: number; y: number } | null>(null);
-  const [distA, setDistA] = useState<number | null>(null);
-  const [distB, setDistB] = useState<number | null>(null);
+  const [distKmA, setDistKmA] = useState<number | null>(null);
+  const [distKmB, setDistKmB] = useState<number | null>(null);
   const [completed, setCompleted] = useState<boolean>(false);
 
   const mapContainerRef = useRef<HTMLDivElement>(null);
@@ -39,51 +51,55 @@ export const BlindPinpointGame: React.FC<Props> = ({
     if (completed) return;
 
     const botTimer = setTimeout(() => {
-      // Bot lands within 0.05 - 0.20 distance
-      const botErrX = (Math.random() - 0.5) * 0.25;
-      const botErrY = (Math.random() - 0.5) * 0.25;
-      const botX = Math.max(0.1, Math.min(0.9, challenge.targetNormX + botErrX));
-      const botY = Math.max(0.1, Math.min(0.9, challenge.targetNormY + botErrY));
+      // Bot lands within 400 - 1800km of target
+      const angle = Math.random() * 2 * Math.PI;
+      const kmOffset = 400 + Math.random() * 1200;
+      const degOffset = kmOffset / 111; // ~111km per degree
+      const botLat = Math.max(-80, Math.min(80, targetCity.lat + Math.sin(angle) * degOffset));
+      const botLon = Math.max(-175, Math.min(175, targetCity.lon + Math.cos(angle) * degOffset));
 
-      const rawDist = Math.hypot(botX - challenge.targetNormX, botY - challenge.targetNormY);
-      const km = Math.round(rawDist * challenge.mapWidthKm);
+      const botNorm = latLonToNormCoords(botLat, botLon);
+      const actualKm = calculateHaversineKm(botLat, botLon, targetCity.lat, targetCity.lon);
 
       if (playerFighterSlot === 'A') {
-        setPinB({ x: botX, y: botY });
-        setDistB(km);
+        setPinB({ x: botNorm.normX, y: botNorm.normY });
+        setDistKmB(actualKm);
       } else if (playerFighterSlot === 'B') {
-        setPinA({ x: botX, y: botY });
-        setDistA(km);
+        setPinA({ x: botNorm.normX, y: botNorm.normY });
+        setDistKmA(actualKm);
       } else {
-        setPinA({ x: challenge.targetNormX + 0.08, y: challenge.targetNormY - 0.05 });
-        setDistA(Math.round(0.09 * challenge.mapWidthKm));
-        setPinB({ x: botX, y: botY });
-        setDistB(km);
+        // Spectator view
+        setPinA({ x: targetNorm.normX + 0.04, y: targetNorm.normY - 0.03 });
+        setDistKmA(calculateHaversineKm(targetCity.lat + 5, targetCity.lon + 8, targetCity.lat, targetCity.lon));
+        setPinB({ x: botNorm.normX, y: botNorm.normY });
+        setDistKmB(actualKm);
       }
-    }, 2500);
+    }, 2800);
 
     return () => clearTimeout(botTimer);
-  }, [challenge, playerFighterSlot, completed]);
+  }, [targetCity, targetNorm, playerFighterSlot, completed]);
 
   const handleMapClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (completed || !isPlayerFighter) return;
     if (!mapContainerRef.current) return;
 
     const rect = mapContainerRef.current.getBoundingClientRect();
-    const clickX = (e.clientX - rect.left) / rect.width;
-    const clickY = (e.clientY - rect.top) / rect.height;
+    const clickX = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    const clickY = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
 
-    const rawDist = Math.hypot(clickX - challenge.targetNormX, clickY - challenge.targetNormY);
-    const km = Math.round(rawDist * challenge.mapWidthKm);
+    const { lat, lon } = normCoordsToLatLon(clickX, clickY);
+    const km = calculateHaversineKm(lat, lon, targetCity.lat, targetCity.lon);
 
     sound.playTap(true);
 
     if (playerFighterSlot === 'A' && pinA === null) {
       setPinA({ x: clickX, y: clickY });
-      setDistA(km);
+      setDistKmA(km);
+      if (onSendInput) onSendInput('PIN', km);
     } else if (playerFighterSlot === 'B' && pinB === null) {
       setPinB({ x: clickX, y: clickY });
-      setDistB(km);
+      setDistKmB(km);
+      if (onSendInput) onSendInput('PIN', km);
     }
   };
 
@@ -91,51 +107,72 @@ export const BlindPinpointGame: React.FC<Props> = ({
   useEffect(() => {
     if (completed) return;
 
-    if (distA !== null && distB !== null) {
+    if (distKmA !== null && distKmB !== null) {
       setCompleted(true);
-      const winnerId = distA <= distB ? fighterA.id : fighterB.id;
+      const isTie = Math.abs(distKmA - distKmB) < 5;
+      const winnerId = isTie ? null : distKmA < distKmB ? fighterA.id : fighterB.id;
       sound.playFanfare();
 
       setTimeout(() => {
-        onComplete(winnerId, {
-          [fighterA.id]: distA,
-          [fighterB.id]: distB,
-        });
+        onComplete(
+          winnerId,
+          {
+            [fighterA.id]: distKmA,
+            [fighterB.id]: distKmB,
+          },
+          isTie
+        );
       }, 3200);
     }
-  }, [distA, distB, completed, fighterA, fighterB, onComplete]);
+  }, [distKmA, distKmB, completed, fighterA, fighterB, onComplete]);
 
   return (
-    <div className="flex flex-col items-center justify-between w-full max-w-xl mx-auto p-4 py-6 bg-slate-950/80 rounded-3xl border border-cyan-500/30 text-white min-h-[480px]">
+    <div className="flex flex-col items-center justify-between w-full max-w-xl mx-auto p-4 py-6 bg-slate-950/90 rounded-3xl border border-cyan-500/30 text-white min-h-[460px]">
       {/* Top Banner */}
       <div className="text-center space-y-1">
         <span className="px-3 py-1 bg-cyan-950 text-cyan-300 border border-cyan-700/60 rounded-full text-xs font-mono font-bold tracking-wider">
-          CLOSEST PIN IN KILOMETERS WINS
+          GENUINE WORLD MAP · CLOSEST KM WINS
         </span>
         <h3 className="text-xl font-black font-display tracking-wide text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-cyan-400">
-          PINPOINT: {challenge.city.toUpperCase()} ({challenge.country.toUpperCase()})
+          TAP: {targetCity.city.toUpperCase()} ({targetCity.country.toUpperCase()})
         </h3>
       </div>
 
-      {/* Interactive Silhouette Map */}
+      {/* Real Equirectangular World Map Vector Canvas */}
       <div
         ref={mapContainerRef}
         onClick={handleMapClick}
-        className="relative w-full h-64 bg-slate-900 rounded-3xl border-2 border-slate-700 overflow-hidden cursor-crosshair shadow-2xl flex items-center justify-center"
+        className="relative w-full h-56 bg-[#070913] rounded-2xl border-2 border-slate-700 overflow-hidden cursor-crosshair shadow-2xl flex items-center justify-center select-none"
       >
-        {/* Silhouette SVG outline background */}
-        <svg viewBox="0 0 100 100" className="w-full h-full opacity-30 fill-cyan-400/20 stroke-cyan-400 stroke-[0.5]">
-          <path d="M 20 30 Q 35 15 50 20 T 80 35 Q 85 60 70 80 T 30 75 Q 15 60 20 30 Z" />
-          <circle cx="50" cy="50" r="40" fill="none" stroke="currentColor" strokeDasharray="2,2" opacity="0.3" />
+        {/* Equirectangular Grid Lines */}
+        <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(255,255,255,0.05)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.05)_1px,transparent_1px)] bg-[size:25%_25%]" />
+
+        {/* Genuine Continents Vector Silhouette */}
+        <svg viewBox="0 0 360 180" className="w-full h-full opacity-60 fill-slate-800 stroke-cyan-500/40 stroke-[0.8] pointer-events-none">
+          {/* North America */}
+          <path d="M 40 25 L 85 20 L 105 35 L 90 70 L 75 90 L 60 80 L 45 60 Z" />
+          {/* South America */}
+          <path d="M 80 95 L 115 105 L 105 150 L 90 160 L 75 120 Z" />
+          {/* Europe */}
+          <path d="M 160 30 L 200 25 L 195 55 L 170 60 L 160 45 Z" />
+          {/* Africa */}
+          <path d="M 165 65 L 210 65 L 215 110 L 185 145 L 160 110 Z" />
+          {/* Asia */}
+          <path d="M 205 25 L 310 20 L 325 55 L 290 85 L 240 75 L 205 50 Z" />
+          {/* Australia */}
+          <path d="M 290 120 L 335 120 L 330 155 L 295 150 Z" />
+          {/* Equator & Prime Meridian markers */}
+          <line x1="0" y1="90" x2="360" y2="90" stroke="rgba(245, 158, 11, 0.3)" strokeDasharray="3,3" strokeWidth="0.8" />
+          <line x1="180" y1="0" x2="180" y2="180" stroke="rgba(6, 182, 212, 0.3)" strokeDasharray="3,3" strokeWidth="0.8" />
         </svg>
 
-        {/* Target indicator on completion */}
+        {/* Real Target Location Marker (Revealed upon finish) */}
         {completed && (
           <div
-            className="absolute w-6 h-6 -ml-3 -mt-3 rounded-full bg-emerald-500/50 border-2 border-emerald-300 flex items-center justify-center animate-ping"
+            className="absolute w-5 h-5 -ml-2.5 -mt-2.5 rounded-full bg-emerald-500/60 border-2 border-emerald-300 flex items-center justify-center animate-ping"
             style={{
-              left: `${challenge.targetNormX * 100}%`,
-              top: `${challenge.targetNormY * 100}%`,
+              left: `${targetNorm.normX * 100}%`,
+              top: `${targetNorm.normY * 100}%`,
             }}
           />
         )}
@@ -143,18 +180,18 @@ export const BlindPinpointGame: React.FC<Props> = ({
           <div
             className="absolute text-[11px] font-mono font-bold bg-emerald-950 px-2 py-0.5 rounded text-emerald-300 border border-emerald-400 -mt-7 -ml-6"
             style={{
-              left: `${challenge.targetNormX * 100}%`,
-              top: `${challenge.targetNormY * 100}%`,
+              left: `${targetNorm.normX * 100}%`,
+              top: `${targetNorm.normY * 100}%`,
             }}
           >
-            🎯 {challenge.city}
+            🎯 {targetCity.city}
           </div>
         )}
 
         {/* Fighter A Pin */}
         {pinA && (
           <div
-            className="absolute w-5 h-5 -ml-2.5 -mt-2.5 rounded-full bg-cyan-500 border-2 border-white shadow-lg flex items-center justify-center text-[10px]"
+            className="absolute w-5 h-5 -ml-2.5 -mt-2.5 rounded-full bg-cyan-500 border-2 border-white shadow-lg flex items-center justify-center text-[10px] font-bold"
             style={{ left: `${pinA.x * 100}%`, top: `${pinA.y * 100}%` }}
           >
             A
@@ -164,30 +201,30 @@ export const BlindPinpointGame: React.FC<Props> = ({
         {/* Fighter B Pin */}
         {pinB && (
           <div
-            className="absolute w-5 h-5 -ml-2.5 -mt-2.5 rounded-full bg-amber-500 border-2 border-white shadow-lg flex items-center justify-center text-[10px]"
+            className="absolute w-5 h-5 -ml-2.5 -mt-2.5 rounded-full bg-amber-500 border-2 border-white shadow-lg flex items-center justify-center text-[10px] font-bold"
             style={{ left: `${pinB.x * 100}%`, top: `${pinB.y * 100}%` }}
           >
             B
           </div>
         )}
 
-        <div className="absolute bottom-2 left-3 text-[10px] font-mono text-slate-500">
-          Tap on silhouette to drop pin
+        <div className="absolute bottom-2 left-3 text-[10px] font-mono text-slate-400 bg-slate-950/70 px-2 py-0.5 rounded">
+          Equirectangular World Projection · Tap map
         </div>
       </div>
 
-      {/* Distance Scoreboard */}
+      {/* Haversine Distance Scoreboard */}
       <div className="grid grid-cols-2 gap-4 w-full">
         <div className="p-3 bg-slate-900 rounded-2xl border border-cyan-500/30 text-center">
           <div className="text-xs font-mono text-cyan-400 font-bold">{fighterA.name}</div>
-          <div className="text-lg font-mono font-black text-white mt-0.5">
-            {distA !== null ? `${distA} km away` : 'Waiting for pin...'}
+          <div className="text-base font-mono font-black text-white mt-1">
+            {distKmA !== null ? `${distKmA.toLocaleString()} km error` : 'Waiting for pin...'}
           </div>
         </div>
         <div className="p-3 bg-slate-900 rounded-2xl border border-amber-500/30 text-center">
           <div className="text-xs font-mono text-amber-400 font-bold">{fighterB.name}</div>
-          <div className="text-lg font-mono font-black text-white mt-0.5">
-            {distB !== null ? `${distB} km away` : 'Waiting for pin...'}
+          <div className="text-base font-mono font-black text-white mt-1">
+            {distKmB !== null ? `${distKmB.toLocaleString()} km error` : 'Waiting for pin...'}
           </div>
         </div>
       </div>
