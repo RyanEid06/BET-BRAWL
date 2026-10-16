@@ -76,7 +76,6 @@ test('Red Light Green Light: correctly tracks green and red at schedule boundari
 test('Red Light Green Light: tap on green increments +1, tap on red subtracts -3 (min 0)', () => {
   const gameStartsAt = 1000;
   const { internal } = initMiniGameServerState('rapid_red_green', ['f1', 'f2'], gameStartsAt);
-  // Inject deterministic schedule: 0-2000 green, 2000-3000 red
   internal.redGreen!.schedule = [
     { light: 'GREEN', durationMs: 2000 },
     { light: 'RED', durationMs: 1000 },
@@ -159,6 +158,18 @@ test('Speed Math: first to 3 correct answers wins immediately', () => {
   assert.equal(scores.f1, 3);
 });
 
+test('Speed Math: rejects malformed or non-integer payload', () => {
+  const gameStartsAt = 1000;
+  const { internal } = initMiniGameServerState('speed_math', ['f1', 'f2'], gameStartsAt);
+  const scores: Record<string, number> = { f1: 0, f2: 0 };
+
+  const badRes1 = processFighterAction(internal, scores, 'f1', { type: 'ANSWER', questionIndex: -1, answer: 10 } as any, gameStartsAt + 100);
+  assert.ok(badRes1.rejectionReason?.includes('Invalid'));
+
+  const badRes2 = processFighterAction(internal, scores, 'f1', { type: 'ANSWER', questionIndex: 0, answer: NaN } as any, gameStartsAt + 100);
+  assert.ok(badRes2.rejectionReason?.includes('Invalid'));
+});
+
 // ---------------------------------------------------------------------------
 // 4. HIGHER OR LOWER TESTS
 // ---------------------------------------------------------------------------
@@ -185,6 +196,29 @@ test('Higher or Lower: validates guess against card isHigher and rejects stale i
     guess: rightGuess,
   }, gameStartsAt + 200);
   assert.equal(staleRes.rejectionReason, 'Stale trivia index');
+});
+
+test('Higher or Lower: rejects invalid guess string and malformed payload', () => {
+  const gameStartsAt = 1000;
+  const { internal } = initMiniGameServerState('higher_lower', ['f1', 'f2'], gameStartsAt);
+  const scores: Record<string, number> = { f1: 0, f2: 0 };
+
+  // Invalid string guess
+  const badGuessRes = processFighterAction(internal, scores, 'f1', {
+    type: 'GUESS',
+    questionIndex: 0,
+    guess: 'EQUAL' as any,
+  }, gameStartsAt + 100);
+  assert.equal(badGuessRes.rejectionReason, 'Guess must be HIGHER or LOWER');
+  assert.equal(scores.f1, 0);
+
+  // Negative questionIndex
+  const badIdxRes = processFighterAction(internal, scores, 'f1', {
+    type: 'GUESS',
+    questionIndex: -1,
+    guess: 'HIGHER',
+  }, gameStartsAt + 100);
+  assert.equal(badIdxRes.rejectionReason, 'Invalid questionIndex');
 });
 
 // ---------------------------------------------------------------------------
@@ -219,7 +253,7 @@ test('Blind Pinpoint: validates normalized coords and calculates Haversine dista
 });
 
 // ---------------------------------------------------------------------------
-// 6. QUICK DRAW TESTS
+// 6. QUICK DRAW TESTS & EARLY-TAP EXPLOIT ELIMINATION
 // ---------------------------------------------------------------------------
 test('Quick Draw: tap before drawAt results in immediate false start foul loss', () => {
   const gameStartsAt = 1000;
@@ -232,6 +266,63 @@ test('Quick Draw: tap before drawAt results in immediate false start foul loss',
   assert.equal(foulRes.resolved, true);
   assert.equal(foulRes.winnerId, 'f2'); // f2 wins due to f1 false start!
   assert.equal(scores.f1, -1);
+});
+
+test('Quick Draw: boundary tests for early-tap exploit fix', () => {
+  const gameStartsAt = 1000;
+
+  // 1. drawAt - 100ms -> foul
+  {
+    const { internal } = initMiniGameServerState('quick_draw', ['f1', 'f2'], gameStartsAt);
+    const drawAt = internal.quickDraw!.drawAt;
+    const scores = { f1: 0, f2: 0 };
+    const res = processFighterAction(internal, scores, 'f1', { type: 'DRAW_TAP' }, drawAt - 100);
+    assert.equal(res.resolved, true);
+    assert.equal(res.winnerId, 'f2');
+    assert.equal(scores.f1, -1);
+  }
+
+  // 2. drawAt - 40ms -> foul
+  {
+    const { internal } = initMiniGameServerState('quick_draw', ['f1', 'f2'], gameStartsAt);
+    const drawAt = internal.quickDraw!.drawAt;
+    const scores = { f1: 0, f2: 0 };
+    const res = processFighterAction(internal, scores, 'f1', { type: 'DRAW_TAP' }, drawAt - 40);
+    assert.equal(res.resolved, true);
+    assert.equal(res.winnerId, 'f2');
+    assert.equal(scores.f1, -1);
+  }
+
+  // 3. drawAt - 1ms -> foul
+  {
+    const { internal } = initMiniGameServerState('quick_draw', ['f1', 'f2'], gameStartsAt);
+    const drawAt = internal.quickDraw!.drawAt;
+    const scores = { f1: 0, f2: 0 };
+    const res = processFighterAction(internal, scores, 'f1', { type: 'DRAW_TAP' }, drawAt - 1);
+    assert.equal(res.resolved, true);
+    assert.equal(res.winnerId, 'f2');
+    assert.equal(scores.f1, -1);
+  }
+
+  // 4. drawAt exactly -> valid reaction of 0ms
+  {
+    const { internal } = initMiniGameServerState('quick_draw', ['f1', 'f2'], gameStartsAt);
+    const drawAt = internal.quickDraw!.drawAt;
+    const scores = { f1: 0, f2: 0 };
+    const res = processFighterAction(internal, scores, 'f1', { type: 'DRAW_TAP' }, drawAt);
+    assert.equal(res.resolved, false, 'First valid reaction must not resolve immediately');
+    assert.equal(scores.f1, 0, 'Reaction at exact drawAt is 0ms');
+  }
+
+  // 5. drawAt + 1ms -> valid reaction of 1ms
+  {
+    const { internal } = initMiniGameServerState('quick_draw', ['f1', 'f2'], gameStartsAt);
+    const drawAt = internal.quickDraw!.drawAt;
+    const scores = { f1: 0, f2: 0 };
+    const res = processFighterAction(internal, scores, 'f1', { type: 'DRAW_TAP' }, drawAt + 1);
+    assert.equal(res.resolved, false);
+    assert.equal(scores.f1, 1, 'Reaction at drawAt + 1ms is 1ms');
+  }
 });
 
 test('Quick Draw: does NOT resolve on first valid reaction; lowest reaction time wins when both finish', () => {

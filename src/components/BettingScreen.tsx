@@ -189,8 +189,12 @@ export const BettingScreen: React.FC<Props> = ({
                     <span className="font-bold text-cyan-300">{myBet.oddsAtBet.toFixed(2)}x</span>
                   </div>
                   <div className="flex justify-between">
-                    <span>Potential Return:</span>
-                    <span className="font-bold text-emerald-400">+{myBet.potentialReturn} coins</span>
+                    <span>Total Return:</span>
+                    <span className="font-bold text-white">{myBet.potentialReturn} coins</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Net Profit:</span>
+                    <span className="font-bold text-emerald-400">+{myBet.potentialReturn - myBet.amount} coins</span>
                   </div>
                 </div>
               </div>

@@ -3,9 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  * 
  * Bet & BRAWL: Mini-Game 1 - Millisecond Stop (Authoritative Precision Timer)
+ * Strict blind enforcement: No client sees live clock once 3.000s is reached.
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import type { PublicPlayer } from '../../engine/types.ts';
 import { sound } from '../../engine/audio.ts';
 
@@ -56,7 +57,10 @@ export const MillisecondStopGame: React.FC<Props> = ({
     return () => cancelAnimationFrame(animFrame);
   }, [gameStartsAt, serverTimeOffset]);
 
+  // Once elapsed reaches 3.000s, ALL clients enter the blind zone.
+  // NO CLIENT (neither fighters nor spectators) may see the live continuing clock!
   const isBlinded = elapsed >= 3.0;
+
   const hasMyPlayerStopped = (playerFighterSlot === 'A' && (stoppedA !== null || localStopped)) ||
                              (playerFighterSlot === 'B' && (stoppedB !== null || localStopped));
 
@@ -86,26 +90,26 @@ export const MillisecondStopGame: React.FC<Props> = ({
       {/* Top Banner */}
       <div className="text-center space-y-1">
         <span className="px-3 py-1 bg-cyan-950 text-cyan-300 border border-cyan-700/60 rounded-full text-xs font-mono font-bold tracking-wider">
-          TARGET: 05.000s (BLINDS AT 03.000s)
+          TARGET: 05.000s (BLINDS AT 03.000s FOR EVERYONE)
         </span>
         <h3 className="text-xl font-black font-display tracking-wide text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-amber-400">
           MILLISECOND STOP
         </h3>
       </div>
 
-      {/* Main Clock Face */}
+      {/* Main Clock Face: BLIND FOR EVERYONE ONCE >= 3.000s */}
       <div className="relative flex flex-col items-center justify-center w-72 h-40 rounded-2xl bg-black border-2 border-slate-700 shadow-2xl p-4 overflow-hidden">
-        <div className={`absolute inset-0 transition-opacity duration-300 ${isBlinded ? 'bg-red-950/20' : 'bg-cyan-950/20'}`} />
+        <div className={`absolute inset-0 transition-opacity duration-300 ${isBlinded ? 'bg-red-950/30' : 'bg-cyan-950/20'}`} />
 
         <div className="text-[11px] uppercase font-mono tracking-widest text-slate-400 mb-1">
-          {isBlinded ? 'BLIND ZONE ACTIVE' : 'SYNCHRONIZED CLOCK'}
+          {isBlinded ? '🔒 BLIND ZONE ACTIVE' : 'SYNCHRONIZED CLOCK'}
         </div>
 
         <div className="text-5xl font-mono font-black text-center tracking-wider text-glow-cyan">
-          {isBlinded && !hasMyPlayerStopped && (playerFighterSlot !== 'spectator') ? (
+          {isBlinded ? (
             <span className="text-amber-400 animate-pulse tracking-widest">??.???</span>
           ) : (
-            <span className={elapsed >= 5.0 ? 'text-amber-400' : 'text-cyan-400'}>
+            <span className="text-cyan-400">
               {formatTime(elapsed)}
               <span className="text-xs ml-1 text-slate-400">s</span>
             </span>
@@ -117,7 +121,7 @@ export const MillisecondStopGame: React.FC<Props> = ({
         </div>
       </div>
 
-      {/* Fighters Dual Scoreboard */}
+      {/* Fighters Dual Status Cards */}
       <div className="grid grid-cols-2 gap-4 w-full">
         {/* Fighter A */}
         <div
@@ -134,17 +138,17 @@ export const MillisecondStopGame: React.FC<Props> = ({
               </div>
             </div>
           </div>
-          <div className="font-mono text-base font-bold">
+          <div className="font-mono text-sm font-bold">
             {stoppedA !== null ? (
               <div>
-                <div className="text-cyan-300">{formatTime(stoppedA)}s</div>
-                <div className="text-[10px] text-amber-300">
-                  Δ {Math.abs(stoppedA - TARGET_TIME).toFixed(3)}s error
-                </div>
+                <span className="text-emerald-400">✓ LOCKED IN</span>
+                {playerFighterSlot === 'A' && (
+                  <div className="text-xs text-cyan-300 mt-0.5">{formatTime(stoppedA)}s</div>
+                )}
               </div>
             ) : (
               <span className="text-xs text-slate-500">
-                {playerFighterSlot === 'A' && localStopped ? 'Stopped! Syncing...' : 'Timing slam...'}
+                {playerFighterSlot === 'A' && localStopped ? '✓ LOCKED IN' : 'Timing tap...'}
               </span>
             )}
           </div>
@@ -165,17 +169,17 @@ export const MillisecondStopGame: React.FC<Props> = ({
               </div>
             </div>
           </div>
-          <div className="font-mono text-base font-bold">
+          <div className="font-mono text-sm font-bold">
             {stoppedB !== null ? (
               <div>
-                <div className="text-amber-300">{formatTime(stoppedB)}s</div>
-                <div className="text-[10px] text-cyan-300">
-                  Δ {Math.abs(stoppedB - TARGET_TIME).toFixed(3)}s error
-                </div>
+                <span className="text-emerald-400">✓ LOCKED IN</span>
+                {playerFighterSlot === 'B' && (
+                  <div className="text-xs text-amber-300 mt-0.5">{formatTime(stoppedB)}s</div>
+                )}
               </div>
             ) : (
               <span className="text-xs text-slate-500">
-                {playerFighterSlot === 'B' && localStopped ? 'Stopped! Syncing...' : 'Timing slam...'}
+                {playerFighterSlot === 'B' && localStopped ? '✓ LOCKED IN' : 'Timing tap...'}
               </span>
             )}
           </div>
@@ -199,7 +203,7 @@ export const MillisecondStopGame: React.FC<Props> = ({
         ) : (
           <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 text-center w-full">
             <span className="text-xs font-mono text-cyan-300">
-              👁️ SPECTATOR VIEW: Both fighters timing their buzzer slams live!
+              👁️ SPECTATOR VIEW: Watching fighters time their buzzer slams in the blind!
             </span>
           </div>
         )}

@@ -18,6 +18,7 @@ import {
   CityLocation,
   HigherLowerTrivia,
 } from './miniGamesCatalog.ts';
+import { fisherYatesShuffle } from './roomEngine.ts';
 
 export interface LightScheduleStep {
   light: 'GREEN' | 'RED';
@@ -132,12 +133,9 @@ export function initMiniGameServerState(
       choices: q.choices,
     }));
   } else if (miniGameId === 'higher_lower') {
-    // Pick 4 sequential cards from shuffled bank
-    const startIdx = Math.floor(Math.random() * STABLE_HIGHER_LOWER_BANK.length);
-    const cards: HigherLowerTrivia[] = [];
-    for (let i = 0; i < 4; i++) {
-      cards.push(STABLE_HIGHER_LOWER_BANK[(startIdx + i) % STABLE_HIGHER_LOWER_BANK.length]);
-    }
+    // Pick 4 shuffled cards using Fisher-Yates
+    const shuffledBank = fisherYatesShuffle(STABLE_HIGHER_LOWER_BANK);
+    const cards = shuffledBank.slice(0, 4);
 
     internal.higherLower = {
       cards,
@@ -148,6 +146,8 @@ export function initMiniGameServerState(
       baseItem: c.baseItem,
       baseStat: c.baseStat,
       challengerItem: c.challengerItem,
+      challengerStat: c.challengerStat,
+      isHigher: c.isHigher,
     }));
   } else if (miniGameId === 'blind_pinpoint') {
     const cityIdx = Math.floor(Math.random() * WORLD_CITIES.length);
@@ -189,6 +189,10 @@ export function processFighterAction(
   action: FighterAction,
   nowMs: number
 ): GameActionResult {
+  if (!action || typeof action !== 'object' || typeof action.type !== 'string') {
+    return { resolved: false, isTie: false, winnerId: null, rejectionReason: 'Malformed action' };
+  }
+
   const [f1, f2] = internal.fighterIds;
   if (fighterId !== f1 && fighterId !== f2) {
     return { resolved: false, isTie: false, winnerId: null, rejectionReason: 'Not an active fighter' };
@@ -264,6 +268,10 @@ export function processFighterAction(
     if (action.type !== 'ANSWER') {
       return { resolved: false, isTie: false, winnerId: null, rejectionReason: 'Invalid action for Speed Math' };
     }
+    if (!Number.isInteger(action.questionIndex) || action.questionIndex < 0 || typeof action.answer !== 'number' || !Number.isFinite(action.answer)) {
+      return { resolved: false, isTie: false, winnerId: null, rejectionReason: 'Invalid Speed Math answer payload' };
+    }
+
     const sm = internal.speedMath!;
     // Penalty lock check
     if (nowMs < (sm.penaltyUntil[fighterId] || 0)) {
@@ -317,6 +325,14 @@ export function processFighterAction(
     if (action.type !== 'GUESS') {
       return { resolved: false, isTie: false, winnerId: null, rejectionReason: 'Invalid action for Higher Lower' };
     }
+    // Strict runtime validation
+    if (action.guess !== 'HIGHER' && action.guess !== 'LOWER') {
+      return { resolved: false, isTie: false, winnerId: null, rejectionReason: 'Guess must be HIGHER or LOWER' };
+    }
+    if (!Number.isInteger(action.questionIndex) || action.questionIndex < 0) {
+      return { resolved: false, isTie: false, winnerId: null, rejectionReason: 'Invalid questionIndex' };
+    }
+
     const hl = internal.higherLower!;
     const currentStep = hl.stepIndex[fighterId] || 0;
 
@@ -366,8 +382,17 @@ export function processFighterAction(
     }
 
     const { normX, normY } = action;
-    if (!Number.isFinite(normX) || !Number.isFinite(normY) || normX < 0 || normX > 1 || normY < 0 || normY > 1) {
-      return { resolved: false, isTie: false, winnerId: null, rejectionReason: 'Coordinates must be between 0 and 1' };
+    if (
+      typeof normX !== 'number' ||
+      typeof normY !== 'number' ||
+      !Number.isFinite(normX) ||
+      !Number.isFinite(normY) ||
+      normX < 0 ||
+      normX > 1 ||
+      normY < 0 ||
+      normY > 1
+    ) {
+      return { resolved: false, isTie: false, winnerId: null, rejectionReason: 'Coordinates must be numbers between 0 and 1' };
     }
 
     const { lat, lon } = normCoordsToLatLon(normX, normY);
@@ -415,7 +440,7 @@ export function processFighterAction(
     };
   }
 
-  // 6. QUICK DRAW
+  // 6. QUICK DRAW (No pre-tap exploit: any tap before drawAt is an immediate false start foul)
   if (internal.miniGameId === 'quick_draw') {
     if (action.type !== 'DRAW_TAP') {
       return { resolved: false, isTie: false, winnerId: null, rejectionReason: 'Invalid action for Quick Draw' };
@@ -426,9 +451,8 @@ export function processFighterAction(
       return { resolved: false, isTie: false, winnerId: null, rejectionReason: 'Already acted' };
     }
 
-    // Check false start (tapped before drawAt)
-    if (nowMs < qd.drawAt - 40) {
-      // FALSE START FOUL!
+    // Strict false start: If tap timestamp is before drawAt, it is an instant FALSE START FOUL
+    if (nowMs < qd.drawAt) {
       qd.fouls[fighterId] = true;
       fighterScores[fighterId] = -1; // -1 indicates false start foul
       fighterScores[otherFighterId] = 1;
@@ -445,8 +469,8 @@ export function processFighterAction(
       };
     }
 
-    // Valid reaction
-    const reactionMs = Math.max(1, nowMs - qd.drawAt);
+    // Valid reaction: strictly non-negative reaction time
+    const reactionMs = nowMs - qd.drawAt;
     qd.reactions[fighterId] = reactionMs;
     fighterScores[fighterId] = reactionMs;
 

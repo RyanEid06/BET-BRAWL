@@ -41,18 +41,39 @@ export const LobbyScreen: React.FC<Props> = ({
   onAddDebugBot,
   isDebug = false,
 }) => {
+  const isLoopbackUrl = (url: string | undefined): boolean => {
+    if (!url) return true;
+    try {
+      const parsed = new URL(url);
+      const host = parsed.hostname;
+      return host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0' || host === '::1';
+    } catch {
+      return url.includes('localhost') || url.includes('127.0.0.1') || url.includes('0.0.0.0');
+    }
+  };
+
   const [selectedBaseUrl, setSelectedBaseUrl] = useState<string>(() => {
-    // If client loaded over a non-loopback LAN host, use proven origin
-    if (typeof window !== 'undefined' && window.location.hostname !== '127.0.0.1' && window.location.hostname !== 'localhost') {
+    // If client loaded over a proven non-loopback LAN host, use origin
+    if (typeof window !== 'undefined' && !isLoopbackUrl(window.location.origin)) {
       return window.location.origin;
     }
-    return networkInfo?.fullJoinUrl || (typeof window !== 'undefined' ? window.location.origin : '');
+    if (networkInfo?.fullJoinUrl && !isLoopbackUrl(networkInfo.fullJoinUrl)) {
+      return networkInfo.fullJoinUrl;
+    }
+    return typeof window !== 'undefined' ? window.location.origin : '';
   });
 
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
 
   useEffect(() => {
-    if (networkInfo?.fullJoinUrl && !selectedBaseUrl) {
+    if (!networkInfo) return;
+
+    // Never silently prefer localhost/loopback when a valid non-loopback LAN URL exists!
+    if (networkInfo.fullJoinUrl && !isLoopbackUrl(networkInfo.fullJoinUrl)) {
+      if (isLoopbackUrl(selectedBaseUrl)) {
+        setSelectedBaseUrl(networkInfo.fullJoinUrl);
+      }
+    } else if (!selectedBaseUrl && networkInfo.fullJoinUrl) {
       setSelectedBaseUrl(networkInfo.fullJoinUrl);
     }
   }, [networkInfo, selectedBaseUrl]);

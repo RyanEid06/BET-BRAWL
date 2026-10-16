@@ -7,7 +7,7 @@
  * Implements:
  *   Odds_PlayerA = 1 + (WinRate_PlayerB / WinRate_PlayerA) * RiskFactor
  * combined with Laplace smoothing, live spectator pool weighting,
- * strict bet validation, and honest net profit/loss calculations.
+ * strict bet validation, authoritative timestamp boundaries, and honest net profit/loss calculations.
  */
 
 import type { FighterOdds, Player, SecretBet, RoundState, RoundPayoutItem } from './types.ts';
@@ -139,6 +139,7 @@ export function calculateDynamicOdds(
 
 /**
  * Validates a secret bet request server-side before execution.
+ * Checks authoritative timestamps as well as remaining integer countdown.
  * Returns null if valid, or a descriptive error string if invalid.
  */
 export function validateBetPlacement(
@@ -146,14 +147,24 @@ export function validateBetPlacement(
   fighterId: string,
   amount: number,
   round: RoundState | null,
-  currentPhase: string
+  currentPhase: string,
+  serverNowMs?: number
 ): string | null {
   if (currentPhase !== 'BETTING_WINDOW') {
     return 'Betting window is closed';
   }
-  if (!round || round.bettingTimeRemaining <= 0) {
+  if (!round) {
+    return 'No active round';
+  }
+
+  const now = serverNowMs ?? Date.now();
+  if (round.bettingEndsAt !== undefined && now >= round.bettingEndsAt) {
     return 'Betting time has expired';
   }
+  if (round.bettingTimeRemaining <= 0) {
+    return 'Betting time has expired';
+  }
+
   if (!bettor) {
     return 'Player not found';
   }
@@ -177,7 +188,7 @@ export function validateBetPlacement(
 }
 
 /**
- * Calculates net return for a placed bet.
+ * Calculates potential return for a placed bet.
  */
 export function calculatePotentialReturn(amount: number, decimalOdds: number): number {
   return Math.floor(amount * decimalOdds);

@@ -1,317 +1,422 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ * 
+ * Bet & BRAWL: Genuine Production Server Multi-Client WebSocket Integration Tests
+ * Exercises the ACTUAL production server handlers created by createBrawlServer.
+ */
+
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createServer } from 'http';
-import { WebSocketServer, WebSocket } from 'ws';
-import express from 'express';
-import type { ServerMessage, ClientMessage, PublicPlayer } from './types.ts';
-import { toPublicPlayer } from './types.ts';
-import {
-  createFreshPlayer,
-  generateRoomCode,
-  initAuthoritativeRound,
-  MIN_PLAYERS_TO_START,
-} from './roomEngine.ts';
-import {
-  processFighterAction,
-} from './gameEngine.ts';
-import {
-  calculateDynamicOdds,
-  validateBetPlacement,
-  computeRoundPayouts,
-} from './odds.ts';
+import { WebSocket } from 'ws';
+import { createBrawlServer } from '../../server.ts';
+import type { ServerMessage, PublicRoomState } from './types.ts';
 
-test('Multi-client WebSocket Integration: authenticates real sockets, enforces token privacy, and resolves brawl authoritatively', async () => {
-  const app = express();
-  const server = createServer(app);
-  const wss = new WebSocketServer({ server, path: '/ws' });
+// Helper to spawn a connected WebSocket client with message wait utilities
+async function createTestWsClient(wsUrl: string) {
+  const ws = new WebSocket(wsUrl);
+  const received: ServerMessage[] = [];
 
-  // Start test server on random available port
-  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', () => resolve()));
-  const address = server.address();
-  const port = typeof address === 'object' && address ? address.port : 3000;
-  const wsUrl = `ws://127.0.0.1:${port}/ws`;
-
-  // Server state for integration test
-  interface TestRoom {
-    roomCode: string;
-    hostToken: string;
-    phase: string;
-    players: Map<string, any>;
-    clientSockets: Map<string, WebSocket>;
-    currentRound: any;
-    internalGame: any;
-    totalRounds: number;
-    roundHistory: any[];
-  }
-  let room: TestRoom | null = null;
-
-  function broadcast(state: any) {
-    if (!room) return;
-    const publicPlayers = Array.from(room.players.values()).map(toPublicPlayer);
-    const msg = JSON.stringify({
-      type: 'ROOM_STATE',
-      timestamp: Date.now(),
-      payload: {
-        roomCode: room.roomCode,
-        phase: room.phase,
-        players: publicPlayers,
-        currentRound: room.currentRound,
-      },
-    });
-    for (const ws of room.clientSockets.values()) {
-      if (ws.readyState === WebSocket.OPEN) ws.send(msg);
-    }
-  }
-
-  wss.on('connection', (ws) => {
-    let boundToken: string | null = null;
-
-    ws.on('message', (raw) => {
-      const msg: ClientMessage = JSON.parse(raw.toString());
-
-      if (msg.type === 'CREATE_ROOM') {
-        const host = createFreshPlayer('Ace (Host)', '⚡', true);
-        const code = generateRoomCode();
-        room = {
-          roomCode: code,
-          hostToken: host.sessionToken,
-          phase: 'LOBBY',
-          players: new Map([[host.sessionToken, host]]),
-          clientSockets: new Map([[host.sessionToken, ws]]),
-          currentRound: null,
-          internalGame: null,
-          totalRounds: 8,
-          roundHistory: [],
-        };
-        boundToken = host.sessionToken;
-        ws.send(JSON.stringify({
-          type: 'JOIN_SUCCESS',
-          timestamp: Date.now(),
-          payload: { player: toPublicPlayer(host), sessionToken: host.sessionToken, roomCode: code, isHost: true },
-        }));
-        broadcast(room);
-        return;
-      }
-
-      if (msg.type === 'JOIN_ROOM') {
-        if (!room) return;
-        const p = createFreshPlayer(msg.payload.playerName, '🦊', false);
-        room.players.set(p.sessionToken, p);
-        room.clientSockets.set(p.sessionToken, ws);
-        boundToken = p.sessionToken;
-
-        ws.send(JSON.stringify({
-          type: 'JOIN_SUCCESS',
-          timestamp: Date.now(),
-          payload: { player: toPublicPlayer(p), sessionToken: p.sessionToken, roomCode: room.roomCode, isHost: false },
-        }));
-        broadcast(room);
-        return;
-      }
-
-      if (!room || !boundToken) return;
-      const player = room.players.get(boundToken);
-
-      if (msg.type === 'TOGGLE_READY') {
-        player.isReady = !player.isReady;
-        broadcast(room);
-        return;
-      }
-
-      if (msg.type === 'START_GAME') {
-        if (!player.isHost) return;
-        const playerList = Array.from(room.players.values());
-        const { round, internalGame } = initAuthoritativeRound(1, 8, playerList);
-        room.currentRound = round;
-        room.internalGame = internalGame;
-        room.phase = 'MINIGAME_ACTIVE';
-        round.gameStartsAt = Date.now();
-        broadcast(room);
-        return;
-      }
-
-      if (msg.type === 'PLACE_BET') {
-        const { fighterId, amount } = msg.payload;
-        player.coins -= amount;
-        const bet = {
-          bettorId: player.id,
-          fighterId,
-          amount,
-          oddsAtBet: 2.0,
-          timestamp: Date.now(),
-          potentialReturn: amount * 2,
-        };
-        room.currentRound.bets.push(bet);
-        ws.send(JSON.stringify({
-          type: 'BET_ACCEPTED',
-          timestamp: Date.now(),
-          payload: { bet, myBankroll: player.coins },
-        }));
-        broadcast(room);
-        return;
-      }
-
-      if (msg.type === 'FIGHTER_ACTION') {
-        const action = msg.payload;
-        const res = processFighterAction(room.internalGame, room.currentRound.fighterScores, player.id, action, Date.now());
-        if (res.resolved) {
-          room.currentRound.winnerId = res.winnerId;
-          room.currentRound.tieResult = res.isTie;
-          const { payouts, updatedPlayers } = computeRoundPayouts(
-            res.winnerId,
-            res.isTie,
-            room.currentRound.fighterIds,
-            room.currentRound.matchPot,
-            room.currentRound.bets,
-            Array.from(room.players.values())
-          );
-          room.currentRound.payouts = payouts;
-          for (const up of updatedPlayers) {
-            room.players.set(up.sessionToken, up);
-          }
-          room.phase = 'PAYOUT_RECAP';
-        }
-        broadcast(room);
-        return;
-      }
-    });
+  await new Promise<void>((resolve, reject) => {
+    ws.on('open', () => resolve());
+    ws.on('error', reject);
   });
 
-  // Helper to create client and receive messages
-  const createTestClient = async (name: string): Promise<{
-    ws: WebSocket;
-    received: ServerMessage[];
-    waitFor: (predicate: (m: ServerMessage) => boolean) => Promise<ServerMessage>;
-    waitForType: (type: string) => Promise<ServerMessage>;
-    close: () => void;
-  }> => {
-    const ws = new WebSocket(wsUrl);
-    const received: ServerMessage[] = [];
-
-    await new Promise<void>(resolve => ws.on('open', () => resolve()));
-
-    ws.on('message', data => {
+  ws.on('message', (data) => {
+    try {
       const parsed: ServerMessage = JSON.parse(data.toString());
       received.push(parsed);
-    });
+    } catch {
+      // ignore
+    }
+  });
 
-    const waitFor = (predicate: (m: ServerMessage) => boolean): Promise<ServerMessage> => {
-      return new Promise(resolve => {
-        const existing = received.find(predicate);
-        if (existing) return resolve(existing);
+  const waitFor = (predicate: (m: ServerMessage) => boolean, timeoutMs = 4000): Promise<ServerMessage> => {
+    return new Promise((resolve, reject) => {
+      const existing = received.find(predicate);
+      if (existing) return resolve(existing);
 
-        const handler = (data: any) => {
+      const timer = setTimeout(() => {
+        ws.off('message', handler);
+        reject(new Error(`Timed out waiting for message after ${timeoutMs}ms. Received: ${received.map(m => m.type).join(', ')}`));
+      }, timeoutMs);
+
+      const handler = (data: any) => {
+        try {
           const parsed: ServerMessage = JSON.parse(data.toString());
           if (predicate(parsed)) {
+            clearTimeout(timer);
             ws.off('message', handler);
             resolve(parsed);
           }
-        };
-        ws.on('message', handler);
-      });
-    };
+        } catch {
+          // ignore
+        }
+      };
 
-    const waitForType = (targetType: string): Promise<ServerMessage> => {
-      return waitFor(m => m.type === targetType);
-    };
-
-    return { ws, received, waitFor, waitForType, close: () => ws.close() };
+      ws.on('message', handler);
+    });
   };
+
+  const waitForType = <T extends ServerMessage['type']>(
+    targetType: T,
+    timeoutMs = 4000
+  ): Promise<Extract<ServerMessage, { type: T }>> => {
+    return waitFor(m => m.type === targetType, timeoutMs) as Promise<Extract<ServerMessage, { type: T }>>;
+  };
+
+  const waitForRoomState = (
+    predicate: (payload: PublicRoomState) => boolean,
+    timeoutMs = 4000
+  ): Promise<Extract<ServerMessage, { type: 'ROOM_STATE' }>> => {
+    return waitFor(m => m.type === 'ROOM_STATE' && predicate(m.payload), timeoutMs) as Promise<Extract<ServerMessage, { type: 'ROOM_STATE' }>>;
+  };
+
+  const close = () => {
+    try {
+      ws.close();
+    } catch {
+      // ignore
+    }
+  };
+
+  return { ws, received, waitFor, waitForType, waitForRoomState, close };
+}
+
+test('Production Server Integration: full 6-player lifecycle on actual server handlers', async () => {
+  // Use fast timing for snappy, reliable integration tests
+  const server = createBrawlServer({
+    timingConfig: {
+      revealDurationMs: 150,
+      bettingDurationSeconds: 1,
+      countdownDurationMs: 150,
+      fighterGraceMs: 500,
+      hostGraceMs: 800,
+      staleSeatGraceMs: 500,
+    },
+  });
+
+  const { port } = await server.listen(0, '127.0.0.1');
+  const wsUrl = `ws://127.0.0.1:${port}/ws`;
+
+  const allClients: Array<Awaited<ReturnType<typeof createTestWsClient>>> = [];
 
   try {
     // 1. Host creates room
-    const hostClient = await createTestClient('Host Ace');
-    hostClient.ws.send(JSON.stringify({ type: 'CREATE_ROOM', payload: { playerName: 'Host Ace' } }));
-    const hostSuccess = await hostClient.waitForType('JOIN_SUCCESS');
-    const roomCode = hostSuccess.payload.roomCode;
+    const host = await createTestWsClient(wsUrl);
+    allClients.push(host);
+
+    host.ws.send(JSON.stringify({
+      type: 'CREATE_ROOM',
+      payload: { playerName: 'Host Ace', avatar: '⚡' },
+    }));
+
+    const hostJoin = await host.waitForType('JOIN_SUCCESS');
+    const roomCode = hostJoin.payload.roomCode;
+    const hostSessionToken = hostJoin.payload.sessionToken;
+
     assert.ok(roomCode);
-    assert.equal(hostSuccess.payload.isHost, true);
-    assert.ok(hostSuccess.payload.sessionToken);
+    assert.equal(hostJoin.payload.isHost, true);
+    assert.ok(hostSessionToken.startsWith('tok_'));
 
-    // 2. Connect 5 more clients to reach minimum 6 players
-    const clients = [hostClient];
+    // Verify room state received by host
+    const initialState = await host.waitForRoomState(s => s.roomCode === roomCode);
+    assert.equal(initialState.payload.phase, 'LOBBY');
+    assert.equal(initialState.payload.players.length, 1);
+
+    // 2. Connect 5 additional clients to reach 6 players (minimum for normal match)
     for (let i = 2; i <= 6; i++) {
-      const c = await createTestClient(`Brawler ${i}`);
-      c.ws.send(JSON.stringify({
+      const client = await createTestWsClient(wsUrl);
+      allClients.push(client);
+
+      client.ws.send(JSON.stringify({
         type: 'JOIN_ROOM',
-        payload: { roomCode, playerName: `Brawler ${i}` },
+        payload: { roomCode, playerName: `Player ${i}`, avatar: '🦊' },
       }));
-      await c.waitForType('JOIN_SUCCESS');
-      clients.push(c);
+
+      const joinSuccess = await client.waitForType('JOIN_SUCCESS');
+      assert.equal(joinSuccess.payload.isHost, false);
+      assert.ok(joinSuccess.payload.sessionToken.startsWith('tok_'));
     }
 
-    // Wait for room state with 6 players
-    const stateWith6 = await hostClient.waitFor(
-      m => m.type === 'ROOM_STATE' && m.payload?.players?.length === 6
-    );
-    const playerList: PublicPlayer[] = stateWith6.payload.players;
-    assert.equal(playerList.length, 6);
+    // Wait for all 6 clients in room state
+    const sixPlayerState = await host.waitForRoomState(s => s.players?.length === 6);
+    assert.equal(sixPlayerState.payload.players.length, 6);
 
-    // PROTOCOL PRIVACY CHECK: ensure NO sessionToken leaked in public ROOM_STATE
-    for (const pub of playerList) {
-      assert.equal((pub as any).sessionToken, undefined, 'PublicPlayer must NEVER include sessionToken');
+    // SECURITY CHECK: Ensure sessionToken is NEVER leaked in public room state
+    for (const p of sixPlayerState.payload.players) {
+      assert.equal((p as any).sessionToken, undefined, 'PublicPlayer must NEVER include sessionToken');
     }
 
-    // 3. Ready up clients 2-6
+    // 3. Security: Non-host client CANNOT start game
+    const nonHost = allClients[1];
+    nonHost.ws.send(JSON.stringify({ type: 'START_GAME' }));
+    const notHostErr = await nonHost.waitForType('JOIN_ERROR');
+    assert.equal(notHostErr.payload.code, 'NOT_HOST');
+
+    // 4. Normal host cannot start before all players are ready
+    host.ws.send(JSON.stringify({ type: 'START_GAME' }));
+    const notReadyErr = await host.waitForType('JOIN_ERROR');
+    assert.equal(notReadyErr.payload.code, 'NOT_ALL_READY');
+
+    // 5. Toggle ready for all non-host players
     for (let i = 1; i < 6; i++) {
-      clients[i].ws.send(JSON.stringify({ type: 'TOGGLE_READY' }));
+      allClients[i].ws.send(JSON.stringify({ type: 'TOGGLE_READY' }));
     }
 
-    // 4. Host starts game
-    hostClient.ws.send(JSON.stringify({ type: 'START_GAME' }));
+    // Wait until all 6 players are ready (or host)
+    await host.waitForRoomState(s => {
+      const players = s.players || [];
+      return players.length === 6 && players.every(p => p.isReady || p.isHost);
+    });
 
-    // Wait for active mini-game
-    const activeState = await hostClient.waitFor(
-      m => m.type === 'ROOM_STATE' && m.payload?.phase === 'MINIGAME_ACTIVE' && !!m.payload?.currentRound
-    );
-    assert.ok(activeState.payload.currentRound);
-    const [f1Id, f2Id] = activeState.payload.currentRound.fighterIds;
+    // 6. Host starts game
+    host.ws.send(JSON.stringify({ type: 'START_GAME' }));
+
+    // Progresses to FIGHTER_REVEAL
+    const revealState = await host.waitForRoomState(s => s.phase === 'FIGHTER_REVEAL');
+    assert.ok(revealState.payload.currentRound);
+    const [f1Id, f2Id] = revealState.payload.currentRound.fighterIds;
     assert.notEqual(f1Id, f2Id);
 
-    // Find which client owns f1 and which owns f2
-    const f1Client = clients.find(c => {
-      const js = c.received.find(m => m.type === 'JOIN_SUCCESS');
-      return js?.payload.player.id === f1Id;
-    })!;
-    const f2Client = clients.find(c => {
-      const js = c.received.find(m => m.type === 'JOIN_SUCCESS');
-      return js?.payload.player.id === f2Id;
-    })!;
-    const spectatorClient = clients.find(c => c !== f1Client && c !== f2Client)!;
+    // Progresses automatically to BETTING_WINDOW
+    const bettingState = await host.waitForRoomState(s => s.phase === 'BETTING_WINDOW');
+    assert.equal(bettingState.payload.phase, 'BETTING_WINDOW');
 
-    // 5. Spectator places bet on fighter 1
+    // PRIVACY CHECK: Secret bets array must be empty during betting window!
+    assert.deepEqual(bettingState.payload.currentRound?.bets, []);
+
+    // 7. Find a spectator client and place a bet
+    const spectatorClient = allClients.find(c => {
+      const js = c.received.find(m => m.type === 'JOIN_SUCCESS');
+      const pid = (js as any)?.payload.player.id;
+      return pid !== f1Id && pid !== f2Id;
+    })!;
+
     spectatorClient.ws.send(JSON.stringify({
       type: 'PLACE_BET',
       payload: { fighterId: f1Id, amount: 100 },
     }));
+
     const betAccepted = await spectatorClient.waitForType('BET_ACCEPTED');
     assert.equal(betAccepted.payload.bet.fighterId, f1Id);
     assert.equal(betAccepted.payload.bet.amount, 100);
 
-    // 6. Both fighters send actions from their respective separate WebSockets
-    // If miniGame is millisecond_stop, send STOP
-    f1Client.ws.send(JSON.stringify({
-      type: 'FIGHTER_ACTION',
-      payload: { type: 'STOP' },
-    }));
+    // 8. Progresses to MINIGAME_COUNTDOWN then MINIGAME_ACTIVE
+    const activeState = await host.waitForRoomState(s => s.phase === 'MINIGAME_ACTIVE');
+    assert.equal(activeState.payload.phase, 'MINIGAME_ACTIVE');
 
-    f2Client.ws.send(JSON.stringify({
-      type: 'FIGHTER_ACTION',
-      payload: { type: 'STOP' },
-    }));
+    // PRIVACY CHECK: Secret bets array must STILL be empty during active mini-game!
+    assert.deepEqual(activeState.payload.currentRound?.bets, []);
 
-    // 7. Verify all clients receive the PAYOUT_RECAP with the authoritative winner
-    const recapHost = await hostClient.waitFor(
-      m => m.type === 'ROOM_STATE' && m.payload?.phase === 'PAYOUT_RECAP'
-    );
-    assert.equal(recapHost.payload.phase, 'PAYOUT_RECAP');
+    // 9. Both fighters send actions
+    const f1Client = allClients.find(c => {
+      const js = c.received.find(m => m.type === 'JOIN_SUCCESS');
+      return (js as any)?.payload.player.id === f1Id;
+    })!;
+    const f2Client = allClients.find(c => {
+      const js = c.received.find(m => m.type === 'JOIN_SUCCESS');
+      return (js as any)?.payload.player.id === f2Id;
+    })!;
 
-    // Clean up
-    for (const c of clients) {
-      c.close();
+    // Send actions appropriate for the active mini-game
+    const miniGameId = activeState.payload.currentRound!.miniGame.id;
+    if (miniGameId === 'millisecond_stop') {
+      f1Client.ws.send(JSON.stringify({ type: 'FIGHTER_ACTION', payload: { type: 'STOP' } }));
+      f2Client.ws.send(JSON.stringify({ type: 'FIGHTER_ACTION', payload: { type: 'STOP' } }));
+    } else if (miniGameId === 'speed_math') {
+      const answers = (server.getActiveRoom()?.internalGameState?.speedMath?.correctAnswers) || [0, 0, 0];
+      f1Client.ws.send(JSON.stringify({ type: 'FIGHTER_ACTION', payload: { type: 'ANSWER', questionIndex: 0, answer: answers[0] } }));
+      f1Client.ws.send(JSON.stringify({ type: 'FIGHTER_ACTION', payload: { type: 'ANSWER', questionIndex: 1, answer: answers[1] } }));
+      f1Client.ws.send(JSON.stringify({ type: 'FIGHTER_ACTION', payload: { type: 'ANSWER', questionIndex: 2, answer: answers[2] } }));
+    } else {
+      f1Client.ws.send(JSON.stringify({ type: 'FIGHTER_ACTION', payload: { type: 'TAP' } }));
     }
+
+    // 10. Round resolves to PAYOUT_RECAP and all clients receive identical state
+    const recapState = await host.waitForRoomState(s => s.phase === 'PAYOUT_RECAP', 12000);
+    assert.equal(recapState.payload.phase, 'PAYOUT_RECAP');
+    assert.ok(recapState.payload.currentRound?.payouts.length! >= 1);
+
+    // At recap, bets are revealed in recap state
+    assert.ok(recapState.payload.currentRound?.bets.length! >= 1);
+
+    // 11. Host triggers NEXT_ROUND
+    host.ws.send(JSON.stringify({ type: 'NEXT_ROUND' }));
+    const round2State = await host.waitForRoomState(s => s.phase === 'FIGHTER_REVEAL' || s.phase === 'BETTING_WINDOW');
+    assert.ok(round2State.payload.currentRound);
+
+    // 12. Security: An unauthorized new client cannot destroy the active room via CREATE_ROOM
+    const rogue = await createTestWsClient(wsUrl);
+    allClients.push(rogue);
+    rogue.ws.send(JSON.stringify({
+      type: 'CREATE_ROOM',
+      payload: { playerName: 'Rogue', avatar: '💀' },
+    }));
+    const rogueErr = await rogue.waitForType('JOIN_ERROR');
+    assert.equal(rogueErr.payload.code, 'ROOM_ALREADY_ACTIVE');
+
+    // 13. Host closes room -> CLOSE_ROOM reaches all clients
+    host.ws.send(JSON.stringify({ type: 'CLOSE_ROOM' }));
+    const closedMsg = await nonHost.waitForType('ROOM_CLOSED');
+    assert.ok(closedMsg.payload.reason.includes('closed'));
   } finally {
-    server.close();
-    wss.close();
+    for (const c of allClients) c.close();
+    await server.close();
+  }
+});
+
+test('Production Server: old-socket reconnect race safety', async () => {
+  const server = createBrawlServer();
+  const { port } = await server.listen(0, '127.0.0.1');
+  const wsUrl = `ws://127.0.0.1:${port}/ws`;
+
+  try {
+    // 1. Host creates room
+    const host = await createTestWsClient(wsUrl);
+    host.ws.send(JSON.stringify({ type: 'CREATE_ROOM', payload: { playerName: 'Host' } }));
+    const hostJoin = await host.waitForType('JOIN_SUCCESS');
+    const roomCode = hostJoin.payload.roomCode;
+
+    // 2. Player joins on Socket 1
+    const socket1 = await createTestWsClient(wsUrl);
+    socket1.ws.send(JSON.stringify({ type: 'JOIN_ROOM', payload: { roomCode, playerName: 'ReconnectTester' } }));
+    const pJoin = await socket1.waitForType('JOIN_SUCCESS');
+    const token = pJoin.payload.sessionToken;
+
+    // 3. Socket 2 reconnects using same token BEFORE socket 1 closes
+    const socket2 = await createTestWsClient(wsUrl);
+    socket2.ws.send(JSON.stringify({ type: 'JOIN_ROOM', payload: { roomCode, sessionToken: token } }));
+    const reconSuccess = await socket2.waitForType('JOIN_SUCCESS');
+    assert.equal(reconSuccess.payload.sessionToken, token);
+
+    // 4. Socket 1 closes now
+    socket1.close();
+    await new Promise(r => setTimeout(r, 80));
+
+    // 5. Player must still be connected through Socket 2!
+    const room = server.getActiveRoom()!;
+    const player = room.players.get(token)!;
+    assert.equal(player.connected, true, 'Player must remain connected through socket 2 after socket 1 closes');
+    assert.equal(room.players.size, 2, 'No duplicate players created');
+
+    socket2.close();
+    host.close();
+  } finally {
+    await server.close();
+  }
+});
+
+test('Production Server: host reconnect grace timer survives mini-game resolution', async () => {
+  const server = createBrawlServer({
+    timingConfig: {
+      revealDurationMs: 100,
+      bettingDurationSeconds: 1,
+      countdownDurationMs: 100,
+      fighterGraceMs: 200,
+      hostGraceMs: 600,
+    },
+  });
+
+  const { port } = await server.listen(0, '127.0.0.1');
+  const wsUrl = `ws://127.0.0.1:${port}/ws`;
+  const clients: Array<Awaited<ReturnType<typeof createTestWsClient>>> = [];
+
+  try {
+    // Create debug room so we can test with 2 players
+    const host = await createTestWsClient(wsUrl);
+    clients.push(host);
+    host.ws.send(JSON.stringify({ type: 'CREATE_ROOM', payload: { playerName: 'Host', debugMode: true } }));
+    const hostJoin = await host.waitForType('JOIN_SUCCESS');
+    const hostToken = hostJoin.payload.sessionToken;
+    const roomCode = hostJoin.payload.roomCode;
+
+    const p2 = await createTestWsClient(wsUrl);
+    clients.push(p2);
+    p2.ws.send(JSON.stringify({ type: 'JOIN_ROOM', payload: { roomCode, playerName: 'P2' } }));
+    await p2.waitForType('JOIN_SUCCESS');
+
+    // Host starts game
+    host.ws.send(JSON.stringify({ type: 'START_GAME' }));
+
+    // Wait until MINIGAME_ACTIVE
+    await p2.waitForRoomState(s => s.phase === 'MINIGAME_ACTIVE');
+
+    // Host disconnects DURING active mini-game!
+    host.close();
+    await new Promise(r => setTimeout(r, 50));
+
+    const room = server.getActiveRoom()!;
+    assert.ok(room.connectionTimers.hostGraceTimer, 'Host grace timer must be scheduled');
+
+    // End mini-game by having P2 stop / resolve
+    p2.ws.send(JSON.stringify({ type: 'FIGHTER_ACTION', payload: { type: 'STOP' } }));
+
+    // Wait for PAYOUT_RECAP
+    await p2.waitForRoomState(s => s.phase === 'PAYOUT_RECAP');
+
+    // CRITICAL: Host grace timer must STILL exist after game resolution!
+    assert.ok(
+      room.connectionTimers.hostGraceTimer,
+      'Host grace timer must NOT be wiped by game resolution'
+    );
+
+    // Host reconnects before grace timer expires
+    const newHostSocket = await createTestWsClient(wsUrl);
+    clients.push(newHostSocket);
+    newHostSocket.ws.send(JSON.stringify({ type: 'JOIN_ROOM', payload: { roomCode, sessionToken: hostToken } }));
+    const recon = await newHostSocket.waitForType('JOIN_SUCCESS');
+    assert.equal(recon.payload.isHost, true);
+
+    const hostPlayer = room.players.get(hostToken)!;
+    assert.equal(hostPlayer.connected, true);
+    assert.equal(room.connectionTimers.hostGraceTimer, undefined, 'Host grace timer cleared on reconnect');
+  } finally {
+    for (const c of clients) c.close();
+    await server.close();
+  }
+});
+
+test('Production Server: disconnected lobby seats free capacity after grace expiry', async () => {
+  const server = createBrawlServer({
+    timingConfig: {
+      staleSeatGraceMs: 150, // 150ms stale seat grace in test mode
+    },
+  });
+
+  const { port } = await server.listen(0, '127.0.0.1');
+  const wsUrl = `ws://127.0.0.1:${port}/ws`;
+  const clients: Array<Awaited<ReturnType<typeof createTestWsClient>>> = [];
+
+  try {
+    const host = await createTestWsClient(wsUrl);
+    clients.push(host);
+    host.ws.send(JSON.stringify({ type: 'CREATE_ROOM', payload: { playerName: 'Host' } }));
+    const hostJoin = await host.waitForType('JOIN_SUCCESS');
+    const roomCode = hostJoin.payload.roomCode;
+
+    // Player joins
+    const player = await createTestWsClient(wsUrl);
+    player.ws.send(JSON.stringify({ type: 'JOIN_ROOM', payload: { roomCode, playerName: 'Leaver' } }));
+    await player.waitForType('JOIN_SUCCESS');
+
+    const room = server.getActiveRoom()!;
+    assert.equal(room.players.size, 2);
+
+    // Player disconnects
+    player.close();
+
+    // Stale timer starts
+    await new Promise(r => setTimeout(r, 50));
+    assert.equal(room.players.size, 2); // Still reserved initially
+
+    // Wait until grace period expires (>150ms)
+    await new Promise(r => setTimeout(r, 200));
+
+    // Stale seat removed!
+    assert.equal(room.players.size, 1, 'Stale disconnected player must be deleted to free capacity');
+  } finally {
+    for (const c of clients) c.close();
+    await server.close();
   }
 });

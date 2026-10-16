@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  * 
- * Bet & BRAWL: Network & Game Protocol Type Definitions (v2.0 Server-Authoritative)
+ * Bet & BRAWL: Network & Game Protocol Type Definitions (v2.1 Authoritative Hardened)
  */
 
 export type MiniGameId = 
@@ -153,44 +153,49 @@ export type FighterAction =
   | { type: 'DRAW_TAP' };
 
 // -------------------------------------------------------------
-// REAL WEBSOCKET PROTOCOL SCHEMAS
+// DISCRIMINATED UNION PROTOCOL SCHEMAS
 // -------------------------------------------------------------
 
-export type ClientMessageType =
-  | 'CREATE_ROOM'
-  | 'JOIN_ROOM'
-  | 'TOGGLE_READY'
-  | 'START_GAME'
-  | 'SET_MATCH_LENGTH'
-  | 'PLACE_BET'
-  | 'FIGHTER_ACTION'
-  | 'NEXT_ROUND'
-  | 'RESTART_GAME'
-  | 'CLOSE_ROOM'
-  | 'DEBUG_ADD_BOT'
-  | 'PING';
-
-export interface ClientMessage {
-  type: ClientMessageType;
-  sessionToken?: string;
-  roomCode?: string;
-  payload?: any;
+export interface PublicRoomState {
+  roomId: string;
+  roomCode: string;
+  phase: GamePhase;
+  players: PublicPlayer[];
+  totalRounds: number;
+  currentRound: RoundState | null;
+  roundHistory: Array<{
+    roundNumber: number;
+    miniGameName: string;
+    winnerName: string;
+    totalPotWon: number;
+  }>;
+  awards: Award[];
+  debugMode?: boolean;
 }
 
-export type ServerMessageType =
-  | 'JOIN_SUCCESS'
-  | 'JOIN_ERROR'
-  | 'ROOM_STATE'
-  | 'BET_ACCEPTED'
-  | 'BET_REJECTED'
-  | 'ROOM_CLOSED'
-  | 'PONG';
+export type ClientMessage =
+  | { type: 'CREATE_ROOM'; payload?: { playerName?: string; avatar?: string; debugMode?: boolean } }
+  | { type: 'JOIN_ROOM'; payload: { roomCode: string; playerName?: string; avatar?: string; sessionToken?: string } }
+  | { type: 'TOGGLE_READY' }
+  | { type: 'START_GAME'; payload?: { debug?: boolean } }
+  | { type: 'SET_MATCH_LENGTH'; payload: { totalRounds: 8 | 10 } }
+  | { type: 'PLACE_BET'; payload: { fighterId: string; amount: number } }
+  | { type: 'FIGHTER_ACTION'; payload: FighterAction }
+  | { type: 'NEXT_ROUND' }
+  | { type: 'RESTART_GAME' }
+  | { type: 'CLOSE_ROOM' }
+  | { type: 'DEBUG_ADD_BOT' }
+  | { type: 'KICK_PLAYER'; payload: { playerId: string } }
+  | { type: 'PING'; payload?: { clientSentAt: number } };
 
-export interface ServerMessage {
-  type: ServerMessageType;
-  timestamp: number;
-  payload: any;
-}
+export type ServerMessage =
+  | { type: 'JOIN_SUCCESS'; timestamp: number; payload: { player: PublicPlayer; sessionToken: string; roomCode: string; isHost: boolean } }
+  | { type: 'JOIN_ERROR'; timestamp: number; payload: { code: string; message: string } }
+  | { type: 'ROOM_STATE'; timestamp: number; payload: PublicRoomState }
+  | { type: 'BET_ACCEPTED'; timestamp: number; payload: { bet: SecretBet; myBankroll: number } }
+  | { type: 'BET_REJECTED'; timestamp: number; payload: { reason: string } }
+  | { type: 'ROOM_CLOSED'; timestamp: number; payload: { reason: string } }
+  | { type: 'PONG'; timestamp: number; payload: { clientSentAt?: number; serverNow: number } };
 
 export interface RoomNetworkInfo {
   localIp: string;

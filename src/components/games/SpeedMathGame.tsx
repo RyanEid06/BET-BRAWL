@@ -22,6 +22,7 @@ interface Props {
   fighterScores: Record<string, number>;
   gameState?: Record<string, unknown>;
   gameConfig?: Record<string, unknown>;
+  serverTimeOffset?: number;
   onSendAction: (action: { type: 'ANSWER'; questionIndex: number; answer: number }) => void;
 }
 
@@ -33,6 +34,7 @@ export const SpeedMathGame: React.FC<Props> = ({
   fighterScores,
   gameState,
   gameConfig,
+  serverTimeOffset = 0,
   onSendAction,
 }) => {
   const questions: QuestionPublic[] = (gameConfig?.questions as QuestionPublic[]) || [
@@ -47,11 +49,39 @@ export const SpeedMathGame: React.FC<Props> = ({
   const myFighterId = playerFighterSlot === 'A' ? fighterA.id : playerFighterSlot === 'B' ? fighterB.id : null;
   const myProgress = myFighterId ? (fighterScores[myFighterId] || 0) : 0;
 
-  // Local feedback on selection
-  const [localPenalty, setLocalPenalty] = useState<boolean>(false);
   const penalties = (gameState?.penaltyUntil as Record<string, number>) || {};
-  const isServerPenalized = myFighterId ? (penalties[myFighterId] && Date.now() < penalties[myFighterId]) : false;
-  const isPenalized = localPenalty || !!isServerPenalized;
+  const myPenaltyUntil = myFighterId ? (penalties[myFighterId] || 0) : 0;
+
+  // Track penalty remaining with active timer to guarantee immediate re-enabling on expiry
+  const [penaltyRemainingMs, setPenaltyRemainingMs] = useState<number>(0);
+
+  useEffect(() => {
+    if (!myPenaltyUntil) {
+      setPenaltyRemainingMs(0);
+      return;
+    }
+
+    const checkPenalty = () => {
+      const serverNow = Date.now() + serverTimeOffset;
+      const remaining = Math.max(0, myPenaltyUntil - serverNow);
+      setPenaltyRemainingMs(remaining);
+      return remaining;
+    };
+
+    const initialRemaining = checkPenalty();
+    if (initialRemaining > 0) {
+      // Re-check frequently while penalty is active to update display and re-enable at 0ms
+      const interval = setInterval(() => {
+        const remaining = checkPenalty();
+        if (remaining <= 0) {
+          clearInterval(interval);
+        }
+      }, 50);
+      return () => clearInterval(interval);
+    }
+  }, [myPenaltyUntil, serverTimeOffset]);
+
+  const isPenalized = penaltyRemainingMs > 0;
 
   const handleSelectChoice = (choice: number) => {
     if (!isPlayerFighter || isPenalized || myProgress >= 3) return;
@@ -121,11 +151,17 @@ export const SpeedMathGame: React.FC<Props> = ({
         <div className="w-full flex flex-col items-center gap-4">
           <div
             className={`w-full py-8 rounded-3xl bg-slate-900 border-2 text-center transition-all ${
-              isPenalized ? 'border-rose-500 bg-rose-950/50 animate-shake' : 'border-cyan-400/50'
+              isPenalized ? 'border-rose-500 bg-rose-950/50' : 'border-cyan-400/50'
             }`}
           >
             <div className="text-xs font-mono uppercase tracking-widest text-slate-400 mb-1">
-              {isPenalized ? '❌ 1.5s PENALTY FREEZE' : `QUESTION ${activeQuestionIndex + 1} OF 3`}
+              {isPenalized ? (
+                <span className="text-rose-400 font-black animate-pulse">
+                  ❌ WRONG · 1.5s PENALTY ({(penaltyRemainingMs / 1000).toFixed(1)}s)
+                </span>
+              ) : (
+                `QUESTION ${activeQuestionIndex + 1} OF 3`
+              )}
             </div>
             <div className="text-5xl font-mono font-black text-cyan-300 tracking-wider">
               {currentQ.q} = ?
@@ -141,7 +177,7 @@ export const SpeedMathGame: React.FC<Props> = ({
                 disabled={isPenalized}
                 className={`py-4 px-6 rounded-2xl font-mono text-2xl font-black transition-all transform active:scale-95 border-2 cursor-pointer ${
                   isPenalized
-                    ? 'bg-slate-900 text-slate-600 border-slate-800 cursor-not-allowed'
+                    ? 'bg-slate-900 text-slate-600 border-slate-800 cursor-not-allowed opacity-50'
                     : 'bg-slate-900 hover:bg-cyan-950 hover:border-cyan-400 text-white border-slate-700 shadow-lg'
                 }`}
               >

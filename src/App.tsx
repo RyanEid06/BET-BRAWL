@@ -25,6 +25,7 @@ import { SpeedMathGame } from './components/games/SpeedMathGame.tsx';
 import { HigherLowerGame } from './components/games/HigherLowerGame.tsx';
 import { BlindPinpointGame } from './components/games/BlindPinpointGame.tsx';
 import { QuickDrawGame } from './components/games/QuickDrawGame.tsx';
+import { SynchronizedCountdown } from './components/SynchronizedCountdown.tsx';
 
 export default function App() {
   const client = useBrawlClient();
@@ -153,18 +154,12 @@ export default function App() {
       )}
 
       {/* Phase 5: Mini-Game Countdown */}
-      {client.phase === 'MINIGAME_COUNTDOWN' && (
-        <div className="flex-1 flex flex-col items-center justify-center space-y-3 p-4 my-auto">
-          <span className="text-xs font-mono text-cyan-400 uppercase tracking-widest">
-            FIGHTERS READY
-          </span>
-          <div className="text-8xl sm:text-9xl font-black font-display text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-amber-400 to-rose-400 animate-pulse">
-            BRAWL!
-          </div>
-          <p className="text-sm font-display font-bold text-slate-300">
-            {client.currentRound?.miniGame.name}
-          </p>
-        </div>
+      {client.phase === 'MINIGAME_COUNTDOWN' && client.currentRound && (
+        <SynchronizedCountdown
+          gameStartsAt={client.currentRound.gameStartsAt || Date.now() + 3500}
+          serverTimeOffset={client.serverTimeOffset}
+          miniGameName={client.currentRound.miniGame.name}
+        />
       )}
 
       {/* Phase 6: Active Mini-Game Execution */}
@@ -206,6 +201,7 @@ export default function App() {
               fighterScores={client.currentRound.fighterScores}
               gameState={client.currentRound.gameState}
               gameConfig={client.currentRound.gameConfig}
+              serverTimeOffset={client.serverTimeOffset}
               onSendAction={client.sendFighterAction}
             />
           )}

@@ -5,6 +5,7 @@
  * Bet & BRAWL: Authoritative Room, Session & Fighter Rotation Engine
  */
 
+import crypto from 'crypto';
 import type { Player, RoundState, Award, MiniGameId } from './types.ts';
 import { calculateDynamicOdds } from './odds.ts';
 import { MINI_GAMES } from './miniGamesCatalog.ts';
@@ -25,6 +26,36 @@ export function getRandomPlayerColor(): string {
 export function generateRoomCode(): string {
   const words = ['BRAWL', 'FIGHT', 'CLASH', 'VIPER', 'TITAN', 'SWIFT', 'SPARK', 'TURBO', 'BLITZ', 'ARENA'];
   return words[Math.floor(Math.random() * words.length)];
+}
+
+/**
+ * Generates a cryptographically strong session token.
+ */
+export function generateSecureToken(): string {
+  if (typeof crypto !== 'undefined') {
+    if (typeof crypto.randomUUID === 'function') {
+      return `tok_${crypto.randomUUID()}`;
+    }
+    if (typeof crypto.randomBytes === 'function') {
+      return `tok_${crypto.randomBytes(16).toString('hex')}`;
+    }
+  }
+  return `tok_${Math.random().toString(36).substring(2, 12)}_${Date.now()}`;
+}
+
+/**
+ * Generates a cryptographically strong player ID.
+ */
+export function generateSecurePlayerId(): string {
+  if (typeof crypto !== 'undefined') {
+    if (typeof crypto.randomUUID === 'function') {
+      return `p_${crypto.randomUUID().replace(/-/g, '').slice(0, 10)}`;
+    }
+    if (typeof crypto.randomBytes === 'function') {
+      return `p_${crypto.randomBytes(5).toString('hex')}`;
+    }
+  }
+  return `p_${Math.random().toString(36).substring(2, 9)}`;
 }
 
 /**
@@ -59,9 +90,9 @@ export function createFreshPlayer(
   isHost = false,
   sessionToken?: string
 ): Player {
-  const token = sessionToken || `tok_${Math.random().toString(36).substring(2, 12)}_${Date.now()}`;
+  const token = sessionToken || generateSecureToken();
   return {
-    id: `p_${Math.random().toString(36).substring(2, 9)}`,
+    id: generateSecurePlayerId(),
     sessionToken: token,
     name: sanitizePlayerName(name, isHost),
     avatar: sanitizePlayerAvatar(avatar),

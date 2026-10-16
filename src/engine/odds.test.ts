@@ -120,6 +120,23 @@ test('validateBetPlacement rejects bets when timer expired', () => {
   assert.equal(err, 'Betting time has expired');
 });
 
+test('validateBetPlacement authoritative deadline boundaries (bettingEndsAt)', () => {
+  const deadline = 100000;
+  const timedRound = { ...mockRound, bettingEndsAt: deadline, bettingTimeRemaining: 5 };
+
+  // 1ms before deadline -> allowed
+  const beforeErr = validateBetPlacement(mockSpectator, 'f1', 100, timedRound, 'BETTING_WINDOW', deadline - 1);
+  assert.equal(beforeErr, null, '1ms before deadline must be allowed');
+
+  // Exactly at deadline -> rejected
+  const atErr = validateBetPlacement(mockSpectator, 'f1', 100, timedRound, 'BETTING_WINDOW', deadline);
+  assert.equal(atErr, 'Betting time has expired', 'At deadline must be rejected');
+
+  // 1ms after deadline -> rejected
+  const afterErr = validateBetPlacement(mockSpectator, 'f1', 100, timedRound, 'BETTING_WINDOW', deadline + 1);
+  assert.equal(afterErr, 'Betting time has expired', 'After deadline must be rejected');
+});
+
 test('validateBetPlacement rejects non-positive, non-integer, or non-finite amounts', () => {
   assert.ok(validateBetPlacement(mockSpectator, 'f1', 0, mockRound, 'BETTING_WINDOW') !== null);
   assert.ok(validateBetPlacement(mockSpectator, 'f1', -50, mockRound, 'BETTING_WINDOW') !== null);

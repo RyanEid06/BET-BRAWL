@@ -326,10 +326,10 @@ export function useBrawlClient() {
     connectWs(() => {
       send({
         type: 'CREATE_ROOM',
-        payload: { playerName, avatar },
+        payload: { playerName, avatar, debugMode: state.isDebug },
       });
     });
-  }, [connectWs, send]);
+  }, [connectWs, send, state.isDebug]);
 
   const joinGame = useCallback((roomCode: string, playerName: string, avatar: string) => {
     const cleanCode = roomCode.trim().toUpperCase();
@@ -395,6 +395,13 @@ export function useBrawlClient() {
     send({ type: 'DEBUG_ADD_BOT' });
   }, [send]);
 
+  const kickPlayer = useCallback((playerId: string) => {
+    send({
+      type: 'KICK_PLAYER',
+      payload: { playerId },
+    });
+  }, [send]);
+
   return {
     ...state,
     hostGame,
@@ -408,5 +415,6 @@ export function useBrawlClient() {
     restartGame,
     closeRoom,
     addDebugBot,
+    kickPlayer,
   };
 }

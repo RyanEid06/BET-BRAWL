@@ -16,7 +16,7 @@ export const MINI_GAMES: Record<MiniGameId, MiniGameMeta> = {
     description: 'The timer counts toward 05.000s. At 03.000s the display blinds out into ??.??? Tap as close to 05.000s as you can.',
     rules: [
       'Watch the live counter until 03.000s',
-      'At 03.000s the clock blinds out into ??.???',
+      'At 03.000s the clock blinds out into ??.??? for all players',
       'Tap SLAM as close to 05.000s as possible',
       'Closest tap to 5.000s wins the Brawl'
     ],
@@ -31,7 +31,7 @@ export const MINI_GAMES: Record<MiniGameId, MiniGameMeta> = {
       'Tap rapidly while GREEN (+1 point)',
       'FREEZE immediately when RED appears',
       'Tapping on RED deducts 3 points!',
-      'First to 40 points or leader at time-up wins'
+      'First to 40 points or highest score at timeout wins; tie if equal'
     ],
   },
   speed_math: {
@@ -43,8 +43,8 @@ export const MINI_GAMES: Record<MiniGameId, MiniGameMeta> = {
     rules: [
       'Solve 3 mental math problems back to back',
       'Pick from 4 answer choices',
-      'Mistakes cause a 1.5s freeze penalty',
-      'First fighter to 3 correct answers wins'
+      'Mistakes trigger an authoritative 1.5s freeze penalty',
+      'First fighter to 3 correct answers or highest at timeout wins'
     ],
   },
   higher_lower: {
@@ -56,7 +56,7 @@ export const MINI_GAMES: Record<MiniGameId, MiniGameMeta> = {
     rules: [
       'Read the baseline statistic on the card',
       'Guess whether the challenger is HIGHER or LOWER',
-      'First fighter to 3 correct locks wins'
+      'First to 3 correct locks wins (or highest score at timeout; explicit tie if equal)'
     ],
   },
   blind_pinpoint: {
@@ -67,7 +67,7 @@ export const MINI_GAMES: Record<MiniGameId, MiniGameMeta> = {
     description: 'A target city is displayed on an equirectangular world map. Tap where you think it is located. Closest distance in km wins.',
     rules: [
       'Read the target world city and country',
-      'Tap your pin on the world map',
+      'Tap your pin on the accurate equirectangular world map',
       'Distance error is calculated with the Haversine formula in genuine km',
       'Smallest distance error wins'
     ],
@@ -77,7 +77,7 @@ export const MINI_GAMES: Record<MiniGameId, MiniGameMeta> = {
     name: 'Quick Draw',
     tagline: 'Fastest Finger',
     durationSeconds: 10,
-    description: 'Watch the screen closely. When "GO!" flashes, tap instantly! Tapping before "GO!" is an instant false-start disqualification.',
+    description: 'Watch the screen closely. When "DRAW!" flashes, tap instantly! Tapping before "DRAW!" is an instant false-start disqualification.',
     rules: [
       'Wait on high alert during the "WAIT..." phase',
       'DO NOT tap early (instant false-start foul!)',
@@ -147,6 +147,7 @@ export function generateMathQuestions(count = 3): MathQuestion[] {
 
 // -------------------------------------------------------------
 // STABLE HIGHER OR LOWER TRIVIA BANK
+// Stable physical, astronomical, geographic & historical measurements
 // -------------------------------------------------------------
 
 export interface HigherLowerTrivia {
@@ -160,15 +161,6 @@ export interface HigherLowerTrivia {
 }
 
 export const STABLE_HIGHER_LOWER_BANK: HigherLowerTrivia[] = [
-  {
-    baseItem: 'France Population',
-    baseStat: '68 Million',
-    baseValue: 68,
-    challengerItem: 'United Kingdom Population',
-    challengerStat: '67.7 Million',
-    challengerValue: 67.7,
-    isHigher: false,
-  },
   {
     baseItem: 'Eiffel Tower Height',
     baseStat: '330 Meters',
@@ -194,15 +186,6 @@ export const STABLE_HIGHER_LOWER_BANK: HigherLowerTrivia[] = [
     challengerItem: 'Mount Kilimanjaro Elevation',
     challengerStat: '5,895 Meters',
     challengerValue: 5895,
-    isHigher: false,
-  },
-  {
-    baseItem: 'Tokyo Population (Metro)',
-    baseStat: '37 Million',
-    baseValue: 37,
-    challengerItem: 'New York City Population (Metro)',
-    challengerStat: '19.5 Million',
-    challengerValue: 19.5,
     isHigher: false,
   },
   {
@@ -275,6 +258,33 @@ export const STABLE_HIGHER_LOWER_BANK: HigherLowerTrivia[] = [
     challengerItem: 'Formula 1 Top Race Speed',
     challengerStat: '372 km/h',
     challengerValue: 372,
+    isHigher: true,
+  },
+  {
+    baseItem: 'Diameter of Moon',
+    baseStat: '3,474 km',
+    baseValue: 3474,
+    challengerItem: 'Diameter of Planet Mercury',
+    challengerStat: '4,879 km',
+    challengerValue: 4879,
+    isHigher: true,
+  },
+  {
+    baseItem: 'Golden Gate Bridge Length',
+    baseStat: '2,737 Meters',
+    baseValue: 2737,
+    challengerItem: 'Brooklyn Bridge Length',
+    challengerStat: '1,825 Meters',
+    challengerValue: 1825,
+    isHigher: false,
+  },
+  {
+    baseItem: 'Boiling Point of Water',
+    baseStat: '100 °C',
+    baseValue: 100,
+    challengerItem: 'Melting Point of Lead',
+    challengerStat: '327 °C',
+    challengerValue: 327,
     isHigher: true,
   },
 ];

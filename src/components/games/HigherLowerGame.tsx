@@ -13,6 +13,8 @@ interface PublicTriviaCard {
   baseItem: string;
   baseStat: string;
   challengerItem: string;
+  challengerStat?: string;
+  isHigher?: boolean;
 }
 
 interface Props {
@@ -36,28 +38,7 @@ export const HigherLowerGame: React.FC<Props> = ({
   gameConfig,
   onSendAction,
 }) => {
-  const cards: PublicTriviaCard[] = (gameConfig?.cards as PublicTriviaCard[]) || [
-    {
-      baseItem: 'France Population',
-      baseStat: '68 Million',
-      challengerItem: 'United Kingdom Population',
-    },
-    {
-      baseItem: 'Eiffel Tower Height',
-      baseStat: '330 Meters',
-      challengerItem: 'Empire State Building Height',
-    },
-    {
-      baseItem: 'Speed of Sound in Air',
-      baseStat: '1,235 km/h',
-      challengerItem: 'Cruising Speed of Boeing 747',
-    },
-    {
-      baseItem: 'Mount Everest Elevation',
-      baseStat: '8,849 Meters',
-      challengerItem: 'Mount Kilimanjaro Elevation',
-    },
-  ];
+  const cards: PublicTriviaCard[] = (gameConfig?.cards as PublicTriviaCard[]) || [];
 
   const scoreA = fighterScores[fighterA.id] || 0;
   const scoreB = fighterScores[fighterB.id] || 0;
@@ -66,19 +47,36 @@ export const HigherLowerGame: React.FC<Props> = ({
   const stepIndices = (gameState?.stepIndex as Record<string, number>) || {};
   const myStepIndex = myFighterId ? (stepIndices[myFighterId] || 0) : 0;
 
+  const [feedback, setFeedback] = useState<{ isCorrect: boolean; challengerStat: string } | null>(null);
   const [waitingNext, setWaitingNext] = useState<boolean>(false);
 
   const handleGuess = (guess: 'HIGHER' | 'LOWER') => {
     if (!isPlayerFighter || waitingNext || myStepIndex >= cards.length) return;
 
-    sound.playTap(true);
+    const card = cards[myStepIndex];
+    if (card && card.isHigher !== undefined) {
+      const isCorrect = (guess === 'HIGHER') === card.isHigher;
+      setFeedback({
+        isCorrect,
+        challengerStat: card.challengerStat || '',
+      });
+      if (isCorrect) sound.playCoin();
+      else sound.playBuzzer();
+    } else {
+      sound.playTap(true);
+    }
+
     setWaitingNext(true);
     onSendAction({
       type: 'GUESS',
       questionIndex: myStepIndex,
       guess,
     });
-    setTimeout(() => setWaitingNext(false), 600);
+
+    setTimeout(() => {
+      setFeedback(null);
+      setWaitingNext(false);
+    }, 700);
   };
 
   const currentCard = cards[Math.min(cards.length - 1, myStepIndex)];
@@ -88,7 +86,7 @@ export const HigherLowerGame: React.FC<Props> = ({
       {/* Top Banner */}
       <div className="text-center space-y-1">
         <span className="px-3 py-1 bg-cyan-950 text-cyan-300 border border-cyan-700/60 rounded-full text-xs font-mono font-bold tracking-wider">
-          FIRST TO 3 CORRECT LOCKS
+          RACE TO 3 · HIGHEST SCORE AT TIMEOUT WINS
         </span>
         <h3 className="text-xl font-black font-display tracking-wide text-transparent bg-clip-text bg-gradient-to-r from-amber-400 to-rose-400">
           HIGHER OR LOWER SHOWDOWN
@@ -120,9 +118,28 @@ export const HigherLowerGame: React.FC<Props> = ({
           </div>
 
           {/* Challenger Item */}
-          <div className="p-4 rounded-2xl bg-slate-900/90 border-2 border-cyan-500/50 text-center">
-            <div className="text-[11px] font-mono uppercase text-cyan-400">IS THIS HIGHER OR LOWER?</div>
+          <div className={`p-4 rounded-2xl bg-slate-900/90 border-2 text-center transition-all ${
+            feedback
+              ? feedback.isCorrect
+                ? 'border-emerald-500 bg-emerald-950/50'
+                : 'border-rose-500 bg-rose-950/50'
+              : 'border-cyan-500/50'
+          }`}>
+            <div className="text-[11px] font-mono uppercase text-cyan-400">
+              {feedback ? (
+                <span className={feedback.isCorrect ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>
+                  {feedback.isCorrect ? '✓ CORRECT!' : '✗ WRONG!'}
+                </span>
+              ) : (
+                'IS THIS HIGHER OR LOWER?'
+              )}
+            </div>
             <div className="text-base font-bold text-white mt-1">{currentCard.challengerItem}</div>
+            {feedback && feedback.challengerStat && (
+              <div className="text-lg font-mono font-bold text-white mt-1">
+                Actual: {feedback.challengerStat}
+              </div>
+            )}
           </div>
         </div>
       ) : (

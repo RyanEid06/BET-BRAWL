@@ -36,6 +36,22 @@ test('Fresh player starts with clean statistics and 1000 coins', () => {
   assert.ok(p.sessionToken.length > 5);
 });
 
+test('Cryptographic session tokens and player IDs are unique and strong', () => {
+  const tokens = new Set<string>();
+  const ids = new Set<string>();
+
+  for (let i = 0; i < 50; i++) {
+    const p = createFreshPlayer(`Player ${i}`, '⚡', i === 0);
+    tokens.add(p.sessionToken);
+    ids.add(p.id);
+    assert.ok(p.sessionToken.startsWith('tok_'));
+    assert.ok(p.id.startsWith('p_'));
+  }
+
+  assert.equal(tokens.size, 50, 'All 50 generated session tokens must be unique');
+  assert.equal(ids.size, 50, 'All 50 generated player IDs must be unique');
+});
+
 test('Room enforces minimum 6 players and maximum 9 players constant', () => {
   assert.equal(MIN_PLAYERS_TO_START, 6);
   assert.equal(MAX_PLAYERS_CAPACITY, 9);

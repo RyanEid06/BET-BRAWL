@@ -4,71 +4,95 @@ An offline, low-latency party game for 6 to 9 friends in the same physical room 
 
 ---
 
-## How to Host & Play
+## Windows Quick Start (Install & Host)
 
-### 1. Requirements
-- Node.js 20+ installed on the host computer / phone.
-- All 6 to 9 players must be connected to the **same local Wi-Fi network** (or phone hotspot).
-- Zero cloud servers, zero internet API keys, and zero external fonts needed.
+Open **PowerShell** or **Command Prompt** in the project directory:
 
-### 2. Start the Local Host Server
-On the host machine, run:
-```bash
-npm install
+```powershell
+# 1. Install dependencies reproducibly using package-lock.json
+npm ci
+
+# 2. Build the production client
 npm run build
+
+# 3. Start the authoritative production server
 npm start
 ```
-*(Or for development mode: `npm run dev`)*
 
-The server automatically detects your computer's local IPv4 network address (e.g. `192.168.1.50`) and binds to `0.0.0.0:3000`.
+For development mode with hot-reloading:
+```powershell
+npm run dev
+```
 
-### 3. Join the Game from Phones
-1. Open your browser on the host machine (`http://localhost:3000`).
-2. Click **HOST NEW GAME**. A room is created with a room code and a large join QR code.
-3. Friends on the same Wi-Fi simply:
+### Windows Firewall Note
+When running `npm start` for the first time, Windows Defender Firewall may display an alert:
+- Check **"Private networks, such as home or work network"**
+- Click **"Allow access"**
+This permits incoming connections on port 3000 from mobile phones connected to the same Wi-Fi router or phone hotspot.
+
+---
+
+## How to Play
+
+### 1. Requirements
+- Node.js 20+ installed on the host computer.
+- All 6 to 9 players connected to the **same local Wi-Fi network** (or a phone hotspot).
+- Zero cloud servers, zero internet API keys, and zero external fonts needed.
+
+### 2. Join the Game from Phones
+1. Open the host browser at `http://localhost:3000`.
+2. Click **HOST NEW GAME**. A room is created with a room code and a QR code pointing directly to the host computer's LAN IP address.
+3. Friends on the same Wi-Fi network:
    - **Scan the QR code** with their phone camera, OR
-   - Open the displayed local URL (e.g. `http://192.168.1.50:3000`) and tap **JOIN GAME WITH CODE**.
-4. Enter their player alias and pick an avatar.
+   - Open the displayed local URL (e.g. `http://192.168.1.50:3000`) and enter the room code.
+4. Enter an alias and choose an avatar.
 5. In the lobby, each player taps **SET READY**.
-6. When at least 6 players are ready, the host taps **START BRAWL MATCH!**.
+6. When at least 6 connected players are ready, the host clicks **START BRAWL MATCH!**.
 
 ---
 
 ## Mini-Game Catalog (6 Active Games)
 
-1. **Millisecond Stop:** A timer counts toward `05.000s`. At `03.000s`, the timer blinds out into `??.???`. Players tap at what they feel is exactly `05.000s`. Closest tap wins.
-2. **Rapid Red Light, Green Light:** Unpredictable traffic light simulator with authoritative server schedule. Mash tap on Green (+1 point); tapping on Red penalizes (-3 points). First to 40 or leader at 15s wins.
-3. **Speed Math:** Rapid 3-question mental arithmetic race with randomized questions. Mistakes trigger a 1.5s freeze penalty. First to 3 correct answers wins.
-4. **Higher or Lower:** Real-world stable trivia showdown (mountain elevations, monument heights, historical dates). First to 3 correct locks wins.
+1. **Millisecond Stop:** A timer counts toward `05.000s`. At `03.000s`, the timer blinds out into `??.???` for **all clients** (fighters and spectators alike) to prevent room coaching. Players tap as close to `05.000s` as possible. Closest tap wins.
+2. **Rapid Red Light, Green Light:** Fast traffic light simulator with authoritative server schedule. Mash tap on Green (+1 point); tapping on Red penalizes (-3 points). First to 40 or highest score at 15s timeout wins; explicit tie if equal.
+3. **Speed Math:** Rapid 3-question mental arithmetic race with randomized questions. Wrong answers trigger an authoritative 1.5s freeze penalty with live UI countdown. First to 3 correct answers or highest at timeout wins.
+4. **Higher or Lower:** Real-world stable trivia showdown (astronomy, physics, monument heights, geography, historic years). First to 3 correct locks wins (or highest score at timeout; explicit tie if equal).
 5. **Blind Pinpoint:** Target city appears with an equirectangular world map. Tap your pin; genuine kilometer distance error is calculated with the Haversine formula. Smallest distance error wins.
-6. **Quick Draw:** Both fighters see "WAIT...". When "DRAW!" flashes, tap instantly. Tapping early triggers an immediate false-start disqualification! Fastest reaction wins.
+6. **Quick Draw:** Both fighters see "WAIT...". When "DRAW!" flashes, tap instantly. Tapping even 1ms before "DRAW!" is an instant false-start disqualification! Lowest valid reaction time wins.
 
 ---
 
 ## Developer / Debug Mode
-To test with fewer than 6 devices, append `?debug=1` to the URL:
+To test with fewer than 6 physical devices, open:
 ```
 http://localhost:3000?debug=1
 ```
-This enables the `+ Add Test Bot` button in the lobby, allowing a single developer to populate 6-9 players and test all gameplay loops.
+This enables the `+ Add Bot (debug)` button in the lobby, allowing a single developer to populate 6-9 players and test all gameplay loops.
 
 ---
 
-## Running the Automated Test Suite
-```bash
-npm test
-```
-Runs 36 comprehensive test cases covering:
-- **Authoritative Mini-Game Engine:** Pure server rule adjudication for all 6 games (Millisecond Stop elapsed timing & DNF timeout handling, Red Light Green Light schedule boundaries & score penalization, Speed Math question generation & 1.5s freeze penalty, Higher/Lower server-side validation against stable trivia dataset, Blind Pinpoint normalized coordinates & server-side Haversine kilometer distances, Quick Draw false-start foul detection & reaction time comparisons).
-- **Multi-Client WebSocket Integration:** Real WebSocket client/server lifecycle, connection authentication, token privacy enforcement (session tokens never leaked to public states), spectator wagering, and authoritative brawl resolution.
-- **LAN Network Discovery:** RFC1918 private IPv4 detection, link-local `169.254.x.x` rejection, candidate URL generation, and interface prioritization.
-- **Laplace Smoothing & Dynamic Odds:** Dynamic payout multipliers, underdog incentives, and bettor risk/reward balance.
-- **Strict Bet Validation:** Prevention of duplicate bets, self-betting by fighters, over-bankroll stakes, and invalid round phases.
-- **Authoritative Payouts & Refunds:** Honest net profit calculation (+net on wins, -stake on loss) and 0-net coin refunds on ties.
-- **Room Lifecycle & Fair Rotation:** 6–9 player room constraints, Fisher-Yates match scheduling across 8 and 10 rounds with equal opportunity distribution, and session awards calculated strictly from current session statistics.
+## Automated Test Suite & Verification
 
-## Verification
+Run the entire verification pipeline in one command:
 ```bash
 npm run verify
 ```
-Runs TypeScript verification (`tsc --noEmit`), the 36-test automated suite, and the Vite production build (`vite build`) in one command.
+This executes:
+1. `npm run typecheck` (`tsc --noEmit`): 0 TypeScript errors.
+2. `npm test` (`tsx --test ...`): 44 comprehensive tests covering:
+   - **Genuine Production Server Integration:** Real WebSocket multi-client lifecycle exercising `createBrawlServer`, connection authentication, token privacy enforcement (session tokens never leaked in public states), spectator wagering, separate fighter action processing, payout synchronization, and room closure.
+   - **Old-Socket Reconnect Race Protection:** Verified that a socket closing after reconnect replacement cannot disconnect the seat.
+   - **Connection Grace Timers Separation:** Verified host reconnect grace timer survives round completion and mini-game resolution.
+   - **Disconnected Seat Expiry:** Verified stale disconnected lobby seats automatically clean up after grace expiry to restore room capacity.
+   - **Authoritative Deadlines:** Strict boundary tests for `bettingEndsAt` and `gameEndsAt`.
+   - **Quick Draw Exploit Elimination:** Strict boundary tests at `drawAt - 100ms`, `drawAt - 40ms`, `drawAt - 1ms` (all fouls), `drawAt` (valid 0ms), and `drawAt + 1ms` (valid 1ms).
+   - **Runtime Payload Sanity Validation:** Strict rejection of malformed guesses, invalid coordinates, and negative indices.
+   - **LAN Network Discovery:** RFC1918 private IPv4 detection, link-local `169.254.x.x` rejection, candidate URL generation, and interface prioritization.
+   - **Laplace Smoothing & Dynamic Odds:** Dynamic payout multipliers, underdog incentives, and bettor risk/reward balance.
+   - **Room Lifecycle & Fair Rotation:** 6–9 player room constraints, Fisher-Yates match scheduling across 8 and 10 rounds with equal opportunity distribution, and session awards calculated strictly from genuine session statistics.
+3. `npm run build` (`vite build`): Generates static production assets in `dist/`.
+
+---
+
+## Assets & Attribution
+- Equirectangular world map coastline geometries in Blind Pinpoint are derived from [Natural Earth](https://www.naturalearthdata.com/) vector data (Public Domain).
