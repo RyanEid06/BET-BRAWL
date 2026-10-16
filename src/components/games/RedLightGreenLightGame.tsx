@@ -2,21 +2,24 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  * 
- * Bet & BRAWL: Mini-Game 2 - Rapid Red Light, Green Light (Synchronized Schedule)
+ * Bet & BRAWL: Mini-Game 2 - Rapid Red Light, Green Light (Authoritative Synchronized Schedule)
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import type { Player } from '../../engine/types.ts';
+import type { PublicPlayer } from '../../engine/types.ts';
 import { sound } from '../../engine/audio.ts';
+import { getLightAtServerTime, LightScheduleStep } from '../../engine/gameEngine.ts';
 
 interface Props {
-  fighterA: Player;
-  fighterB: Player;
+  fighterA: PublicPlayer;
+  fighterB: PublicPlayer;
   isPlayerFighter: boolean;
   playerFighterSlot: 'A' | 'B' | 'spectator';
+  fighterScores: Record<string, number>;
   gameConfig?: Record<string, unknown>;
-  onComplete: (winnerId: string | null, scores: Record<string, number>, isTie?: boolean) => void;
-  onSendInput?: (action: string, value: number) => void;
+  gameStartsAt?: number;
+  serverTimeOffset?: number;
+  onSendAction: (action: { type: 'TAP' }) => void;
 }
 
 export const RedLightGreenLightGame: React.FC<Props> = ({
@@ -24,129 +27,59 @@ export const RedLightGreenLightGame: React.FC<Props> = ({
   fighterB,
   isPlayerFighter,
   playerFighterSlot,
+  fighterScores,
   gameConfig,
-  onComplete,
-  onSendInput,
+  gameStartsAt = Date.now(),
+  serverTimeOffset = 0,
+  onSendAction,
 }) => {
-  const [light, setLight] = useState<'GREEN' | 'RED'>('GREEN');
-  const [scoreA, setScoreA] = useState<number>(0);
-  const [scoreB, setScoreB] = useState<number>(0);
-  const [timeLeft, setTimeLeft] = useState<number>(15);
-  const [lastPenalty, setLastPenalty] = useState<'A' | 'B' | null>(null);
-  const [completed, setCompleted] = useState<boolean>(false);
-
-  const TARGET_GOAL = 40;
-  const lightRef = useRef<'GREEN' | 'RED'>('GREEN');
-  lightRef.current = light;
-
-  // Authoritative light schedule passed from server
-  const schedule = (gameConfig?.lightSchedule as Array<{ light: 'GREEN' | 'RED'; durationMs: number }>) || [
-    { light: 'GREEN', durationMs: 2200 },
-    { light: 'RED', durationMs: 1100 },
-    { light: 'GREEN', durationMs: 1800 },
-    { light: 'RED', durationMs: 1300 },
-    { light: 'GREEN', durationMs: 2400 },
-    { light: 'RED', durationMs: 1000 },
+  const schedule = (gameConfig?.lightSchedule as LightScheduleStep[]) || [
     { light: 'GREEN', durationMs: 2000 },
     { light: 'RED', durationMs: 1200 },
-    { light: 'GREEN', durationMs: 3000 },
   ];
 
-  // Execute authoritative synchronized schedule
-  useEffect(() => {
-    let accumulated = 0;
-    const timeouts: NodeJS.Timeout[] = [];
+  const [currentLight, setCurrentLight] = useState<'GREEN' | 'RED'>('GREEN');
+  const [timeLeft, setTimeLeft] = useState<number>(15);
+  const prevLightRef = useRef<'GREEN' | 'RED'>('GREEN');
 
-    schedule.forEach((step, idx) => {
-      accumulated += step.durationMs;
-      const t = setTimeout(() => {
-        setLight(step.light);
-        if (step.light === 'RED') {
+  const scoreA = fighterScores[fighterA.id] || 0;
+  const scoreB = fighterScores[fighterB.id] || 0;
+
+  // Real-time synchronization loop to track light from authoritative schedule
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const now = Date.now() + serverTimeOffset;
+      const elapsedMs = Math.max(0, now - gameStartsAt);
+      const light = getLightAtServerTime(schedule, elapsedMs);
+
+      setCurrentLight(light);
+      if (prevLightRef.current !== light) {
+        prevLightRef.current = light;
+        if (light === 'RED') {
           sound.playBuzzer();
         } else {
           sound.playCountdown(false);
         }
-      }, accumulated);
-      timeouts.push(t);
-    });
-
-    return () => timeouts.forEach(clearTimeout);
-  }, [schedule]);
-
-  // Bot taps simulation
-  useEffect(() => {
-    if (completed) return;
-
-    const botInterval = setInterval(() => {
-      if (lightRef.current === 'GREEN') {
-        if (playerFighterSlot === 'A') {
-          setScoreB(prev => Math.min(TARGET_GOAL, prev + 1));
-        } else if (playerFighterSlot === 'B') {
-          setScoreA(prev => Math.min(TARGET_GOAL, prev + 1));
-        } else {
-          setScoreA(prev => Math.min(TARGET_GOAL, prev + 1));
-          setScoreB(prev => Math.min(TARGET_GOAL, prev + 1));
-        }
-      } else {
-        // Red light: 15% chance bot makes a mistake
-        if (Math.random() < 0.15) {
-          if (playerFighterSlot === 'A') {
-            setScoreB(prev => Math.max(0, prev - 3));
-          } else if (playerFighterSlot === 'B') {
-            setScoreA(prev => Math.max(0, prev - 3));
-          }
-        }
       }
-    }, 180 + Math.random() * 80);
 
-    return () => clearInterval(botInterval);
-  }, [playerFighterSlot, completed]);
-
-  // Round countdown
-  useEffect(() => {
-    if (completed) return;
-
-    const interval = setInterval(() => {
-      setTimeLeft(prev => Math.max(0, prev - 1));
-    }, 1000);
+      const remainingSec = Math.max(0, 15 - Math.floor(elapsedMs / 1000));
+      setTimeLeft(remainingSec);
+    }, 50);
 
     return () => clearInterval(interval);
-  }, [completed]);
+  }, [schedule, gameStartsAt, serverTimeOffset]);
 
-  // Player tap action
   const handleTap = () => {
-    if (completed) return;
-
-    if (light === 'GREEN') {
+    if (!isPlayerFighter) return;
+    if (currentLight === 'GREEN') {
       sound.playTap(true);
-      if (playerFighterSlot === 'A') {
-        const next = Math.min(TARGET_GOAL, scoreA + 1);
-        setScoreA(next);
-        if (onSendInput) onSendInput('TAP', next);
-      } else if (playerFighterSlot === 'B') {
-        const next = Math.min(TARGET_GOAL, scoreB + 1);
-        setScoreB(next);
-        if (onSendInput) onSendInput('TAP', next);
-      }
     } else {
-      // RED LIGHT FOUL!
       sound.playTap(false);
-      if (playerFighterSlot === 'A') {
-        const next = Math.max(0, scoreA - 3);
-        setScoreA(next);
-        setLastPenalty('A');
-        if (onSendInput) onSendInput('PENALTY', next);
-      } else if (playerFighterSlot === 'B') {
-        const next = Math.max(0, scoreB - 3);
-        setScoreB(next);
-        setLastPenalty('B');
-        if (onSendInput) onSendInput('PENALTY', next);
-      }
-      setTimeout(() => setLastPenalty(null), 500);
     }
+    onSendAction({ type: 'TAP' });
   };
 
-  // Bind Space or Enter
+  // Keyboard shortcut (Space / Enter)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.code === 'Space' || e.code === 'Enter') {
@@ -156,30 +89,7 @@ export const RedLightGreenLightGame: React.FC<Props> = ({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [light, completed, scoreA, scoreB]);
-
-  // Check victory condition
-  useEffect(() => {
-    if (completed) return;
-
-    if (scoreA >= TARGET_GOAL || scoreB >= TARGET_GOAL || timeLeft === 0) {
-      setCompleted(true);
-      const isTie = scoreA === scoreB;
-      const winnerId = isTie ? null : scoreA > scoreB ? fighterA.id : fighterB.id;
-      sound.playFanfare();
-
-      setTimeout(() => {
-        onComplete(
-          winnerId,
-          {
-            [fighterA.id]: scoreA,
-            [fighterB.id]: scoreB,
-          },
-          isTie
-        );
-      }, 2200);
-    }
-  }, [scoreA, scoreB, timeLeft, completed, fighterA, fighterB, onComplete]);
+  }, [currentLight, isPlayerFighter]);
 
   return (
     <div className="flex flex-col items-center justify-between w-full max-w-xl mx-auto p-4 py-6 bg-slate-950/90 rounded-3xl border border-cyan-500/30 text-white min-h-[460px]">
@@ -196,16 +106,16 @@ export const RedLightGreenLightGame: React.FC<Props> = ({
       {/* Synchronized Traffic Light */}
       <div
         className={`w-full py-8 px-4 rounded-3xl flex flex-col items-center justify-center transition-all duration-150 border-4 shadow-2xl ${
-          light === 'GREEN'
+          currentLight === 'GREEN'
             ? 'bg-emerald-950/90 border-emerald-400 shadow-emerald-500/40 text-emerald-300'
             : 'bg-rose-950/90 border-rose-500 shadow-rose-600/50 text-rose-300'
         }`}
       >
         <div className="text-6xl mb-1 font-black font-display tracking-widest animate-bounce">
-          {light === 'GREEN' ? '🟢 GREEN!' : '🛑 FREEZE!'}
+          {currentLight === 'GREEN' ? '🟢 GREEN!' : '🛑 FREEZE!'}
         </div>
         <div className="text-xs uppercase font-mono tracking-widest font-bold opacity-80">
-          {light === 'GREEN' ? 'MASH TAP FAST (+1 POINT)' : 'DO NOT TAP! (-3 PENALTY)'}
+          {currentLight === 'GREEN' ? 'MASH TAP FAST (+1 POINT)' : 'DO NOT TAP! (-3 PENALTY)'}
         </div>
       </div>
 
@@ -247,19 +157,18 @@ export const RedLightGreenLightGame: React.FC<Props> = ({
         {isPlayerFighter ? (
           <button
             onClick={handleTap}
-            disabled={completed}
             className={`w-full py-6 rounded-2xl font-display font-black text-2xl uppercase tracking-wider transition-all transform active:scale-95 shadow-xl select-none cursor-pointer ${
-              light === 'GREEN'
+              currentLight === 'GREEN'
                 ? 'bg-gradient-to-r from-emerald-500 via-green-500 to-teal-400 text-slate-950 border-2 border-emerald-300 glow-cyan'
                 : 'bg-gradient-to-r from-rose-800 to-red-900 text-rose-200 border-2 border-rose-600 shadow-rose-950'
-            } ${lastPenalty ? 'animate-shake' : ''}`}
+            }`}
           >
-            {light === 'GREEN' ? '⚡ TAP! TAP! TAP! ⚡' : '🛑 STOP! DO NOT TAP!'}
+            {currentLight === 'GREEN' ? '⚡ TAP! TAP! TAP! ⚡' : '🛑 STOP! DO NOT TAP!'}
           </button>
         ) : (
           <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 text-center w-full">
             <span className="text-xs font-mono text-cyan-300">
-              👁️ SPECTATOR VIEW: Both fighters racing to 40 taps!
+              👁️ SPECTATOR VIEW: Both fighters racing to 40 taps live!
             </span>
           </div>
         )}

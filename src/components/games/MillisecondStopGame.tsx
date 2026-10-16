@@ -2,20 +2,22 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  * 
- * Bet & BRAWL: Mini-Game 1 - Millisecond Stop (Precision Timer)
+ * Bet & BRAWL: Mini-Game 1 - Millisecond Stop (Authoritative Precision Timer)
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import type { Player } from '../../engine/types.ts';
+import type { PublicPlayer } from '../../engine/types.ts';
 import { sound } from '../../engine/audio.ts';
 
 interface Props {
-  fighterA: Player;
-  fighterB: Player;
+  fighterA: PublicPlayer;
+  fighterB: PublicPlayer;
   isPlayerFighter: boolean;
   playerFighterSlot: 'A' | 'B' | 'spectator';
-  onComplete: (winnerId: string | null, scores: Record<string, number>, isTie?: boolean) => void;
-  onSendInput?: (action: string, value: number) => void;
+  fighterScores: Record<string, number>;
+  gameStartsAt?: number;
+  serverTimeOffset?: number;
+  onSendAction: (action: { type: 'STOP' }) => void;
 }
 
 export const MillisecondStopGame: React.FC<Props> = ({
@@ -23,83 +25,49 @@ export const MillisecondStopGame: React.FC<Props> = ({
   fighterB,
   isPlayerFighter,
   playerFighterSlot,
-  onComplete,
-  onSendInput,
+  fighterScores,
+  gameStartsAt = Date.now(),
+  serverTimeOffset = 0,
+  onSendAction,
 }) => {
   const [elapsed, setElapsed] = useState<number>(0);
-  const [stoppedA, setStoppedA] = useState<number | null>(null);
-  const [stoppedB, setStoppedB] = useState<number | null>(null);
-  const [completed, setCompleted] = useState<boolean>(false);
+  const [localStopped, setLocalStopped] = useState<boolean>(false);
 
-  // IMMUTABLE high-resolution start time: initialized ONCE on mount
-  const startTimeRef = useRef<number>(performance.now());
-  const timerFrameRef = useRef<number | null>(null);
-  const completedRef = useRef<boolean>(false);
+  const stoppedA = fighterScores[fighterA.id] || null;
+  const stoppedB = fighterScores[fighterB.id] || null;
 
   const TARGET_TIME = 5.0;
 
-  // Bot opponent timing simulation (variance around 4.85 - 5.20s)
+  // Real-time animation loop synchronized to gameStartsAt
   useEffect(() => {
-    const botVariation = (Math.random() - 0.48) * 0.38;
-    const botTarget = 5.0 + botVariation;
-    const botDelayMs = botTarget * 1000;
+    let animFrame: number;
 
-    const botTimer = setTimeout(() => {
-      if (playerFighterSlot === 'A') {
-        setStoppedB(botTarget);
-      } else if (playerFighterSlot === 'B') {
-        setStoppedA(botTarget);
-      } else {
-        // Spectator view: simulate both
-        setStoppedA(5.0 + (Math.random() - 0.46) * 0.32);
-        setStoppedB(5.0 + (Math.random() - 0.52) * 0.32);
-      }
-    }, botDelayMs);
-
-    return () => clearTimeout(botTimer);
-  }, [playerFighterSlot]);
-
-  // Main 60fps timer loop: depends ONLY on empty dependency array so it NEVER resets!
-  useEffect(() => {
-    startTimeRef.current = performance.now();
-
-    const loop = () => {
-      if (completedRef.current) return;
-      const now = performance.now();
-      const currentElapsed = (now - startTimeRef.current) / 1000;
+    const tick = () => {
+      const now = Date.now() + serverTimeOffset;
+      const currentElapsed = Math.max(0, (now - gameStartsAt) / 1000);
       setElapsed(currentElapsed);
 
-      if (currentElapsed < 7.5) {
-        timerFrameRef.current = requestAnimationFrame(loop);
+      if (currentElapsed < 8.0) {
+        animFrame = requestAnimationFrame(tick);
       }
     };
 
-    timerFrameRef.current = requestAnimationFrame(loop);
-    return () => {
-      if (timerFrameRef.current) cancelAnimationFrame(timerFrameRef.current);
-    };
-  }, []); // Run once on mount! Never restart on state changes!
+    animFrame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(animFrame);
+  }, [gameStartsAt, serverTimeOffset]);
 
-  // Derived display state: blinded strictly when elapsed >= 3.0
   const isBlinded = elapsed >= 3.0;
+  const hasMyPlayerStopped = (playerFighterSlot === 'A' && (stoppedA !== null || localStopped)) ||
+                             (playerFighterSlot === 'B' && (stoppedB !== null || localStopped));
 
-  // Handle player stop press
   const handleStop = () => {
-    if (completed || completedRef.current) return;
-    const currentPress = elapsed;
-
+    if (!isPlayerFighter || hasMyPlayerStopped) return;
+    setLocalStopped(true);
     sound.playTap(true);
-
-    if (playerFighterSlot === 'A' && stoppedA === null) {
-      setStoppedA(currentPress);
-      if (onSendInput) onSendInput('STOP', currentPress);
-    } else if (playerFighterSlot === 'B' && stoppedB === null) {
-      setStoppedB(currentPress);
-      if (onSendInput) onSendInput('STOP', currentPress);
-    }
+    onSendAction({ type: 'STOP' });
   };
 
-  // Bind Spacebar / Enter
+  // Keyboard shortcut (Space / Enter)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.code === 'Space' || e.code === 'Enter') {
@@ -109,36 +77,7 @@ export const MillisecondStopGame: React.FC<Props> = ({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [elapsed, stoppedA, stoppedB, completed]);
-
-  // Evaluate winner when both have stopped
-  useEffect(() => {
-    if (completed) return;
-
-    if (stoppedA !== null && stoppedB !== null) {
-      completedRef.current = true;
-      setCompleted(true);
-
-      const deltaA = Math.abs(stoppedA - TARGET_TIME);
-      const deltaB = Math.abs(stoppedB - TARGET_TIME);
-
-      const isTie = Math.abs(deltaA - deltaB) < 0.001;
-      const winnerId = isTie ? null : deltaA < deltaB ? fighterA.id : fighterB.id;
-
-      sound.playFanfare();
-
-      setTimeout(() => {
-        onComplete(
-          winnerId,
-          {
-            [fighterA.id]: Math.round(stoppedA * 1000) / 1000,
-            [fighterB.id]: Math.round(stoppedB * 1000) / 1000,
-          },
-          isTie
-        );
-      }, 2600);
-    }
-  }, [stoppedA, stoppedB, completed, fighterA, fighterB, onComplete]);
+  }, [hasMyPlayerStopped, isPlayerFighter]);
 
   const formatTime = (t: number) => t.toFixed(3);
 
@@ -159,11 +98,11 @@ export const MillisecondStopGame: React.FC<Props> = ({
         <div className={`absolute inset-0 transition-opacity duration-300 ${isBlinded ? 'bg-red-950/20' : 'bg-cyan-950/20'}`} />
 
         <div className="text-[11px] uppercase font-mono tracking-widest text-slate-400 mb-1">
-          {isBlinded ? 'BLIND ZONE ACTIVE' : 'PRECISION TIMER'}
+          {isBlinded ? 'BLIND ZONE ACTIVE' : 'SYNCHRONIZED CLOCK'}
         </div>
 
         <div className="text-5xl font-mono font-black text-center tracking-wider text-glow-cyan">
-          {isBlinded && !completed && (playerFighterSlot === 'A' ? stoppedA === null : stoppedB === null) ? (
+          {isBlinded && !hasMyPlayerStopped && (playerFighterSlot !== 'spectator') ? (
             <span className="text-amber-400 animate-pulse tracking-widest">??.???</span>
           ) : (
             <span className={elapsed >= 5.0 ? 'text-amber-400' : 'text-cyan-400'}>
@@ -204,7 +143,9 @@ export const MillisecondStopGame: React.FC<Props> = ({
                 </div>
               </div>
             ) : (
-              <span className="text-xs text-slate-500">Timing slam...</span>
+              <span className="text-xs text-slate-500">
+                {playerFighterSlot === 'A' && localStopped ? 'Stopped! Syncing...' : 'Timing slam...'}
+              </span>
             )}
           </div>
         </div>
@@ -233,7 +174,9 @@ export const MillisecondStopGame: React.FC<Props> = ({
                 </div>
               </div>
             ) : (
-              <span className="text-xs text-slate-500">Timing slam...</span>
+              <span className="text-xs text-slate-500">
+                {playerFighterSlot === 'B' && localStopped ? 'Stopped! Syncing...' : 'Timing slam...'}
+              </span>
             )}
           </div>
         </div>
@@ -244,33 +187,29 @@ export const MillisecondStopGame: React.FC<Props> = ({
         {isPlayerFighter ? (
           <button
             onClick={handleStop}
-            disabled={
-              (playerFighterSlot === 'A' && stoppedA !== null) ||
-              (playerFighterSlot === 'B' && stoppedB !== null) ||
-              completed
-            }
+            disabled={hasMyPlayerStopped}
             className={`w-full py-5 rounded-2xl font-display font-black text-2xl uppercase tracking-wider transition-all transform active:scale-95 shadow-xl cursor-pointer ${
-              (playerFighterSlot === 'A' && stoppedA !== null) || (playerFighterSlot === 'B' && stoppedB !== null)
+              hasMyPlayerStopped
                 ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700'
                 : 'bg-gradient-to-r from-red-600 via-rose-500 to-amber-500 text-white shadow-red-500/30 glow-crimson border-2 border-red-400'
             }`}
           >
-            {(playerFighterSlot === 'A' && stoppedA !== null) || (playerFighterSlot === 'B' && stoppedB !== null)
-              ? 'LOCKED IN!'
-              : '⚡ SLAM AT 05.000s! ⚡'}
+            {hasMyPlayerStopped ? 'LOCKED IN!' : '⚡ SLAM AT 05.000s! ⚡'}
           </button>
         ) : (
           <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 text-center w-full">
             <span className="text-xs font-mono text-cyan-300">
-              👁️ SPECTATOR VIEW: Both fighters timing their buzzer slams!
+              👁️ SPECTATOR VIEW: Both fighters timing their buzzer slams live!
             </span>
           </div>
         )}
 
-        <div className="text-[11px] font-mono text-slate-400">
-          Keyboard: <span className="text-slate-200 font-semibold">[Space]</span> or{' '}
-          <span className="text-slate-200 font-semibold">[Enter]</span>
-        </div>
+        {isPlayerFighter && (
+          <div className="text-[11px] font-mono text-slate-400">
+            Keyboard: <span className="text-slate-200 font-semibold">[Space]</span> or{' '}
+            <span className="text-slate-200 font-semibold">[Enter]</span>
+          </div>
+        )}
       </div>
     </div>
   );

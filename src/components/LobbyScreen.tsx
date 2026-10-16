@@ -2,25 +2,27 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  * 
- * Bet & BRAWL: Real Wi-Fi Room Lobby with QR Code & Real Joined Players
+ * Bet & BRAWL: Real Wi-Fi Room Lobby with Reachable LAN URLs, QR Code, & Real Player Seats
  */
 
 import React, { useEffect, useState } from 'react';
 import QRCode from 'qrcode';
-import { Users, Wifi, Play, CheckCircle, Bot } from 'lucide-react';
-import type { Player, RoomNetworkInfo } from '../engine/types.ts';
+import { Users, Wifi, Play, Bot, WifiOff, LogOut } from 'lucide-react';
+import type { PublicPlayer, RoomNetworkInfo } from '../engine/types.ts';
 import { MIN_PLAYERS_TO_START, MAX_PLAYERS_CAPACITY } from '../engine/roomEngine.ts';
 import { sound } from '../engine/audio.ts';
 
 interface Props {
-  players: Player[];
+  players: PublicPlayer[];
   roomCode: string;
   isHost: boolean;
-  myPlayer: Player | null;
+  myPlayer: PublicPlayer | null;
   networkInfo: RoomNetworkInfo | null;
   totalRounds: number;
   onToggleReady: () => void;
+  onSetMatchLength: (rounds: 8 | 10) => void;
   onStartGame: () => void;
+  onCloseRoom?: () => void;
   onAddDebugBot?: () => void;
   isDebug?: boolean;
 }
@@ -33,14 +35,31 @@ export const LobbyScreen: React.FC<Props> = ({
   networkInfo,
   totalRounds,
   onToggleReady,
+  onSetMatchLength,
   onStartGame,
+  onCloseRoom,
   onAddDebugBot,
   isDebug = false,
 }) => {
+  const [selectedBaseUrl, setSelectedBaseUrl] = useState<string>(() => {
+    // If client loaded over a non-loopback LAN host, use proven origin
+    if (typeof window !== 'undefined' && window.location.hostname !== '127.0.0.1' && window.location.hostname !== 'localhost') {
+      return window.location.origin;
+    }
+    return networkInfo?.fullJoinUrl || (typeof window !== 'undefined' ? window.location.origin : '');
+  });
+
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
 
-  const baseUrl = networkInfo?.fullJoinUrl || (typeof window !== 'undefined' ? window.location.origin : '');
-  const joinUrlWithRoom = roomCode ? `${baseUrl}?room=${roomCode}` : baseUrl;
+  useEffect(() => {
+    if (networkInfo?.fullJoinUrl && !selectedBaseUrl) {
+      setSelectedBaseUrl(networkInfo.fullJoinUrl);
+    }
+  }, [networkInfo, selectedBaseUrl]);
+
+  const joinUrlWithRoom = roomCode
+    ? `${selectedBaseUrl}?room=${roomCode}`
+    : selectedBaseUrl;
 
   // Generate real join QR code
   useEffect(() => {
@@ -58,23 +77,44 @@ export const LobbyScreen: React.FC<Props> = ({
     }
   }, [joinUrlWithRoom]);
 
-  const enoughPlayers = players.length >= MIN_PLAYERS_TO_START || isDebug;
-  const allReady = players.every(p => p.isReady || p.isHost) || isDebug;
+  const connectedPlayers = players.filter(p => p.connected);
+  const enoughPlayers = connectedPlayers.length >= MIN_PLAYERS_TO_START || isDebug;
+  const allReady = connectedPlayers.every(p => p.isReady || p.isHost) || isDebug;
   const canStart = isHost && enoughPlayers && allReady;
 
   return (
-    <div className="w-full max-w-4xl mx-auto p-4 md:p-6 space-y-6">
+    <div className="w-full max-w-4xl mx-auto p-3 sm:p-4 md:p-6 space-y-5">
       {/* Prominent Host Wi-Fi Join Card */}
       <div className="bg-slate-900/95 border-2 border-cyan-500/40 rounded-3xl p-5 shadow-2xl flex flex-col md:flex-row items-center justify-between gap-6">
         <div className="flex-1 space-y-2 text-center md:text-left">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-950 text-cyan-300 border border-cyan-700/60 text-xs font-mono">
             <Wifi className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
-            <span>Friends on this Wi-Fi can join:</span>
+            <span>Friends on the same Wi-Fi can join:</span>
           </div>
 
-          <h2 className="text-xl md:text-2xl font-black font-display text-white">
-            JOIN AT: <span className="text-cyan-300 font-mono text-base md:text-xl break-all">{baseUrl}</span>
+          <h2 className="text-lg sm:text-xl md:text-2xl font-black font-display text-white">
+            JOIN AT: <span className="text-cyan-300 font-mono text-base md:text-xl break-all">{selectedBaseUrl}</span>
           </h2>
+
+          {/* Multiple Candidate LAN URLs selector if host has multiple adapters */}
+          {networkInfo?.candidateUrls && networkInfo.candidateUrls.length > 1 && isHost && (
+            <div className="text-xs font-mono text-slate-400 flex items-center gap-2 flex-wrap">
+              <span>Adapter URL:</span>
+              {networkInfo.candidateUrls.map(url => (
+                <button
+                  key={url}
+                  onClick={() => setSelectedBaseUrl(url)}
+                  className={`px-2 py-0.5 rounded text-[11px] cursor-pointer transition-colors ${
+                    selectedBaseUrl === url
+                      ? 'bg-cyan-500 text-slate-950 font-bold'
+                      : 'bg-slate-950 text-slate-300 border border-slate-700 hover:border-slate-500'
+                  }`}
+                >
+                  {url}
+                </button>
+              ))}
+            </div>
+          )}
 
           <div className="flex flex-wrap items-center justify-center md:justify-start gap-3 pt-1">
             <div className="px-3.5 py-1.5 rounded-xl bg-slate-950 border border-slate-700 font-mono text-sm text-slate-300">
@@ -82,7 +122,7 @@ export const LobbyScreen: React.FC<Props> = ({
             </div>
             <div className="px-3.5 py-1.5 rounded-xl bg-slate-950 border border-slate-700 font-mono text-sm text-slate-300 flex items-center gap-1.5">
               <Users className="w-4 h-4 text-cyan-400" />
-              <span>{players.length}/{MAX_PLAYERS_CAPACITY} Joined</span>
+              <span>{connectedPlayers.length}/{MAX_PLAYERS_CAPACITY} Connected</span>
             </div>
           </div>
         </div>
@@ -96,16 +136,55 @@ export const LobbyScreen: React.FC<Props> = ({
         )}
       </div>
 
+      {/* Host Match Length Selector (8 vs 10 Rounds) */}
+      <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-3.5 flex flex-col sm:flex-row items-center justify-between gap-3">
+        <div className="text-center sm:text-left">
+          <div className="text-xs font-mono text-slate-400 uppercase">MATCH LENGTH SETTING</div>
+          <div className="text-sm font-bold text-white font-display">
+            {totalRounds} Rounds {totalRounds === 8 ? '(Standard Party Match)' : '(Extended Marathon)'}
+          </div>
+        </div>
+
+        {isHost ? (
+          <div className="flex gap-2">
+            <button
+              onClick={() => onSetMatchLength(8)}
+              className={`px-3 py-1.5 rounded-xl font-mono text-xs font-bold transition-all cursor-pointer ${
+                totalRounds === 8
+                  ? 'bg-amber-500 text-slate-950 glow-gold'
+                  : 'bg-slate-950 text-slate-300 border border-slate-700 hover:border-slate-500'
+              }`}
+            >
+              8 ROUNDS
+            </button>
+            <button
+              onClick={() => onSetMatchLength(10)}
+              className={`px-3 py-1.5 rounded-xl font-mono text-xs font-bold transition-all cursor-pointer ${
+                totalRounds === 10
+                  ? 'bg-amber-500 text-slate-950 glow-gold'
+                  : 'bg-slate-950 text-slate-300 border border-slate-700 hover:border-slate-500'
+              }`}
+            >
+              10 ROUNDS
+            </button>
+          </div>
+        ) : (
+          <span className="text-xs font-mono text-amber-400 font-bold bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800">
+            Host selected: {totalRounds} Rounds
+          </span>
+        )}
+      </div>
+
       {/* Players in Room */}
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <div className="text-xs font-mono text-slate-400 uppercase tracking-wider flex items-center gap-2">
             <Users className="w-4 h-4 text-cyan-400" />
-            <span>CONNECTED PLAYERS ({players.length}/{MAX_PLAYERS_CAPACITY})</span>
+            <span>PLAYERS IN ROOM ({connectedPlayers.length} connected · min {MIN_PLAYERS_TO_START})</span>
           </div>
 
           {/* Debug bot addition for developer testing */}
-          {isDebug && onAddDebugBot && players.length < MAX_PLAYERS_CAPACITY && (
+          {isDebug && onAddDebugBot && players.length < MAX_PLAYERS_CAPACITY && isHost && (
             <button
               onClick={() => {
                 onAddDebugBot();
@@ -114,7 +193,7 @@ export const LobbyScreen: React.FC<Props> = ({
               className="text-xs font-mono text-amber-300 hover:text-amber-200 flex items-center gap-1 bg-amber-950/60 px-3 py-1 rounded-lg border border-amber-800/60 cursor-pointer"
             >
               <Bot className="w-3.5 h-3.5" />
-              <span>+ Add Test Bot (debug)</span>
+              <span>+ Add Bot (debug)</span>
             </button>
           )}
         </div>
@@ -125,7 +204,9 @@ export const LobbyScreen: React.FC<Props> = ({
             <div
               key={p.id}
               className={`p-4 rounded-2xl border transition-all flex items-center justify-between ${
-                p.id === myPlayer?.id
+                !p.connected
+                  ? 'bg-slate-950/60 border-slate-800 opacity-60'
+                  : p.id === myPlayer?.id
                   ? 'bg-slate-900/90 border-cyan-400 shadow-lg glow-cyan'
                   : 'bg-slate-900/70 border-slate-800'
               }`}
@@ -151,14 +232,23 @@ export const LobbyScreen: React.FC<Props> = ({
                       </span>
                     )}
                   </div>
-                  <div className="text-xs font-mono text-amber-400 font-bold">
-                    💰 {p.coins.toLocaleString()} coins
+                  <div className="text-xs font-mono text-amber-400 font-bold flex items-center gap-1 mt-0.5">
+                    <span>💰 {p.coins.toLocaleString()} coins</span>
+                    {!p.connected && (
+                      <span className="text-rose-400 text-[10px] flex items-center gap-0.5">
+                        <WifiOff className="w-3 h-3" /> (Disconnected)
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>
 
               <div>
-                {p.id === myPlayer?.id && !p.isHost ? (
+                {!p.connected ? (
+                  <span className="text-[11px] font-mono font-bold px-2 py-0.5 rounded bg-rose-950/80 text-rose-300 border border-rose-800">
+                    OFFLINE
+                  </span>
+                ) : p.id === myPlayer?.id && !p.isHost ? (
                   <button
                     onClick={() => {
                       onToggleReady();
@@ -189,7 +279,7 @@ export const LobbyScreen: React.FC<Props> = ({
         </div>
       </div>
 
-      {/* Start Game Action (Host only) */}
+      {/* Start Game Action & Host Controls */}
       <div className="pt-2 flex flex-col items-center gap-3">
         {isHost ? (
           <div className="w-full max-w-md space-y-2 text-center">
@@ -211,18 +301,28 @@ export const LobbyScreen: React.FC<Props> = ({
 
             {!enoughPlayers && (
               <p className="text-xs font-mono text-amber-400">
-                ⚠️ Need at least {MIN_PLAYERS_TO_START} players to start (currently {players.length}/{MIN_PLAYERS_TO_START})
+                ⚠️ Need at least {MIN_PLAYERS_TO_START} connected players to start ({connectedPlayers.length}/{MIN_PLAYERS_TO_START})
               </p>
             )}
             {enoughPlayers && !allReady && (
               <p className="text-xs font-mono text-amber-400">
-                ⚠️ Waiting for all players to click READY
+                ⚠️ Waiting for all connected players to click READY
               </p>
             )}
             {canStart && (
               <p className="text-xs font-mono text-emerald-400">
                 ✓ All players ready! Click to begin Round 1
               </p>
+            )}
+
+            {onCloseRoom && (
+              <button
+                onClick={onCloseRoom}
+                className="mt-3 text-xs font-mono text-slate-500 hover:text-rose-400 flex items-center gap-1 mx-auto cursor-pointer"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                <span>Close Room</span>
+              </button>
             )}
           </div>
         ) : (

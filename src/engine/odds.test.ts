@@ -220,8 +220,10 @@ test('computeRoundPayouts handles tie by splitting pot and refunding bets', () =
   );
 
   const refund = result.payouts.find(p => p.playerId === 's1')!;
+  assert.equal(refund.type, 'BET_REFUND');
   assert.equal(refund.netChange, 0);
   assert.equal(refund.totalReturn, 150);
   assert.equal(refund.newBankroll, 650 + 150); // Refunded
   assert.ok(refund.summary.includes('refunded'));
+  assert.ok(refund.summary.includes('0 net'));
 });

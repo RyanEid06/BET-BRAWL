@@ -2,18 +2,20 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  * 
- * Bet & BRAWL: Client WebSocket Engine & Local Storage Session Hook
+ * Bet & BRAWL: Client WebSocket Engine, Reconnect & Time Synchronization
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import type {
-  Player,
+  PublicPlayer,
   RoundState,
   GamePhase,
   Award,
   ClientMessage,
   ServerMessage,
   RoomNetworkInfo,
+  FighterAction,
+  SecretBet,
 } from './types.ts';
 import { sound } from './audio.ts';
 
@@ -26,10 +28,11 @@ export interface BrawlClientState {
   errorMessage: string | null;
   networkInfo: RoomNetworkInfo | null;
   isHost: boolean;
-  myPlayer: Player | null;
+  myPlayer: PublicPlayer | null;
+  myBet: SecretBet | null;
   phase: GamePhase;
   roomCode: string;
-  players: Player[];
+  players: PublicPlayer[];
   totalRounds: number;
   currentRound: RoundState | null;
   roundHistory: Array<{
@@ -40,6 +43,7 @@ export interface BrawlClientState {
   }>;
   awards: Award[];
   lastRejectedBetReason: string | null;
+  serverTimeOffset: number; // in ms
   isDebug: boolean;
 }
 
@@ -52,6 +56,7 @@ export function useBrawlClient() {
       networkInfo: null,
       isHost: false,
       myPlayer: null,
+      myBet: null,
       phase: 'ENTRY',
       roomCode: '',
       players: [],
@@ -60,13 +65,22 @@ export function useBrawlClient() {
       roundHistory: [],
       awards: [],
       lastRejectedBetReason: null,
+      serverTimeOffset: 0,
       isDebug,
     };
   });
 
   const wsRef = useRef<WebSocket | null>(null);
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const heartbeatIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const heartbeatIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Keep refs for latest values to prevent stale closures in WebSocket event listeners
+  const phaseRef = useRef<GamePhase>(state.phase);
+  phaseRef.current = state.phase;
+  const roomCodeRef = useRef<string>(state.roomCode);
+  roomCodeRef.current = state.roomCode;
+  const sessionTokenRef = useRef<string | null>(null);
+  const timeOffsetSamplesRef = useRef<number[]>([]);
 
   // Load network info on mount
   useEffect(() => {
@@ -81,6 +95,9 @@ export function useBrawlClient() {
             port: info.port,
             roomCode: info.roomCode || '',
             fullJoinUrl: fullUrl,
+            hasActiveRoom: info.hasActiveRoom,
+            playerCount: info.playerCount,
+            candidateUrls: info.candidateUrls,
           },
         }));
       })
@@ -94,6 +111,9 @@ export function useBrawlClient() {
             port,
             roomCode: '',
             fullJoinUrl: window.location.origin,
+            hasActiveRoom: false,
+            playerCount: 0,
+            candidateUrls: [window.location.origin],
           },
         }));
       });
@@ -105,9 +125,24 @@ export function useBrawlClient() {
     }
   }, []);
 
-  // Connect WebSocket
+  // Connect WebSocket with immediate callback if already open
   const connectWs = useCallback((onConnected?: () => void) => {
-    if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {
+    // If socket is already OPEN, invoke the callback immediately!
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      if (onConnected) onConnected();
+      return;
+    }
+
+    // If socket is CONNECTING, wait for it
+    if (wsRef.current && wsRef.current.readyState === WebSocket.CONNECTING) {
+      const checkInterval = setInterval(() => {
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
+          clearInterval(checkInterval);
+          if (onConnected) onConnected();
+        } else if (!wsRef.current || wsRef.current.readyState === WebSocket.CLOSED) {
+          clearInterval(checkInterval);
+        }
+      }, 50);
       return;
     }
 
@@ -123,24 +158,46 @@ export function useBrawlClient() {
       setState(prev => ({ ...prev, status: 'CONNECTED', errorMessage: null }));
       if (onConnected) onConnected();
 
-      // Start ping heartbeat
+      // Start ping heartbeat with timestamps for server-time synchronization
       if (heartbeatIntervalRef.current) clearInterval(heartbeatIntervalRef.current);
       heartbeatIntervalRef.current = setInterval(() => {
         if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'PING' }));
+          ws.send(JSON.stringify({
+            type: 'PING',
+            payload: { clientSentAt: Date.now() },
+          }));
         }
-      }, 10000);
+      }, 5000);
     };
 
     ws.onmessage = (event) => {
       try {
         const msg: ServerMessage = JSON.parse(event.data);
 
-        if (msg.type === 'PONG') return;
+        // 1. Time Synchronization PONG
+        if (msg.type === 'PONG') {
+          const clientReceivedAt = Date.now();
+          const clientSentAt = msg.payload?.clientSentAt;
+          const serverNow = msg.payload?.serverNow;
+          if (clientSentAt && serverNow) {
+            const midpoint = (clientSentAt + clientReceivedAt) / 2;
+            const offset = serverNow - midpoint;
+            const samples = timeOffsetSamplesRef.current;
+            samples.push(offset);
+            if (samples.length > 5) samples.shift();
+            // Median sample
+            const sorted = [...samples].sort((a, b) => a - b);
+            const medianOffset = sorted[Math.floor(sorted.length / 2)];
+            setState(prev => ({ ...prev, serverTimeOffset: medianOffset }));
+          }
+          return;
+        }
 
+        // 2. JOIN_SUCCESS
         if (msg.type === 'JOIN_SUCCESS') {
           const { player, sessionToken, roomCode, isHost } = msg.payload;
           localStorage.setItem(SESSION_TOKEN_KEY, sessionToken);
+          sessionTokenRef.current = sessionToken;
           setState(prev => ({
             ...prev,
             myPlayer: player,
@@ -152,6 +209,7 @@ export function useBrawlClient() {
           return;
         }
 
+        // 3. JOIN_ERROR
         if (msg.type === 'JOIN_ERROR') {
           setState(prev => ({
             ...prev,
@@ -160,12 +218,17 @@ export function useBrawlClient() {
           return;
         }
 
+        // 4. ROOM_STATE
         if (msg.type === 'ROOM_STATE') {
           const payload = msg.payload;
           setState(prev => {
             const myUpdated = prev.myPlayer
-              ? payload.players.find((p: Player) => p.id === prev.myPlayer?.id) || prev.myPlayer
+              ? payload.players.find((p: PublicPlayer) => p.id === prev.myPlayer?.id) || prev.myPlayer
               : null;
+
+            // Clear myBet if moving to a new round or lobby
+            const isBettingOrPlaying = payload.phase === 'BETTING_WINDOW' || payload.phase === 'MINIGAME_COUNTDOWN' || payload.phase === 'MINIGAME_ACTIVE';
+            const preservedBet = isBettingOrPlaying ? prev.myBet : null;
 
             return {
               ...prev,
@@ -177,17 +240,44 @@ export function useBrawlClient() {
               roundHistory: payload.roundHistory,
               awards: payload.awards || [],
               myPlayer: myUpdated,
+              myBet: preservedBet,
             };
           });
           return;
         }
 
+        // 5. BET_ACCEPTED
+        if (msg.type === 'BET_ACCEPTED') {
+          setState(prev => ({
+            ...prev,
+            myBet: msg.payload.bet,
+            lastRejectedBetReason: null,
+            myPlayer: prev.myPlayer ? { ...prev.myPlayer, coins: msg.payload.myBankroll } : null,
+          }));
+          return;
+        }
+
+        // 6. BET_REJECTED
         if (msg.type === 'BET_REJECTED') {
           setState(prev => ({
             ...prev,
             lastRejectedBetReason: msg.payload.reason,
           }));
           sound.playBuzzer();
+          return;
+        }
+
+        // 7. ROOM_CLOSED
+        if (msg.type === 'ROOM_CLOSED') {
+          setState(prev => ({
+            ...prev,
+            phase: 'ENTRY',
+            roomCode: '',
+            currentRound: null,
+            myPlayer: null,
+            myBet: null,
+            errorMessage: msg.payload.reason || 'The room has been closed.',
+          }));
           return;
         }
       } catch (err) {
@@ -197,60 +287,74 @@ export function useBrawlClient() {
 
     ws.onclose = () => {
       if (heartbeatIntervalRef.current) clearInterval(heartbeatIntervalRef.current);
+      const wasInRoom = phaseRef.current !== 'ENTRY';
+
       setState(prev => ({
         ...prev,
-        status: prev.phase !== 'ENTRY' ? 'DISCONNECTED' : 'IDLE',
+        status: wasInRoom ? 'DISCONNECTED' : 'IDLE',
       }));
 
-      // Try reconnecting after 3 seconds if inside a room
-      if (state.phase !== 'ENTRY') {
+      // Reconnect automatically using latest ref state
+      if (wasInRoom) {
+        if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
         reconnectTimeoutRef.current = setTimeout(() => {
-          const savedToken = localStorage.getItem(SESSION_TOKEN_KEY);
-          if (savedToken && state.roomCode) {
+          const savedToken = sessionTokenRef.current || localStorage.getItem(SESSION_TOKEN_KEY);
+          const currentCode = roomCodeRef.current;
+          if (savedToken && currentCode) {
             connectWs(() => {
               send({
                 type: 'JOIN_ROOM',
-                payload: { roomCode: state.roomCode, sessionToken: savedToken },
+                payload: { roomCode: currentCode, sessionToken: savedToken },
               });
             });
           }
-        }, 3000);
+        }, 2000);
       }
     };
 
     ws.onerror = () => {
       setState(prev => ({ ...prev, status: 'ERROR', errorMessage: 'WebSocket connection failed' }));
     };
-  }, [state.phase, state.roomCode, send]);
+  }, [send]);
 
   // Actions
   const hostGame = useCallback((playerName: string, avatar: string) => {
     localStorage.setItem(PLAYER_NAME_KEY, playerName);
     localStorage.setItem(PLAYER_AVATAR_KEY, avatar);
+    setState(prev => ({ ...prev, errorMessage: null }));
 
     connectWs(() => {
       send({
-        type: 'CREATE_ROOM' as any,
+        type: 'CREATE_ROOM',
         payload: { playerName, avatar },
       });
     });
   }, [connectWs, send]);
 
   const joinGame = useCallback((roomCode: string, playerName: string, avatar: string) => {
+    const cleanCode = roomCode.trim().toUpperCase();
     localStorage.setItem(PLAYER_NAME_KEY, playerName);
     localStorage.setItem(PLAYER_AVATAR_KEY, avatar);
     const savedToken = localStorage.getItem(SESSION_TOKEN_KEY) || undefined;
+    setState(prev => ({ ...prev, errorMessage: null }));
 
     connectWs(() => {
       send({
         type: 'JOIN_ROOM',
-        payload: { roomCode: roomCode.trim().toUpperCase(), playerName, avatar, sessionToken: savedToken },
+        payload: { roomCode: cleanCode, playerName, avatar, sessionToken: savedToken },
       });
     });
   }, [connectWs, send]);
 
   const toggleReady = useCallback(() => {
     send({ type: 'TOGGLE_READY' });
+  }, [send]);
+
+  const setMatchLength = useCallback((totalRounds: 8 | 10) => {
+    send({
+      type: 'SET_MATCH_LENGTH',
+      payload: { totalRounds },
+    });
   }, [send]);
 
   const startGame = useCallback(() => {
@@ -268,10 +372,10 @@ export function useBrawlClient() {
     });
   }, [send]);
 
-  const sendFighterInput = useCallback((action: string, value?: number | string | boolean) => {
+  const sendFighterAction = useCallback((action: FighterAction) => {
     send({
-      type: 'FIGHTER_INPUT',
-      payload: { action, value, timestamp: Date.now() },
+      type: 'FIGHTER_ACTION',
+      payload: action,
     });
   }, [send]);
 
@@ -283,8 +387,12 @@ export function useBrawlClient() {
     send({ type: 'RESTART_GAME' });
   }, [send]);
 
+  const closeRoom = useCallback(() => {
+    send({ type: 'CLOSE_ROOM' });
+  }, [send]);
+
   const addDebugBot = useCallback(() => {
-    send({ type: 'DEBUG_ADD_BOT' as any });
+    send({ type: 'DEBUG_ADD_BOT' });
   }, [send]);
 
   return {
@@ -292,11 +400,13 @@ export function useBrawlClient() {
     hostGame,
     joinGame,
     toggleReady,
+    setMatchLength,
     startGame,
     placeBet,
-    sendFighterInput,
+    sendFighterAction,
     nextRound,
     restartGame,
+    closeRoom,
     addDebugBot,
   };
 }

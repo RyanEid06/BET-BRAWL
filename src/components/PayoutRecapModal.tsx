@@ -6,14 +6,13 @@
  */
 
 import React from 'react';
-import type { Player, RoundState } from '../engine/types.ts';
+import type { PublicPlayer, RoundState } from '../engine/types.ts';
 import { ArrowRight, Trophy, Coins } from 'lucide-react';
-import { sound } from '../engine/audio.ts';
 
 interface Props {
   round: RoundState;
-  players: Player[];
-  myPlayer: Player | null;
+  players: PublicPlayer[];
+  myPlayer: PublicPlayer | null;
   isHost: boolean;
   onNextRound: () => void;
   isFinalRound: boolean;
@@ -91,6 +90,15 @@ export const PayoutRecapModal: React.FC<Props> = ({
                   {myPayout.totalReturn} coins returned on {myPayout.stake}c wager
                 </div>
               </div>
+            ) : myPayout.type === 'BET_REFUND' ? (
+              <div className="space-y-0.5">
+                <div className="text-cyan-300 font-black text-xl font-display">
+                  {myPayout.totalReturn} COINS REFUNDED · 0 NET
+                </div>
+                <div className="text-xs font-mono text-slate-300">
+                  Brawl ended in a tie — your full stake was returned.
+                </div>
+              </div>
             ) : (
               <div className="space-y-0.5">
                 <div className="text-rose-400 font-black text-xl font-display">
@@ -150,10 +158,7 @@ export const PayoutRecapModal: React.FC<Props> = ({
       <div className="pt-1">
         {isHost ? (
           <button
-            onClick={() => {
-              sound.playCoin();
-              onNextRound();
-            }}
+            onClick={onNextRound}
             className="w-full py-4 rounded-xl font-display font-black text-lg uppercase tracking-wider bg-gradient-to-r from-cyan-500 via-amber-500 to-rose-500 hover:from-cyan-400 hover:to-rose-400 text-slate-950 shadow-xl transition-all transform active:scale-95 glow-gold border border-amber-300 flex items-center justify-center gap-2 cursor-pointer"
           >
             <span>{isFinalRound ? 'REVEAL FINAL PODIUM 🏆' : `PROCEED TO ROUND ${round.roundNumber + 1}`}</span>

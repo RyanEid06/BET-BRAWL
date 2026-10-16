@@ -2,21 +2,23 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  * 
- * Bet & BRAWL: Mini-Game 6 - Quick Draw (Fastest Finger Showdown)
+ * Bet & BRAWL: Mini-Game 6 - Quick Draw (Authoritative Reaction Showdown)
  */
 
-import React, { useState, useEffect, useRef } from 'react';
-import type { Player } from '../../engine/types.ts';
+import React, { useState, useEffect } from 'react';
+import type { PublicPlayer } from '../../engine/types.ts';
 import { sound } from '../../engine/audio.ts';
 
 interface Props {
-  fighterA: Player;
-  fighterB: Player;
+  fighterA: PublicPlayer;
+  fighterB: PublicPlayer;
   isPlayerFighter: boolean;
   playerFighterSlot: 'A' | 'B' | 'spectator';
+  fighterScores: Record<string, number>;
+  gameState?: Record<string, unknown>;
   gameConfig?: Record<string, unknown>;
-  onComplete: (winnerId: string, scores: Record<string, number>) => void;
-  onSendInput?: (action: string, value: number) => void;
+  serverTimeOffset?: number;
+  onSendAction: (action: { type: 'DRAW_TAP' }) => void;
 }
 
 export const QuickDrawGame: React.FC<Props> = ({
@@ -24,84 +26,54 @@ export const QuickDrawGame: React.FC<Props> = ({
   fighterB,
   isPlayerFighter,
   playerFighterSlot,
+  fighterScores,
+  gameState,
   gameConfig,
-  onComplete,
-  onSendInput,
+  serverTimeOffset = 0,
+  onSendAction,
 }) => {
-  const [phase, setPhase] = useState<'WAIT' | 'DRAW' | 'RESOLVED'>('WAIT');
-  const [reactionA, setReactionA] = useState<number | null>(null);
-  const [reactionB, setReactionB] = useState<number | null>(null);
-  const [foulA, setFoulA] = useState<boolean>(false);
-  const [foulB, setFoulB] = useState<boolean>(false);
-  const [completed, setCompleted] = useState<boolean>(false);
+  const drawAt = typeof gameConfig?.drawAt === 'number' ? gameConfig.drawAt : Date.now() + 3000;
+  const [phase, setPhase] = useState<'WAIT' | 'DRAW'>('WAIT');
 
-  const drawDelay = typeof gameConfig?.drawDelayMs === 'number' ? gameConfig.drawDelayMs : 2500;
-  const drawTimeRef = useRef<number>(0);
-  const startWaitRef = useRef<number>(Date.now());
+  const fouls = (gameState?.fouls as Record<string, boolean>) || {};
+  const foulA = !!fouls[fighterA.id];
+  const foulB = !!fouls[fighterB.id];
 
-  // Wait timer leading to "DRAW!"
+  const scoreA = fighterScores[fighterA.id];
+  const scoreB = fighterScores[fighterB.id];
+
+  // Synchronized WAIT vs DRAW transition based on authoritative drawAt
   useEffect(() => {
-    startWaitRef.current = Date.now();
-
-    const timer = setTimeout(() => {
-      setPhase('DRAW');
-      drawTimeRef.current = Date.now();
-      sound.playCountdown(true);
-    }, drawDelay);
-
-    return () => clearTimeout(timer);
-  }, [drawDelay]);
-
-  // Bot opponent reaction simulation
-  useEffect(() => {
-    if (phase !== 'DRAW' || completed) return;
-
-    // Bot reacts in 260 - 450ms
-    const botReaction = Math.floor(260 + Math.random() * 190);
-    const botTimer = setTimeout(() => {
-      if (playerFighterSlot === 'A' && reactionB === null) {
-        setReactionB(botReaction);
-      } else if (playerFighterSlot === 'B' && reactionA === null) {
-        setReactionA(botReaction);
-      } else if (playerFighterSlot === 'spectator') {
-        setReactionA(Math.floor(280 + Math.random() * 140));
-        setReactionB(Math.floor(280 + Math.random() * 140));
+    const checkDraw = () => {
+      const now = Date.now() + serverTimeOffset;
+      if (now >= drawAt) {
+        setPhase('DRAW');
+      } else {
+        setPhase('WAIT');
       }
-    }, botReaction);
+    };
 
-    return () => clearTimeout(botTimer);
-  }, [phase, completed, playerFighterSlot, reactionA, reactionB]);
+    checkDraw();
+    const interval = setInterval(checkDraw, 30);
+    return () => clearInterval(interval);
+  }, [drawAt, serverTimeOffset]);
 
-  // Handle tap
+  const hasMyPlayerActed = (playerFighterSlot === 'A' && (scoreA !== undefined || foulA)) ||
+                           (playerFighterSlot === 'B' && (scoreB !== undefined || foulB));
+
   const handleTap = () => {
-    if (completed) return;
+    if (!isPlayerFighter || hasMyPlayerActed) return;
 
     if (phase === 'WAIT') {
-      // FALSE START FOUL!
       sound.playBuzzer();
-      if (playerFighterSlot === 'A') {
-        setFoulA(true);
-      } else if (playerFighterSlot === 'B') {
-        setFoulB(true);
-      }
-      return;
-    }
-
-    if (phase === 'DRAW') {
-      const reactionMs = Date.now() - drawTimeRef.current;
+    } else {
       sound.playTap(true);
-
-      if (playerFighterSlot === 'A' && reactionA === null) {
-        setReactionA(reactionMs);
-        if (onSendInput) onSendInput('DRAW', reactionMs);
-      } else if (playerFighterSlot === 'B' && reactionB === null) {
-        setReactionB(reactionMs);
-        if (onSendInput) onSendInput('DRAW', reactionMs);
-      }
     }
+
+    onSendAction({ type: 'DRAW_TAP' });
   };
 
-  // Bind Spacebar / Enter
+  // Keyboard shortcut (Space / Enter)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.code === 'Space' || e.code === 'Enter') {
@@ -111,54 +83,14 @@ export const QuickDrawGame: React.FC<Props> = ({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [phase, completed, reactionA, reactionB]);
-
-  // Resolve winner
-  useEffect(() => {
-    if (completed) return;
-
-    // Case 1: Foul occurred
-    if (foulA) {
-      setCompleted(true);
-      setPhase('RESOLVED');
-      sound.playFanfare();
-      setTimeout(() => {
-        onComplete(fighterB.id, { [fighterA.id]: 0, [fighterB.id]: 1 });
-      }, 2500);
-      return;
-    }
-    if (foulB) {
-      setCompleted(true);
-      setPhase('RESOLVED');
-      sound.playFanfare();
-      setTimeout(() => {
-        onComplete(fighterA.id, { [fighterA.id]: 1, [fighterB.id]: 0 });
-      }, 2500);
-      return;
-    }
-
-    // Case 2: Both have reacted
-    if (reactionA !== null && reactionB !== null) {
-      setCompleted(true);
-      setPhase('RESOLVED');
-      sound.playFanfare();
-
-      const winnerId = reactionA <= reactionB ? fighterA.id : fighterB.id;
-      setTimeout(() => {
-        onComplete(winnerId, {
-          [fighterA.id]: reactionA,
-          [fighterB.id]: reactionB,
-        });
-      }, 2500);
-    }
-  }, [reactionA, reactionB, foulA, foulB, completed, fighterA, fighterB, onComplete]);
+  }, [hasMyPlayerActed, isPlayerFighter, phase]);
 
   return (
     <div className="flex flex-col items-center justify-between w-full max-w-xl mx-auto p-4 py-6 bg-slate-950/90 rounded-3xl border border-cyan-500/30 text-white min-h-[460px]">
       {/* Top Banner */}
       <div className="text-center space-y-1">
         <span className="px-3 py-1 bg-amber-950 text-amber-300 border border-amber-700/60 rounded-full text-xs font-mono font-bold tracking-wider">
-          FASTEST REACTION WINS · EARLY TAP = FOUL
+          FASTEST REACTION WINS · EARLY TAP = FALSE START FOUL
         </span>
         <h3 className="text-xl font-black font-display tracking-wide text-transparent bg-clip-text bg-gradient-to-r from-amber-400 to-rose-400">
           QUICK DRAW SHOWDOWN
@@ -167,7 +99,7 @@ export const QuickDrawGame: React.FC<Props> = ({
 
       {/* Main Flash Arena */}
       <div
-        className={`w-full py-12 px-6 rounded-3xl flex flex-col items-center justify-center transition-all duration-150 border-4 shadow-2xl ${
+        className={`w-full py-12 px-6 rounded-3xl flex flex-col items-center justify-center transition-all duration-100 border-4 shadow-2xl ${
           foulA || foulB
             ? 'bg-red-950 border-red-500 text-red-300'
             : phase === 'DRAW'
@@ -182,7 +114,7 @@ export const QuickDrawGame: React.FC<Props> = ({
           {foulA || foulB
             ? 'Early tap disqualification!'
             : phase === 'DRAW'
-            ? 'TAP NOW AS FAST AS POSSIBLE!'
+            ? 'TAP NOW AS FAST AS HUMANLY POSSIBLE!'
             : 'Do not tap yet! Wait for DRAW'}
         </div>
       </div>
@@ -194,11 +126,11 @@ export const QuickDrawGame: React.FC<Props> = ({
           <div className="text-xs font-mono text-cyan-400 font-bold">{fighterA.avatar} {fighterA.name}</div>
           <div className="text-lg font-mono font-black text-white mt-1">
             {foulA ? (
-              <span className="text-rose-400">DISQUALIFIED (Early)</span>
-            ) : reactionA !== null ? (
-              <span className="text-cyan-300">{reactionA} ms</span>
+              <span className="text-rose-400 text-sm">FOUL (Early Tap)</span>
+            ) : scoreA !== undefined && scoreA > 0 ? (
+              <span className="text-cyan-300">{scoreA} ms</span>
             ) : (
-              <span className="text-xs text-slate-500">Ready...</span>
+              <span className="text-xs text-slate-500">Waiting for trigger...</span>
             )}
           </div>
         </div>
@@ -208,11 +140,11 @@ export const QuickDrawGame: React.FC<Props> = ({
           <div className="text-xs font-mono text-amber-400 font-bold">{fighterB.avatar} {fighterB.name}</div>
           <div className="text-lg font-mono font-black text-white mt-1">
             {foulB ? (
-              <span className="text-rose-400">DISQUALIFIED (Early)</span>
-            ) : reactionB !== null ? (
-              <span className="text-amber-300">{reactionB} ms</span>
+              <span className="text-rose-400 text-sm">FOUL (Early Tap)</span>
+            ) : scoreB !== undefined && scoreB > 0 ? (
+              <span className="text-amber-300">{scoreB} ms</span>
             ) : (
-              <span className="text-xs text-slate-500">Ready...</span>
+              <span className="text-xs text-slate-500">Waiting for trigger...</span>
             )}
           </div>
         </div>
@@ -223,14 +155,20 @@ export const QuickDrawGame: React.FC<Props> = ({
         {isPlayerFighter ? (
           <button
             onClick={handleTap}
-            disabled={completed || (playerFighterSlot === 'A' ? reactionA !== null : reactionB !== null)}
+            disabled={hasMyPlayerActed}
             className={`w-full py-6 rounded-2xl font-display font-black text-2xl uppercase tracking-wider transition-all transform active:scale-95 shadow-xl select-none cursor-pointer ${
-              phase === 'DRAW'
+              hasMyPlayerActed
+                ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700'
+                : phase === 'DRAW'
                 ? 'bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-slate-950 glow-cyan border-2 border-emerald-300'
                 : 'bg-gradient-to-r from-amber-600 to-rose-600 text-white border-2 border-amber-400'
             }`}
           >
-            {phase === 'DRAW' ? '⚡ SLAM TAP NOW! ⚡' : 'WAIT FOR DRAW...'}
+            {hasMyPlayerActed
+              ? 'LOCKED IN'
+              : phase === 'DRAW'
+              ? '⚡ SLAM TAP NOW! ⚡'
+              : 'WAIT FOR DRAW...'}
           </button>
         ) : (
           <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 text-center w-full">

@@ -232,6 +232,51 @@ export const STABLE_HIGHER_LOWER_BANK: HigherLowerTrivia[] = [
     challengerValue: 6650,
     isHigher: true,
   },
+  {
+    baseItem: 'Moon Surface Gravity',
+    baseStat: '1.62 m/s²',
+    baseValue: 1.62,
+    challengerItem: 'Mars Surface Gravity',
+    challengerStat: '3.72 m/s²',
+    challengerValue: 3.72,
+    isHigher: true,
+  },
+  {
+    baseItem: 'Blue Whale Max Weight',
+    baseStat: '190 Metric Tons',
+    baseValue: 190,
+    challengerItem: 'Boeing 737 Empty Weight',
+    challengerStat: '42 Metric Tons',
+    challengerValue: 42,
+    isHigher: false,
+  },
+  {
+    baseItem: 'Deepest Point in Ocean (Challenger Deep)',
+    baseStat: '10,928 Meters',
+    baseValue: 10928,
+    challengerItem: 'Height of Mount Everest',
+    challengerStat: '8,849 Meters',
+    challengerValue: 8849,
+    isHigher: false,
+  },
+  {
+    baseItem: 'Commercial Plane Cruising Altitude',
+    baseStat: '11,000 Meters',
+    baseValue: 11000,
+    challengerItem: 'Low Earth Orbit (ISS)',
+    challengerStat: '408,000 Meters',
+    challengerValue: 408000,
+    isHigher: true,
+  },
+  {
+    baseItem: 'Bicycle Speed Record',
+    baseStat: '296 km/h',
+    baseValue: 296,
+    challengerItem: 'Formula 1 Top Race Speed',
+    challengerStat: '372 km/h',
+    challengerValue: 372,
+    isHigher: true,
+  },
 ];
 
 // -------------------------------------------------------------
@@ -254,6 +299,10 @@ export const WORLD_CITIES: CityLocation[] = [
   { city: 'Rio de Janeiro', country: 'Brazil', lat: -22.9068, lon: -43.1729 },
   { city: 'London', country: 'United Kingdom', lat: 51.5074, lon: -0.1278 },
   { city: 'Cape Town', country: 'South Africa', lat: -33.9249, lon: 18.4241 },
+  { city: 'Rome', country: 'Italy', lat: 41.9028, lon: 12.4964 },
+  { city: 'Toronto', country: 'Canada', lat: 43.6532, lon: -79.3832 },
+  { city: 'Mumbai', country: 'India', lat: 19.0760, lon: 72.8777 },
+  { city: 'Buenos Aires', country: 'Argentina', lat: -34.6037, lon: -58.3816 },
 ];
 
 /**

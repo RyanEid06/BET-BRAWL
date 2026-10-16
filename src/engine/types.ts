@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  * 
- * Bet & BRAWL: Network & Game Protocol Type Definitions (v2.0 Real Wi-Fi)
+ * Bet & BRAWL: Network & Game Protocol Type Definitions (v2.0 Server-Authoritative)
  */
 
 export type MiniGameId = 
@@ -32,9 +32,12 @@ export type GamePhase =
   | 'PAYOUT_RECAP'         // Winner takes match pot, spectator payouts/losses
   | 'FINAL_PODIUM';        // Kahoot podium with 1st, 2nd, 3rd & genuine session awards
 
-export interface Player {
+/**
+ * Public player representation broadcast over the network to all clients.
+ * NEVER contains private credentials or sessionToken.
+ */
+export interface PublicPlayer {
   id: string;
-  sessionToken: string;
   name: string;
   avatar: string;
   color: string;
@@ -54,6 +57,18 @@ export interface Player {
   highestSinglePayout: number;
 }
 
+/**
+ * Full server-side player representation containing the private sessionToken.
+ */
+export interface Player extends PublicPlayer {
+  sessionToken: string;
+}
+
+export function toPublicPlayer(p: Player): PublicPlayer {
+  const { sessionToken, ...publicData } = p;
+  return publicData;
+}
+
 export interface FighterOdds {
   fighterId: string;
   decimalOdds: number;      // e.g. 1.85x
@@ -71,16 +86,22 @@ export interface SecretBet {
   potentialReturn: number;
 }
 
+export interface PublicFighterPool {
+  totalPool: number;
+  bettorCount: number;
+  decimalOdds: number;
+}
+
 export interface RoundPayoutItem {
   playerId: string;
   playerName: string;
   avatar: string;
-  type: 'FIGHTER_BOUNTY' | 'BET_WIN' | 'BET_LOSS';
+  type: 'FIGHTER_BOUNTY' | 'BET_WIN' | 'BET_LOSS' | 'BET_REFUND';
   stake?: number;
   totalReturn?: number;
-  netChange: number;        // e.g. +250, +185, -100
+  netChange: number;        // e.g. +250, +185, -100, 0
   newBankroll: number;
-  summary: string;          // e.g. "360 returned · +160 profit" or "-100 loss"
+  summary: string;          // e.g. "360 returned · +160 profit" or "150 refunded · 0 net"
 }
 
 export interface RoundState {
@@ -97,8 +118,15 @@ export interface RoundState {
   tieResult?: boolean;
   fighterScores: Record<string, number>;
   payouts: RoundPayoutItem[];
-  // Mini-game specific authoritative server config/seed
+  // Timestamps for synchronized client clock tracking
+  revealEndsAt?: number;
+  bettingEndsAt?: number;
+  gameStartsAt?: number;
+  gameEndsAt?: number;
+  // Mini-game public config (scrubbed of private answers)
   gameConfig?: Record<string, unknown>;
+  // Authoritative live state for the active mini-game
+  gameState?: Record<string, unknown>;
 }
 
 export interface Award {
@@ -113,6 +141,18 @@ export interface Award {
 }
 
 // -------------------------------------------------------------
+// TYPED FIGHTER ACTIONS
+// -------------------------------------------------------------
+
+export type FighterAction =
+  | { type: 'STOP' }
+  | { type: 'TAP' }
+  | { type: 'ANSWER'; questionIndex: number; answer: number }
+  | { type: 'GUESS'; questionIndex: number; guess: 'HIGHER' | 'LOWER' }
+  | { type: 'PIN'; normX: number; normY: number }
+  | { type: 'DRAW_TAP' };
+
+// -------------------------------------------------------------
 // REAL WEBSOCKET PROTOCOL SCHEMAS
 // -------------------------------------------------------------
 
@@ -121,11 +161,12 @@ export type ClientMessageType =
   | 'JOIN_ROOM'
   | 'TOGGLE_READY'
   | 'START_GAME'
+  | 'SET_MATCH_LENGTH'
   | 'PLACE_BET'
-  | 'FIGHTER_INPUT'
-  | 'REPORT_MINIGAME_RESULT'
+  | 'FIGHTER_ACTION'
   | 'NEXT_ROUND'
   | 'RESTART_GAME'
+  | 'CLOSE_ROOM'
   | 'DEBUG_ADD_BOT'
   | 'PING';
 
@@ -140,13 +181,7 @@ export type ServerMessageType =
   | 'JOIN_SUCCESS'
   | 'JOIN_ERROR'
   | 'ROOM_STATE'
-  | 'ROUND_INIT'
-  | 'ODDS_SYNC'
-  | 'MINIGAME_START'
-  | 'MINIGAME_TICK'
-  | 'GAME_OVER'
-  | 'PAYOUT_SYNC'
-  | 'FINAL_LEADERBOARD'
+  | 'BET_ACCEPTED'
   | 'BET_REJECTED'
   | 'ROOM_CLOSED'
   | 'PONG';
@@ -162,4 +197,7 @@ export interface RoomNetworkInfo {
   port: number;
   roomCode: string;
   fullJoinUrl: string;
+  hasActiveRoom?: boolean;
+  playerCount?: number;
+  candidateUrls?: string[];
 }

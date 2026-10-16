@@ -7,7 +7,8 @@
 
 import type { Player, RoundState, Award, MiniGameId } from './types.ts';
 import { calculateDynamicOdds } from './odds.ts';
-import { MINI_GAMES, generateMathQuestions, STABLE_HIGHER_LOWER_BANK, WORLD_CITIES } from './miniGamesCatalog.ts';
+import { MINI_GAMES } from './miniGamesCatalog.ts';
+import { initMiniGameServerState, InternalGameState } from './gameEngine.ts';
 
 const PLAYER_COLORS = [
   '#06b6d4', '#f59e0b', '#ef4444', '#10b981', '#8b5cf6',
@@ -26,18 +27,44 @@ export function generateRoomCode(): string {
   return words[Math.floor(Math.random() * words.length)];
 }
 
+/**
+ * Real Fisher-Yates shuffle algorithm.
+ */
+export function fisherYatesShuffle<T>(array: T[]): T[] {
+  const result = [...array];
+  for (let i = result.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [result[i], result[j]] = [result[j], result[i]];
+  }
+  return result;
+}
+
+export function sanitizePlayerName(raw: string | undefined, isHost = false): string {
+  if (!raw || typeof raw !== 'string') return isHost ? 'Host' : 'Brawler';
+  const trimmed = raw.trim();
+  if (!trimmed) return isHost ? 'Host' : 'Brawler';
+  return trimmed.slice(0, 16);
+}
+
+export function sanitizePlayerAvatar(raw: string | undefined): string {
+  if (!raw || typeof raw !== 'string') return '⚡';
+  const trimmed = raw.trim();
+  if (!trimmed) return '⚡';
+  return trimmed.slice(0, 4);
+}
+
 export function createFreshPlayer(
   name: string,
   avatar: string,
   isHost = false,
   sessionToken?: string
 ): Player {
-  const token = sessionToken || `tok_${Math.random().toString(36).substring(2, 12)}`;
+  const token = sessionToken || `tok_${Math.random().toString(36).substring(2, 12)}_${Date.now()}`;
   return {
     id: `p_${Math.random().toString(36).substring(2, 9)}`,
     sessionToken: token,
-    name: name.trim() || (isHost ? 'Host' : 'Brawler'),
-    avatar: avatar || '⚡',
+    name: sanitizePlayerName(name, isHost),
+    avatar: sanitizePlayerAvatar(avatar),
     color: getRandomPlayerColor(),
     isHost,
     isReady: false,
@@ -56,34 +83,35 @@ export function createFreshPlayer(
 
 /**
  * Fair fighter selection algorithm:
- * - Uses ONLY current session appearances
+ * - Selects ONLY from connected, eligible players
  * - Strictly prioritizes players with the minimum matches played
- * - Shuffles ties randomly so array index never dictates who fights
+ * - Uses Fisher-Yates shuffle so array index never dictates who fights
  * - Avoids repeating the exact same pairing consecutively when possible
  */
 export function selectRoundFighters(
   players: Player[],
   lastPairing?: [string, string]
 ): [string, string] {
-  if (players.length < 2) {
-    throw new Error('Need at least 2 players to select fighters');
+  // Only connected players are eligible
+  const eligible = players.filter(p => p.connected !== false);
+  if (eligible.length < 2) {
+    throw new Error('Need at least 2 connected players to select fighters');
   }
 
   // 1. Group players by matchesPlayed
-  const minPlayed = Math.min(...players.map(p => p.matchesPlayed));
-  const poolMin = players.filter(p => p.matchesPlayed === minPlayed);
+  const minPlayed = Math.min(...eligible.map(p => p.matchesPlayed));
+  const poolMin = eligible.filter(p => p.matchesPlayed === minPlayed);
   
-  // Fair shuffle
-  const shuffledMin = [...poolMin].sort(() => Math.random() - 0.5);
-
-  let fighterA = shuffledMin[0];
+  // Fair Fisher-Yates shuffle
+  const shuffledMin = fisherYatesShuffle(poolMin);
+  const fighterA = shuffledMin[0];
 
   // Candidates for Fighter B:
   // Remaining players sorted by matchesPlayed, shuffled within same count
-  const remaining = players.filter(p => p.id !== fighterA.id);
+  const remaining = eligible.filter(p => p.id !== fighterA.id);
   const remainingMin = Math.min(...remaining.map(p => p.matchesPlayed));
   const poolB = remaining.filter(p => p.matchesPlayed === remainingMin);
-  const shuffledB = [...poolB].sort(() => Math.random() - 0.5);
+  const shuffledB = fisherYatesShuffle(poolB);
 
   // Avoid repeating exact pairing if an alternative candidate with same score exists
   let fighterB = shuffledB[0];
@@ -99,7 +127,7 @@ export function selectRoundFighters(
   return [fighterA.id, fighterB.id];
 }
 
-const MINI_GAME_ROTATION: MiniGameId[] = [
+export const MINI_GAME_ROTATION: MiniGameId[] = [
   'millisecond_stop',
   'rapid_red_green',
   'speed_math',
@@ -109,14 +137,14 @@ const MINI_GAME_ROTATION: MiniGameId[] = [
 ];
 
 /**
- * Initializes a new authoritative round.
+ * Initializes a new authoritative round along with internal private game state.
  */
 export function initAuthoritativeRound(
   roundNumber: number,
   totalRounds: number,
   players: Player[],
   lastPairing?: [string, string]
-): RoundState {
+): { round: RoundState; internalGame: InternalGameState } {
   const gameIndex = (roundNumber - 1) % MINI_GAME_ROTATION.length;
   const miniGameId = MINI_GAME_ROTATION[gameIndex];
   const miniGame = MINI_GAMES[miniGameId];
@@ -128,39 +156,22 @@ export function initAuthoritativeRound(
   const initialOdds = calculateDynamicOdds(fighterA, fighterB, []);
   const matchPot = 250; // virtual coin bounty for winner
 
-  // Generate mini-game authoritative config based on type
-  const gameConfig: Record<string, unknown> = {};
+  const now = Date.now();
+  const revealDurationMs = 4500;
+  const revealEndsAt = now + revealDurationMs;
+  const bettingEndsAt = revealEndsAt + 15000;
+  const countdownDurationMs = 3500;
+  const gameStartsAt = bettingEndsAt + countdownDurationMs;
+  const gameEndsAt = gameStartsAt + miniGame.durationSeconds * 1000;
 
-  if (miniGameId === 'rapid_red_green') {
-    // Synchronized light sequence: alternating green (1.5-2.5s) and red (0.8-1.5s)
-    const sequence: Array<{ light: 'GREEN' | 'RED'; durationMs: number }> = [];
-    let accumulatedMs = 0;
-    let currentLight: 'GREEN' | 'RED' = 'GREEN';
+  // Initialize server authoritative state and public config via gameEngine
+  const { internal: internalGame, publicConfig } = initMiniGameServerState(
+    miniGameId,
+    fighterIds,
+    gameStartsAt
+  );
 
-    while (accumulatedMs < 16000) {
-      const dur = currentLight === 'GREEN'
-        ? Math.floor(1400 + Math.random() * 1200)
-        : Math.floor(800 + Math.random() * 800);
-      sequence.push({ light: currentLight, durationMs: dur });
-      accumulatedMs += dur;
-      currentLight = currentLight === 'GREEN' ? 'RED' : 'GREEN';
-    }
-    gameConfig.lightSchedule = sequence;
-  } else if (miniGameId === 'speed_math') {
-    gameConfig.mathQuestions = generateMathQuestions(3);
-  } else if (miniGameId === 'higher_lower') {
-    // Randomize starting trivia index
-    const startIdx = Math.floor(Math.random() * STABLE_HIGHER_LOWER_BANK.length);
-    gameConfig.triviaIndex = startIdx;
-  } else if (miniGameId === 'blind_pinpoint') {
-    const cityIdx = Math.floor(Math.random() * WORLD_CITIES.length);
-    gameConfig.targetCity = WORLD_CITIES[cityIdx];
-  } else if (miniGameId === 'quick_draw') {
-    // Future GO delay between 2.2 and 4.8 seconds
-    gameConfig.drawDelayMs = Math.floor(2200 + Math.random() * 2600);
-  }
-
-  return {
+  const round: RoundState = {
     roundNumber,
     maxRounds: totalRounds,
     miniGame,
@@ -176,8 +187,15 @@ export function initAuthoritativeRound(
       [fighterIds[1]]: 0,
     },
     payouts: [],
-    gameConfig,
+    revealEndsAt,
+    bettingEndsAt,
+    gameStartsAt,
+    gameEndsAt,
+    gameConfig: publicConfig,
+    gameState: {},
   };
+
+  return { round, internalGame };
 }
 
 /**

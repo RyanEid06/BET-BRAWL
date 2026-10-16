@@ -244,12 +244,12 @@ export function computeRoundPayouts(
         playerId: bettor.id,
         playerName: bettor.name,
         avatar: bettor.avatar,
-        type: 'BET_WIN',
+        type: 'BET_REFUND',
         stake: bet.amount,
         totalReturn: bet.amount,
         netChange: 0,
         newBankroll: bettor.coins,
-        summary: `BRAWL TIE: ${bet.amount} coins refunded`,
+        summary: `BRAWL TIE: ${bet.amount} coins refunded · 0 net`,
       });
     }
 

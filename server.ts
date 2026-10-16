@@ -8,18 +8,22 @@
 import express from 'express';
 import { createServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
-import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import fs from 'fs';
 
 import type {
   Player,
+  PublicPlayer,
   RoundState,
   GamePhase,
   ClientMessage,
   ServerMessage,
   Award,
+  FighterAction,
+  SecretBet,
 } from './src/engine/types.ts';
+import { toPublicPlayer } from './src/engine/types.ts';
 import {
   generateRoomCode,
   createFreshPlayer,
@@ -27,34 +31,28 @@ import {
   computeSessionAwards,
   MIN_PLAYERS_TO_START,
   MAX_PLAYERS_CAPACITY,
+  sanitizePlayerName,
+  sanitizePlayerAvatar,
 } from './src/engine/roomEngine.ts';
 import {
   calculateDynamicOdds,
   validateBetPlacement,
   computeRoundPayouts,
 } from './src/engine/odds.ts';
+import {
+  discoverLanAddresses,
+} from './src/engine/networkDiscovery.ts';
+import {
+  InternalGameState,
+  processFighterAction,
+  resolveGameTimeout,
+} from './src/engine/gameEngine.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const HOST = process.env.HOST || '0.0.0.0';
-
-/**
- * Detects the real usable local network IPv4 address for Wi-Fi peers.
- */
-export function getLocalIpAddress(): string {
-  const interfaces = os.networkInterfaces();
-  for (const name of Object.keys(interfaces)) {
-    for (const iface of interfaces[name] || []) {
-      // Find non-internal IPv4 address
-      if (iface.family === 'IPv4' && !iface.internal) {
-        return iface.address;
-      }
-    }
-  }
-  return '127.0.0.1';
-}
 
 const app = express();
 app.use(express.json());
@@ -63,18 +61,29 @@ const server = createServer(app);
 const wss = new WebSocketServer({ server, path: '/ws' });
 
 // -------------------------------------------------------------
-// AUTHORITATIVE SERVER ROOM STATE
+// TIMER TRACKING INTERFACE
 // -------------------------------------------------------------
+
+interface RoomTimers {
+  phaseTimer?: ReturnType<typeof setTimeout>;
+  bettingInterval?: ReturnType<typeof setInterval>;
+  botBetTimers: Array<ReturnType<typeof setTimeout>>;
+  gameTimeoutTimer?: ReturnType<typeof setTimeout>;
+  botGameTimers: Array<ReturnType<typeof setTimeout> | ReturnType<typeof setInterval>>;
+  fighterGraceTimers: Map<string, ReturnType<typeof setTimeout>>;
+  hostGraceTimer?: ReturnType<typeof setTimeout>;
+}
 
 interface ServerRoom {
   roomId: string;
   roomCode: string;
   hostToken: string;
   phase: GamePhase;
-  players: Map<string, Player>; // sessionToken -> Player
+  players: Map<string, Player>; // sessionToken -> Player (private token kept server-side)
   clientSockets: Map<string, WebSocket>; // sessionToken -> ws
   totalRounds: number;
   currentRound: RoundState | null;
+  internalGameState: InternalGameState | null;
   roundHistory: Array<{
     roundNumber: number;
     miniGameName: string;
@@ -83,38 +92,71 @@ interface ServerRoom {
   }>;
   awards: Award[];
   lastPairing?: [string, string];
-  bettingTimer?: NodeJS.Timeout;
-  gameTimer?: NodeJS.Timeout;
+  timers: RoomTimers;
 }
 
 let activeRoom: ServerRoom | null = null;
 
+function clearAllTimers(timers: RoomTimers) {
+  if (timers.phaseTimer) clearTimeout(timers.phaseTimer);
+  if (timers.bettingInterval) clearInterval(timers.bettingInterval);
+  timers.botBetTimers.forEach(clearTimeout);
+  timers.botBetTimers = [];
+  if (timers.gameTimeoutTimer) clearTimeout(timers.gameTimeoutTimer);
+  timers.botGameTimers.forEach(t => {
+    clearTimeout(t as any);
+    clearInterval(t as any);
+  });
+  timers.botGameTimers = [];
+  timers.fighterGraceTimers.forEach(clearTimeout);
+  timers.fighterGraceTimers.clear();
+  if (timers.hostGraceTimer) clearTimeout(timers.hostGraceTimer);
+}
+
+function createEmptyTimers(): RoomTimers {
+  return {
+    botBetTimers: [],
+    botGameTimers: [],
+    fighterGraceTimers: new Map(),
+  };
+}
+
+/**
+ * Broadcasts public room state to all connected clients.
+ * NEVER leaks private session tokens or individual secret bets during the betting window.
+ */
 function broadcastRoomState() {
   if (!activeRoom) return;
 
-  const playerList = Array.from(activeRoom.players.values());
+  const publicPlayers: PublicPlayer[] = Array.from(activeRoom.players.values()).map(toPublicPlayer);
+
+  // Compute public pool aggregates during betting window
+  let publicRound: RoundState | null = null;
+  if (activeRoom.currentRound) {
+    const round = activeRoom.currentRound;
+    const [fAId, fBId] = round.fighterIds;
+
+    let scrubbedBets: SecretBet[] = [];
+    if (activeRoom.phase === 'BETTING_WINDOW') {
+      // Keep individual bettor details secret
+      scrubbedBets = [];
+    } else {
+      scrubbedBets = round.bets;
+    }
+
+    publicRound = {
+      ...round,
+      bets: scrubbedBets,
+    };
+  }
+
   const payload = {
     roomId: activeRoom.roomId,
     roomCode: activeRoom.roomCode,
     phase: activeRoom.phase,
-    players: playerList,
+    players: publicPlayers,
     totalRounds: activeRoom.totalRounds,
-    currentRound: activeRoom.currentRound
-      ? {
-          ...activeRoom.currentRound,
-          // Keep individual bets secret during betting window:
-          bets: activeRoom.phase === 'BETTING_WINDOW'
-            ? activeRoom.currentRound.bets.map(b => ({
-                bettorId: 'hidden',
-                fighterId: b.fighterId,
-                amount: b.amount,
-                oddsAtBet: b.oddsAtBet,
-                timestamp: b.timestamp,
-                potentialReturn: 0,
-              }))
-            : activeRoom.currentRound.bets,
-        }
-      : null,
+    currentRound: publicRound,
     roundHistory: activeRoom.roundHistory,
     awards: activeRoom.awards,
   };
@@ -133,23 +175,18 @@ function broadcastRoomState() {
   }
 }
 
-function sendToToken(token: string, message: ServerMessage) {
-  if (!activeRoom) return;
-  const ws = activeRoom.clientSockets.get(token);
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify(message));
-  }
-}
-
 // REST endpoint for local network discovery & IP
 app.get('/api/network-info', (req, res) => {
-  const localIp = getLocalIpAddress();
+  const { primaryIp, candidateIps } = discoverLanAddresses();
+  const candidateUrls = candidateIps.map(ip => `http://${ip}:${PORT}`);
+
   res.json({
-    localIp,
+    localIp: primaryIp,
     port: PORT,
     hasActiveRoom: !!activeRoom,
     roomCode: activeRoom ? activeRoom.roomCode : null,
     playerCount: activeRoom ? activeRoom.players.size : 0,
+    candidateUrls,
   });
 });
 
@@ -164,21 +201,48 @@ wss.on('connection', (ws: WebSocket) => {
     try {
       const msg: ClientMessage = JSON.parse(raw.toString());
 
+      // Ping-pong for synchronized server time & clock offset estimation
       if (msg.type === 'PING') {
-        ws.send(JSON.stringify({ type: 'PONG', timestamp: Date.now(), payload: {} }));
+        const clientSentAt = msg.payload?.clientSentAt;
+        ws.send(JSON.stringify({
+          type: 'PONG',
+          timestamp: Date.now(),
+          payload: {
+            clientSentAt,
+            serverNow: Date.now(),
+          },
+        }));
         return;
       }
 
       // 1. CREATE_ROOM (Host action)
-      if (msg.type === 'CREATE_ROOM' as any) {
+      if (msg.type === 'CREATE_ROOM') {
         const { playerName, avatar } = msg.payload || {};
+
+        // Protection: do not allow a random new client to overwrite an active room
+        if (activeRoom && activeRoom.players.size > 0 && activeRoom.phase !== 'FINAL_PODIUM') {
+          // If the requester is not the existing room's host, reject
+          if (boundSessionToken !== activeRoom.hostToken) {
+            ws.send(JSON.stringify({
+              type: 'JOIN_ERROR',
+              timestamp: Date.now(),
+              payload: {
+                code: 'ROOM_ALREADY_ACTIVE',
+                message: `A game room (${activeRoom.roomCode}) is already running on this server. Join with the code.`,
+              },
+            }));
+            return;
+          }
+        }
+
+        // Clean up previous room timers
+        if (activeRoom) {
+          clearAllTimers(activeRoom.timers);
+        }
+
         const roomCode = generateRoomCode();
         const roomId = `room_${Date.now()}`;
         const hostPlayer = createFreshPlayer(playerName || 'Host', avatar || '⚡', true);
-
-        // Cancel previous room timers if any
-        if (activeRoom?.bettingTimer) clearInterval(activeRoom.bettingTimer);
-        if (activeRoom?.gameTimer) clearInterval(activeRoom.gameTimer);
 
         activeRoom = {
           roomId,
@@ -189,17 +253,20 @@ wss.on('connection', (ws: WebSocket) => {
           clientSockets: new Map([[hostPlayer.sessionToken, ws]]),
           totalRounds: 8,
           currentRound: null,
+          internalGameState: null,
           roundHistory: [],
           awards: [],
+          timers: createEmptyTimers(),
         };
 
         boundSessionToken = hostPlayer.sessionToken;
 
+        // Deliver private sessionToken ONLY to this specific socket
         const successMsg: ServerMessage = {
           type: 'JOIN_SUCCESS',
           timestamp: Date.now(),
           payload: {
-            player: hostPlayer,
+            player: toPublicPlayer(hostPlayer),
             sessionToken: hostPlayer.sessionToken,
             roomCode,
             isHost: true,
@@ -210,7 +277,7 @@ wss.on('connection', (ws: WebSocket) => {
         return;
       }
 
-      // 2. JOIN_ROOM (Client action)
+      // 2. JOIN_ROOM (Client action / reconnect)
       if (msg.type === 'JOIN_ROOM') {
         const { roomCode, playerName, avatar, sessionToken } = msg.payload || {};
 
@@ -223,7 +290,7 @@ wss.on('connection', (ws: WebSocket) => {
           return;
         }
 
-        if (activeRoom.roomCode.toUpperCase() !== (roomCode || '').toUpperCase()) {
+        if (activeRoom.roomCode.toUpperCase() !== (roomCode || '').trim().toUpperCase()) {
           ws.send(JSON.stringify({
             type: 'JOIN_ERROR',
             timestamp: Date.now(),
@@ -232,18 +299,28 @@ wss.on('connection', (ws: WebSocket) => {
           return;
         }
 
-        // Check if reconnecting existing session token
+        // RECONNECT: check if reconnecting with an existing valid sessionToken
         if (sessionToken && activeRoom.players.has(sessionToken)) {
           const existing = activeRoom.players.get(sessionToken)!;
           existing.connected = true;
           activeRoom.clientSockets.set(sessionToken, ws);
           boundSessionToken = sessionToken;
 
+          // Clear any disconnect grace timer
+          if (activeRoom.timers.fighterGraceTimers.has(existing.id)) {
+            clearTimeout(activeRoom.timers.fighterGraceTimers.get(existing.id));
+            activeRoom.timers.fighterGraceTimers.delete(existing.id);
+          }
+          if (existing.isHost && activeRoom.timers.hostGraceTimer) {
+            clearTimeout(activeRoom.timers.hostGraceTimer);
+            activeRoom.timers.hostGraceTimer = undefined;
+          }
+
           ws.send(JSON.stringify({
             type: 'JOIN_SUCCESS',
             timestamp: Date.now(),
             payload: {
-              player: existing,
+              player: toPublicPlayer(existing),
               sessionToken: existing.sessionToken,
               roomCode: activeRoom.roomCode,
               isHost: existing.isHost,
@@ -253,7 +330,7 @@ wss.on('connection', (ws: WebSocket) => {
           return;
         }
 
-        // New player joins
+        // NEW PLAYER JOIN
         if (activeRoom.phase !== 'LOBBY') {
           ws.send(JSON.stringify({
             type: 'JOIN_ERROR',
@@ -272,7 +349,10 @@ wss.on('connection', (ws: WebSocket) => {
           return;
         }
 
-        const newPlayer = createFreshPlayer(playerName || 'Player', avatar || '🦊', false);
+        const safeName = sanitizePlayerName(playerName);
+        const safeAvatar = sanitizePlayerAvatar(avatar);
+        const newPlayer = createFreshPlayer(safeName, safeAvatar, false);
+
         activeRoom.players.set(newPlayer.sessionToken, newPlayer);
         activeRoom.clientSockets.set(newPlayer.sessionToken, ws);
         boundSessionToken = newPlayer.sessionToken;
@@ -281,7 +361,7 @@ wss.on('connection', (ws: WebSocket) => {
           type: 'JOIN_SUCCESS',
           timestamp: Date.now(),
           payload: {
-            player: newPlayer,
+            player: toPublicPlayer(newPlayer),
             sessionToken: newPlayer.sessionToken,
             roomCode: activeRoom.roomCode,
             isHost: false,
@@ -291,13 +371,13 @@ wss.on('connection', (ws: WebSocket) => {
         return;
       }
 
-      // Session authentication check for gameplay messages
-      const token = msg.sessionToken || boundSessionToken;
-      if (!activeRoom || !token || !activeRoom.players.has(token)) {
+      // SECURITY: all other messages MUST use the session token bound to this WebSocket.
+      // Sockets cannot send arbitrary sessionTokens in payloads to impersonate other players!
+      if (!activeRoom || !boundSessionToken || !activeRoom.players.has(boundSessionToken)) {
         return;
       }
 
-      const player = activeRoom.players.get(token)!;
+      const player = activeRoom.players.get(boundSessionToken)!;
 
       // 3. TOGGLE_READY
       if (msg.type === 'TOGGLE_READY') {
@@ -308,7 +388,18 @@ wss.on('connection', (ws: WebSocket) => {
         return;
       }
 
-      // 4. START_GAME (Host-only)
+      // 4. SET_MATCH_LENGTH (Host-only, LOBBY-only)
+      if (msg.type === 'SET_MATCH_LENGTH') {
+        if (!player.isHost || activeRoom.phase !== 'LOBBY') return;
+        const total = msg.payload?.totalRounds;
+        if (total === 8 || total === 10) {
+          activeRoom.totalRounds = total;
+          broadcastRoomState();
+        }
+        return;
+      }
+
+      // 5. START_GAME (Host-only, LOBBY-only)
       if (msg.type === 'START_GAME') {
         if (!player.isHost) {
           ws.send(JSON.stringify({
@@ -318,38 +409,39 @@ wss.on('connection', (ws: WebSocket) => {
           }));
           return;
         }
+        if (activeRoom.phase !== 'LOBBY') return;
 
         const playerList = Array.from(activeRoom.players.values());
+        const connectedPlayers = playerList.filter(p => p.connected);
         const isDebug = msg.payload?.debug === true;
 
-        if (playerList.length < MIN_PLAYERS_TO_START && !isDebug) {
+        if (connectedPlayers.length < MIN_PLAYERS_TO_START && !isDebug) {
           ws.send(JSON.stringify({
             type: 'JOIN_ERROR',
             timestamp: Date.now(),
             payload: {
               code: 'NOT_ENOUGH_PLAYERS',
-              message: `Need at least ${MIN_PLAYERS_TO_START} players to start (currently ${playerList.length}).`,
+              message: `Need at least ${MIN_PLAYERS_TO_START} connected players to start (currently ${connectedPlayers.length}).`,
             },
           }));
           return;
         }
 
-        const allReady = playerList.every(p => p.isReady || p.isHost);
+        const allReady = connectedPlayers.every(p => p.isReady || p.isHost);
         if (!allReady && !isDebug) {
           ws.send(JSON.stringify({
             type: 'JOIN_ERROR',
             timestamp: Date.now(),
-            payload: { code: 'NOT_ALL_READY', message: 'All players must be READY before starting.' },
+            payload: { code: 'NOT_ALL_READY', message: 'All connected players must be READY before starting.' },
           }));
           return;
         }
 
-        // Initialize round 1
         startRound(1);
         return;
       }
 
-      // 5. PLACE_BET
+      // 6. PLACE_BET
       if (msg.type === 'PLACE_BET') {
         const { fighterId, amount } = msg.payload || {};
         const error = validateBetPlacement(
@@ -369,22 +461,33 @@ wss.on('connection', (ws: WebSocket) => {
           return;
         }
 
-        // Valid bet: deduct coins and record secret bet
+        // Deduct coins & record secret bet
         player.coins -= amount;
         player.totalBetsPlaced += 1;
         player.highestSingleBet = Math.max(player.highestSingleBet, amount);
 
         const currentOdds = activeRoom.currentRound!.odds[fighterId]?.decimalOdds || 2.0;
-        activeRoom.currentRound!.bets.push({
+        const newBet: SecretBet = {
           bettorId: player.id,
           fighterId,
           amount,
           oddsAtBet: currentOdds,
           timestamp: Date.now(),
           potentialReturn: Math.floor(amount * currentOdds),
-        });
+        };
+        activeRoom.currentRound!.bets.push(newBet);
 
-        // Rebalance odds dynamically with updated pool
+        // Notify bettor privately of their accepted wager
+        ws.send(JSON.stringify({
+          type: 'BET_ACCEPTED',
+          timestamp: Date.now(),
+          payload: {
+            bet: newBet,
+            myBankroll: player.coins,
+          },
+        }));
+
+        // Dynamically update odds with the new bet
         const fA = Array.from(activeRoom.players.values()).find(p => p.id === activeRoom!.currentRound!.fighterIds[0])!;
         const fB = Array.from(activeRoom.players.values()).find(p => p.id === activeRoom!.currentRound!.fighterIds[1])!;
         activeRoom.currentRound!.odds = calculateDynamicOdds(fA, fB, activeRoom.currentRound!.bets);
@@ -393,63 +496,43 @@ wss.on('connection', (ws: WebSocket) => {
         return;
       }
 
-      // 6. FIGHTER_INPUT
-      if (msg.type === 'FIGHTER_INPUT') {
-        if (!activeRoom.currentRound || activeRoom.phase !== 'MINIGAME_ACTIVE') return;
-        const { action, value, timestamp } = msg.payload || {};
-        const [f1, f2] = activeRoom.currentRound.fighterIds;
-
-        if (player.id !== f1 && player.id !== f2) {
-          return; // Spectators cannot send fighter inputs
+      // 7. FIGHTER_ACTION (Authoritative Mini-Game Gameplay Action)
+      if (msg.type === 'FIGHTER_ACTION') {
+        if (!activeRoom.currentRound || !activeRoom.internalGameState || activeRoom.phase !== 'MINIGAME_ACTIVE') {
+          return;
         }
 
-        // Record fighter score/input
-        activeRoom.currentRound.fighterScores[player.id] = typeof value === 'number' ? value : 1;
+        const action: FighterAction = msg.payload;
+        const now = Date.now();
 
-        // Mini-game specific resolution checks
-        const gameId = activeRoom.currentRound.miniGame.id;
+        const result = processFighterAction(
+          activeRoom.internalGameState,
+          activeRoom.currentRound.fighterScores,
+          player.id,
+          action,
+          now
+        );
 
-        if (gameId === 'millisecond_stop') {
-          // If both have stopped, resolve immediately
-          const s1 = activeRoom.currentRound.fighterScores[f1];
-          const s2 = activeRoom.currentRound.fighterScores[f2];
-          if (s1 && s2) {
-            resolveCurrentGame();
-          }
-        } else if (gameId === 'quick_draw') {
-          if (action === 'DRAW') {
-            resolveCurrentGame();
-          }
-        } else if (gameId === 'speed_math' || gameId === 'higher_lower') {
-          if (typeof value === 'number' && value >= 3) {
-            resolveCurrentGame();
-          }
-        } else if (gameId === 'rapid_red_green') {
-          if (typeof value === 'number' && value >= 40) {
-            resolveCurrentGame();
-          }
+        if (result.gameStatePatch) {
+          activeRoom.currentRound.gameState = {
+            ...activeRoom.currentRound.gameState,
+            ...result.gameStatePatch,
+          };
         }
 
-        broadcastRoomState();
+        if (result.resolved) {
+          resolveCurrentGame(result.winnerId, result.isTie);
+        } else {
+          broadcastRoomState();
+        }
         return;
       }
 
-      // 6b. REPORT_MINIGAME_RESULT (Host-only authoritative resolution)
-      if (msg.type === 'REPORT_MINIGAME_RESULT') {
-        if (!player.isHost) return;
-        if (!activeRoom.currentRound || activeRoom.phase !== 'MINIGAME_ACTIVE') return;
-        const { winnerId, scores } = msg.payload || {};
-        resolveCurrentGame(winnerId, scores);
-        return;
-      }
-
-      // 7. NEXT_ROUND (Host only)
+      // 8. NEXT_ROUND (Host only, PAYOUT_RECAP only)
       if (msg.type === 'NEXT_ROUND') {
-        if (!player.isHost) return;
-        if (!activeRoom.currentRound) return;
+        if (!player.isHost || !activeRoom.currentRound || activeRoom.phase !== 'PAYOUT_RECAP') return;
 
         if (activeRoom.currentRound.roundNumber >= activeRoom.totalRounds) {
-          // Final podium!
           activeRoom.phase = 'FINAL_PODIUM';
           activeRoom.awards = computeSessionAwards(Array.from(activeRoom.players.values()));
           broadcastRoomState();
@@ -459,10 +542,13 @@ wss.on('connection', (ws: WebSocket) => {
         return;
       }
 
-      // 8. RESTART_GAME (Host only)
+      // 9. RESTART_GAME (Host only, FINAL_PODIUM only)
       if (msg.type === 'RESTART_GAME') {
-        if (!player.isHost) return;
-        // Reset players to initial 1000 coins and clean session stats
+        if (!player.isHost || activeRoom.phase !== 'FINAL_PODIUM') return;
+
+        clearAllTimers(activeRoom.timers);
+
+        // Reset players to initial 1000 coins and clean session statistics
         for (const p of activeRoom.players.values()) {
           p.coins = 1000;
           p.matchesWon = 0;
@@ -477,14 +563,36 @@ wss.on('connection', (ws: WebSocket) => {
         }
         activeRoom.phase = 'LOBBY';
         activeRoom.currentRound = null;
+        activeRoom.internalGameState = null;
         activeRoom.roundHistory = [];
         activeRoom.awards = [];
         broadcastRoomState();
         return;
       }
 
-      // 9. DEBUG_ADD_BOT (Developer testing only when ?debug=1)
-      if (msg.type === 'DEBUG_ADD_BOT' as any) {
+      // 10. CLOSE_ROOM (Host only)
+      if (msg.type === 'CLOSE_ROOM') {
+        if (!player.isHost) return;
+
+        clearAllTimers(activeRoom.timers);
+        const closeMsg: ServerMessage = {
+          type: 'ROOM_CLOSED',
+          timestamp: Date.now(),
+          payload: { reason: 'The host closed the room.' },
+        };
+        const rawMsg = JSON.stringify(closeMsg);
+        for (const sock of activeRoom.clientSockets.values()) {
+          if (sock.readyState === WebSocket.OPEN) {
+            sock.send(rawMsg);
+          }
+        }
+        activeRoom = null;
+        return;
+      }
+
+      // 11. DEBUG_ADD_BOT (Debug mode only, host only, lobby only)
+      if (msg.type === 'DEBUG_ADD_BOT') {
+        if (!player.isHost || activeRoom.phase !== 'LOBBY') return;
         if (activeRoom.players.size < MAX_PLAYERS_CAPACITY) {
           const idx = activeRoom.players.size + 1;
           const bot = createFreshPlayer(`Bot ${idx}`, '🤖', false);
@@ -496,7 +604,7 @@ wss.on('connection', (ws: WebSocket) => {
         return;
       }
     } catch (err) {
-      console.error('WebSocket message parsing error:', err);
+      console.error('[BET & BRAWL] WebSocket error handling message:', err);
     }
   });
 
@@ -505,49 +613,114 @@ wss.on('connection', (ws: WebSocket) => {
       const p = activeRoom.players.get(boundSessionToken)!;
       p.connected = false;
       activeRoom.clientSockets.delete(boundSessionToken);
+
+      // Disconnect handling during active gameplay
+      if (activeRoom.phase === 'MINIGAME_ACTIVE' && activeRoom.currentRound) {
+        const [f1, f2] = activeRoom.currentRound.fighterIds;
+        if (p.id === f1 || p.id === f2) {
+          const otherFighterId = p.id === f1 ? f2 : f1;
+          // 5-second grace window for fighter to reconnect
+          const graceTimer = setTimeout(() => {
+            if (!activeRoom || activeRoom.phase !== 'MINIGAME_ACTIVE') return;
+            const stillDisconnected = activeRoom.players.get(boundSessionToken!)?.connected === false;
+            if (stillDisconnected) {
+              // Forfeit to connected fighter
+              resolveCurrentGame(otherFighterId, false);
+            }
+          }, 5000);
+          activeRoom.timers.fighterGraceTimers.set(p.id, graceTimer);
+        }
+      }
+
+      // Host disconnect handling: 60s grace period
+      if (p.isHost) {
+        if (activeRoom.timers.hostGraceTimer) clearTimeout(activeRoom.timers.hostGraceTimer);
+        activeRoom.timers.hostGraceTimer = setTimeout(() => {
+          if (activeRoom && activeRoom.players.get(boundSessionToken!)?.connected === false) {
+            // Close room cleanly if host never returns
+            clearAllTimers(activeRoom.timers);
+            const closeMsg: ServerMessage = {
+              type: 'ROOM_CLOSED',
+              timestamp: Date.now(),
+              payload: { reason: 'Host disconnected and did not return.' },
+            };
+            const rawMsg = JSON.stringify(closeMsg);
+            for (const sock of activeRoom.clientSockets.values()) {
+              if (sock.readyState === WebSocket.OPEN) {
+                sock.send(rawMsg);
+              }
+            }
+            activeRoom = null;
+          }
+        }, 60000);
+      }
+
       broadcastRoomState();
     }
   });
 });
 
+// -------------------------------------------------------------
+// ROUND LIFECYCLE MANAGEMENT
+// -------------------------------------------------------------
+
 function startRound(roundNum: number) {
   if (!activeRoom) return;
 
+  clearAllTimers(activeRoom.timers);
+
   const playerList = Array.from(activeRoom.players.values());
-  const round = initAuthoritativeRound(roundNum, activeRoom.totalRounds, playerList, activeRoom.lastPairing);
+  const { round, internalGame } = initAuthoritativeRound(
+    roundNum,
+    activeRoom.totalRounds,
+    playerList,
+    activeRoom.lastPairing
+  );
+
   activeRoom.currentRound = round;
+  activeRoom.internalGameState = internalGame;
   activeRoom.lastPairing = round.fighterIds;
   activeRoom.phase = 'FIGHTER_REVEAL';
   broadcastRoomState();
 
-  // 4s reveal countdown, then automatically open betting window
-  setTimeout(() => {
-    if (!activeRoom || activeRoom.currentRound?.roundNumber !== roundNum) return;
+  const currentRoomId = activeRoom.roomId;
+  const currentRoundNum = roundNum;
+
+  // Timed reveal countdown -> automatically transition to betting window
+  activeRoom.timers.phaseTimer = setTimeout(() => {
+    if (!activeRoom || activeRoom.roomId !== currentRoomId || activeRoom.currentRound?.roundNumber !== currentRoundNum) {
+      return;
+    }
     openBettingWindow();
   }, 4500);
 }
 
 function openBettingWindow() {
   if (!activeRoom || !activeRoom.currentRound) return;
+  const room = activeRoom;
+  const currentRound = room.currentRound;
+  if (!currentRound) return;
 
-  activeRoom.phase = 'BETTING_WINDOW';
-  activeRoom.currentRound.bettingTimeRemaining = 15;
+  const currentRoomId = room.roomId;
+  const currentRoundNum = currentRound.roundNumber;
+
+  room.phase = 'BETTING_WINDOW';
+  currentRound.bettingTimeRemaining = 15;
+  currentRound.bettingEndsAt = Date.now() + 15000;
   broadcastRoomState();
 
-  if (activeRoom.bettingTimer) clearInterval(activeRoom.bettingTimer);
-
-  // If there are bot spectators, simulate their bets during the 15s window
-  const botSpectators = Array.from(activeRoom.players.values()).filter(
-    p => p.isBot && !activeRoom!.currentRound!.fighterIds.includes(p.id)
+  // If there are server debug bot spectators, schedule realistic wagers
+  const botSpectators = Array.from(room.players.values()).filter(
+    p => p.isBot && !room.currentRound!.fighterIds.includes(p.id)
   );
 
   botSpectators.forEach((bot, idx) => {
     const delayMs = 1500 + idx * 1200 + Math.random() * 1500;
-    setTimeout(() => {
-      if (!activeRoom || !activeRoom.currentRound || activeRoom.phase !== 'BETTING_WINDOW') return;
-      if (activeRoom.currentRound.bets.some(b => b.bettorId === bot.id)) return;
+    const t = setTimeout(() => {
+      if (!activeRoom || activeRoom.roomId !== currentRoomId || activeRoom.phase !== 'BETTING_WINDOW') return;
+      if (activeRoom.currentRound?.bets.some(b => b.bettorId === bot.id)) return;
 
-      const [fAId, fBId] = activeRoom.currentRound.fighterIds;
+      const [fAId, fBId] = activeRoom.currentRound!.fighterIds;
       const targetFighterId = Math.random() < 0.5 ? fAId : fBId;
       const betAmt = Math.min(bot.coins, [50, 100, 150][Math.floor(Math.random() * 3)]);
       if (betAmt <= 0) return;
@@ -556,8 +729,8 @@ function openBettingWindow() {
       bot.totalBetsPlaced += 1;
       bot.highestSingleBet = Math.max(bot.highestSingleBet, betAmt);
 
-      const currentOdds = activeRoom.currentRound.odds[targetFighterId]?.decimalOdds || 2.0;
-      activeRoom.currentRound.bets.push({
+      const currentOdds = activeRoom.currentRound!.odds[targetFighterId]?.decimalOdds || 2.0;
+      activeRoom.currentRound!.bets.push({
         bettorId: bot.id,
         fighterId: targetFighterId,
         amount: betAmt,
@@ -566,21 +739,21 @@ function openBettingWindow() {
         potentialReturn: Math.floor(betAmt * currentOdds),
       });
 
-      // Recalculate dynamic odds
       const fA = Array.from(activeRoom.players.values()).find(p => p.id === fAId)!;
       const fB = Array.from(activeRoom.players.values()).find(p => p.id === fBId)!;
-      activeRoom.currentRound.odds = calculateDynamicOdds(fA, fB, activeRoom.currentRound.bets);
+      activeRoom.currentRound!.odds = calculateDynamicOdds(fA, fB, activeRoom.currentRound!.bets);
 
       broadcastRoomState();
     }, delayMs);
+    room.timers.botBetTimers.push(t);
   });
 
-  activeRoom.bettingTimer = setInterval(() => {
-    if (!activeRoom || !activeRoom.currentRound) return;
+  room.timers.bettingInterval = setInterval(() => {
+    if (!activeRoom || activeRoom.roomId !== currentRoomId || !activeRoom.currentRound) return;
     activeRoom.currentRound.bettingTimeRemaining -= 1;
 
     if (activeRoom.currentRound.bettingTimeRemaining <= 0) {
-      clearInterval(activeRoom.bettingTimer);
+      clearInterval(room.timers.bettingInterval);
       startMiniGameCountdown();
     } else {
       broadcastRoomState();
@@ -591,133 +764,168 @@ function openBettingWindow() {
 function startMiniGameCountdown() {
   if (!activeRoom || !activeRoom.currentRound) return;
 
+  const currentRoomId = activeRoom.roomId;
+  const currentRoundNum = activeRoom.currentRound.roundNumber;
+
   activeRoom.phase = 'MINIGAME_COUNTDOWN';
   broadcastRoomState();
 
-  setTimeout(() => {
-    if (!activeRoom || !activeRoom.currentRound) return;
-    activeRoom.phase = 'MINIGAME_ACTIVE';
-    broadcastRoomState();
-
-    const round = activeRoom.currentRound;
-    const [f1, f2] = round.fighterIds;
-    const p1 = Array.from(activeRoom.players.values()).find(p => p.id === f1);
-    const p2 = Array.from(activeRoom.players.values()).find(p => p.id === f2);
-
-    // If any fighter is a bot, simulate their performance
-    [p1, p2].forEach(p => {
-      if (!p || !p.isBot) return;
-      const gameId = round.miniGame.id;
-      if (gameId === 'millisecond_stop') {
-        const botStop = 5.0 + (Math.random() - 0.48) * 0.35;
-        setTimeout(() => {
-          if (!activeRoom || !activeRoom.currentRound || activeRoom.phase !== 'MINIGAME_ACTIVE') return;
-          round.fighterScores[p.id] = botStop;
-          const s1 = round.fighterScores[f1];
-          const s2 = round.fighterScores[f2];
-          if (s1 !== undefined && s2 !== undefined && s1 > 0 && s2 > 0) {
-            resolveCurrentGame();
-          } else {
-            broadcastRoomState();
-          }
-        }, botStop * 1000);
-      } else if (gameId === 'quick_draw') {
-        const delay = (round.gameConfig?.drawDelayMs as number) || 2500;
-        const botReaction = 280 + Math.floor(Math.random() * 150);
-        setTimeout(() => {
-          if (!activeRoom || !activeRoom.currentRound || activeRoom.phase !== 'MINIGAME_ACTIVE') return;
-          round.fighterScores[p.id] = botReaction;
-          const s1 = round.fighterScores[f1];
-          const s2 = round.fighterScores[f2];
-          if (s1 !== undefined && s2 !== undefined && s1 > 0 && s2 > 0) {
-            resolveCurrentGame();
-          } else {
-            broadcastRoomState();
-          }
-        }, delay + botReaction);
-      } else if (gameId === 'speed_math' || gameId === 'higher_lower') {
-        setTimeout(() => {
-          if (!activeRoom || !activeRoom.currentRound || activeRoom.phase !== 'MINIGAME_ACTIVE') return;
-          round.fighterScores[p.id] = 3;
-          resolveCurrentGame();
-        }, 7500);
-      } else if (gameId === 'rapid_red_green') {
-        setTimeout(() => {
-          if (!activeRoom || !activeRoom.currentRound || activeRoom.phase !== 'MINIGAME_ACTIVE') return;
-          round.fighterScores[p.id] = 40;
-          resolveCurrentGame();
-        }, 11000);
-      } else if (gameId === 'blind_pinpoint') {
-        setTimeout(() => {
-          if (!activeRoom || !activeRoom.currentRound || activeRoom.phase !== 'MINIGAME_ACTIVE') return;
-          round.fighterScores[p.id] = 450 + Math.floor(Math.random() * 800);
-          const s1 = round.fighterScores[f1];
-          const s2 = round.fighterScores[f2];
-          if (s1 !== undefined && s2 !== undefined && s1 > 0 && s2 > 0) {
-            resolveCurrentGame();
-          } else {
-            broadcastRoomState();
-          }
-        }, 3500);
-      }
-    });
-
-    // Set game timeout fallback
-    const duration = round.miniGame.durationSeconds;
-    if (activeRoom.gameTimer) clearTimeout(activeRoom.gameTimer);
-    activeRoom.gameTimer = setTimeout(() => {
-      resolveCurrentGame();
-    }, duration * 1000 + 1000);
+  activeRoom.timers.phaseTimer = setTimeout(() => {
+    if (!activeRoom || activeRoom.roomId !== currentRoomId || activeRoom.currentRound?.roundNumber !== currentRoundNum) {
+      return;
+    }
+    launchActiveMiniGame();
   }, 3500);
 }
 
-function resolveCurrentGame(forcedWinnerId?: string | null, customScores?: Record<string, number>) {
+function launchActiveMiniGame() {
+  if (!activeRoom || !activeRoom.currentRound || !activeRoom.internalGameState) return;
+  const room = activeRoom;
+  const round = room.currentRound;
+  const internal = room.internalGameState;
+  if (!round || !internal) return;
+
+  const currentRoomId = room.roomId;
+  const currentRoundNum = round.roundNumber;
+
+  room.phase = 'MINIGAME_ACTIVE';
+  round.gameStartsAt = Date.now();
+  round.gameEndsAt = round.gameStartsAt + round.miniGame.durationSeconds * 1000;
+  internal.gameStartsAt = round.gameStartsAt;
+
+  if (round.miniGame.id === 'quick_draw' && internal.quickDraw) {
+    internal.quickDraw.drawAt = round.gameStartsAt + internal.quickDraw.drawDelayMs;
+    round.gameConfig!.drawAt = internal.quickDraw.drawAt;
+  }
+
+  broadcastRoomState();
+
+  const [f1, f2] = round.fighterIds;
+  const p1 = Array.from(room.players.values()).find(p => p.id === f1);
+  const p2 = Array.from(room.players.values()).find(p => p.id === f2);
+
+  // SERVER-SIDE DEBUG BOT SIMULATION ONLY: if either fighter is a server bot
+  [p1, p2].forEach(p => {
+    if (!p || !p.isBot) return;
+
+    if (round.miniGame.id === 'millisecond_stop') {
+      const stopTargetMs = Math.floor(4850 + Math.random() * 320);
+      const t = setTimeout(() => {
+        if (!activeRoom || activeRoom.roomId !== currentRoomId || activeRoom.phase !== 'MINIGAME_ACTIVE') return;
+        const res = processFighterAction(internal, round.fighterScores, p.id, { type: 'STOP' }, Date.now());
+        if (res.resolved) {
+          resolveCurrentGame(res.winnerId, res.isTie);
+        } else {
+          broadcastRoomState();
+        }
+      }, stopTargetMs);
+      room.timers.botGameTimers.push(t);
+    } else if (round.miniGame.id === 'rapid_red_green') {
+      const interval = setInterval(() => {
+        if (!activeRoom || activeRoom.roomId !== currentRoomId || activeRoom.phase !== 'MINIGAME_ACTIVE') {
+          clearInterval(interval);
+          return;
+        }
+        const res = processFighterAction(internal, round.fighterScores, p.id, { type: 'TAP' }, Date.now());
+        if (res.resolved) {
+          clearInterval(interval);
+          resolveCurrentGame(res.winnerId, res.isTie);
+        } else {
+          broadcastRoomState();
+        }
+      }, 200 + Math.random() * 80);
+      room.timers.botGameTimers.push(interval);
+    } else if (round.miniGame.id === 'speed_math') {
+      let qIdx = 0;
+      const stepInterval = setInterval(() => {
+        if (!activeRoom || activeRoom.roomId !== currentRoomId || activeRoom.phase !== 'MINIGAME_ACTIVE' || qIdx >= 3) {
+          clearInterval(stepInterval);
+          return;
+        }
+        const answer = internal.speedMath!.correctAnswers[qIdx];
+        const res = processFighterAction(internal, round.fighterScores, p.id, { type: 'ANSWER', questionIndex: qIdx, answer }, Date.now());
+        qIdx++;
+        if (res.resolved) {
+          clearInterval(stepInterval);
+          resolveCurrentGame(res.winnerId, res.isTie);
+        } else {
+          broadcastRoomState();
+        }
+      }, 2400);
+      room.timers.botGameTimers.push(stepInterval);
+    } else if (round.miniGame.id === 'higher_lower') {
+      let stepIdx = 0;
+      const stepInterval = setInterval(() => {
+        if (!activeRoom || activeRoom.roomId !== currentRoomId || activeRoom.phase !== 'MINIGAME_ACTIVE' || stepIdx >= 3) {
+          clearInterval(stepInterval);
+          return;
+        }
+        const card = internal.higherLower!.cards[stepIdx];
+        const guess = card.isHigher ? 'HIGHER' : 'LOWER';
+        const res = processFighterAction(internal, round.fighterScores, p.id, { type: 'GUESS', questionIndex: stepIdx, guess }, Date.now());
+        stepIdx++;
+        if (res.resolved) {
+          clearInterval(stepInterval);
+          resolveCurrentGame(res.winnerId, res.isTie);
+        } else {
+          broadcastRoomState();
+        }
+      }, 2600);
+      room.timers.botGameTimers.push(stepInterval);
+    } else if (round.miniGame.id === 'blind_pinpoint') {
+      const t = setTimeout(() => {
+        if (!activeRoom || activeRoom.roomId !== currentRoomId || activeRoom.phase !== 'MINIGAME_ACTIVE') return;
+        const target = internal.blindPinpoint!.targetCity;
+        // Bot pins reasonably close
+        const normX = (target.lon + 180) / 360 + (Math.random() - 0.5) * 0.08;
+        const normY = (90 - target.lat) / 180 + (Math.random() - 0.5) * 0.08;
+        const res = processFighterAction(internal, round.fighterScores, p.id, {
+          type: 'PIN',
+          normX: Math.max(0, Math.min(1, normX)),
+          normY: Math.max(0, Math.min(1, normY)),
+        }, Date.now());
+
+        if (res.resolved) {
+          resolveCurrentGame(res.winnerId, res.isTie);
+        } else {
+          broadcastRoomState();
+        }
+      }, 3000);
+      room.timers.botGameTimers.push(t);
+    } else if (round.miniGame.id === 'quick_draw') {
+      const delay = internal.quickDraw!.drawDelayMs;
+      const reaction = 280 + Math.floor(Math.random() * 150);
+      const t = setTimeout(() => {
+        if (!activeRoom || activeRoom.roomId !== currentRoomId || activeRoom.phase !== 'MINIGAME_ACTIVE') return;
+        const res = processFighterAction(internal, round.fighterScores, p.id, { type: 'DRAW_TAP' }, Date.now());
+        if (res.resolved) {
+          resolveCurrentGame(res.winnerId, res.isTie);
+        } else {
+          broadcastRoomState();
+        }
+      }, delay + reaction);
+      room.timers.botGameTimers.push(t);
+    }
+  });
+
+  // Global game duration timeout fallback
+  const durationMs = round.miniGame.durationSeconds * 1000;
+  room.timers.gameTimeoutTimer = setTimeout(() => {
+    if (!activeRoom || activeRoom.roomId !== currentRoomId || activeRoom.phase !== 'MINIGAME_ACTIVE') return;
+    const timeoutResult = resolveGameTimeout(internal, round.fighterScores);
+    if (timeoutResult.gameStatePatch) {
+      round.gameState = { ...round.gameState, ...timeoutResult.gameStatePatch };
+    }
+    resolveCurrentGame(timeoutResult.winnerId, timeoutResult.isTie);
+  }, durationMs + 1000);
+}
+
+function resolveCurrentGame(winnerId: string | null, isTie: boolean) {
   if (!activeRoom || !activeRoom.currentRound || activeRoom.phase !== 'MINIGAME_ACTIVE') return;
 
-  if (activeRoom.gameTimer) clearTimeout(activeRoom.gameTimer);
+  clearAllTimers(activeRoom.timers);
 
   const round = activeRoom.currentRound;
-  if (customScores) {
-    round.fighterScores = { ...round.fighterScores, ...customScores };
-  }
-  const [f1, f2] = round.fighterIds;
-  const s1 = round.fighterScores[f1] || 0;
-  const s2 = round.fighterScores[f2] || 0;
-
-  let winnerId: string | null = null;
-  let isTie = false;
-
-  if (forcedWinnerId !== undefined) {
-    winnerId = forcedWinnerId;
-    isTie = winnerId === null;
-  } else {
-    const gameId = round.miniGame.id;
-    if (gameId === 'millisecond_stop') {
-      // Closest to 5.000s wins (smallest delta)
-      const d1 = Math.abs(s1 - 5.0);
-      const d2 = Math.abs(s2 - 5.0);
-      if (Math.abs(d1 - d2) < 0.001) {
-        isTie = true;
-      } else {
-        winnerId = d1 < d2 ? f1 : f2;
-      }
-    } else if (gameId === 'blind_pinpoint') {
-      // Smallest km error wins
-      if (s1 === s2) {
-        isTie = true;
-      } else {
-        winnerId = s1 < s2 ? f1 : f2;
-      }
-    } else {
-      // Higher score wins (red_green, speed_math, higher_lower, quick_draw)
-      if (s1 === s2) {
-        isTie = true;
-      } else {
-        winnerId = s1 > s2 ? f1 : f2;
-      }
-    }
-  }
-
   round.winnerId = winnerId;
   round.tieResult = isTie;
 
@@ -753,25 +961,40 @@ function resolveCurrentGame(forcedWinnerId?: string | null, customScores?: Recor
 // -------------------------------------------------------------
 
 async function startServer() {
-  if (process.env.NODE_ENV !== 'production') {
+  const isProd = process.env.NODE_ENV === 'production';
+  const distPath = path.resolve(__dirname, 'dist');
+  const distExists = fs.existsSync(distPath);
+
+  if (isProd || distExists) {
+    app.use(express.static(distPath));
+    app.get('*', (req, res, next) => {
+      if (req.path.startsWith('/api') || req.path.startsWith('/ws')) return next();
+      res.sendFile(path.resolve(distPath, 'index.html'));
+    });
+  } else {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
     });
     app.use(vite.middlewares);
-  } else {
-    const distPath = path.resolve(__dirname, 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.resolve(distPath, 'index.html'));
-    });
   }
 
   server.listen(PORT, HOST, () => {
-    const localIp = getLocalIpAddress();
-    console.log(`[BET & BRAWL] Server running at http://${localIp}:${PORT} (bound to ${HOST}:${PORT})`);
+    const { primaryIp } = discoverLanAddresses();
+    console.log(`\n======================================================`);
+    console.log(`BET & BRAWL ready`);
+    console.log(`Local: http://localhost:${PORT}`);
+    console.log(`LAN:   http://${primaryIp}:${PORT}`);
+    console.log(`Bound: ${HOST}:${PORT}`);
+    console.log(`======================================================\n`);
   });
 }
 
-startServer();
+// Export for integration testing
+export { app, server, activeRoom };
+
+// Run only when directly invoked
+if (process.argv[1] && process.argv[1].endsWith('server.ts')) {
+  startServer();
+}

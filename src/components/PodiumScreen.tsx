@@ -7,12 +7,12 @@
 
 import React, { useEffect } from 'react';
 import confetti from 'canvas-confetti';
-import type { Player, Award } from '../engine/types.ts';
+import type { PublicPlayer, Award } from '../engine/types.ts';
 import { sound } from '../engine/audio.ts';
 import { RotateCcw, Sparkles } from 'lucide-react';
 
 interface Props {
-  players: Player[];
+  players: PublicPlayer[];
   awards: Award[];
   isHost: boolean;
   onPlayAgain: () => void;

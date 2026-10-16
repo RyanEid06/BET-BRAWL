@@ -2,22 +2,22 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  * 
- * Bet & BRAWL: Fighter Reveal with Clear How-to-Play Guide
+ * Bet & BRAWL: Fighter Reveal with Clear How-to-Play Guide & Synchronized Countdown
  */
 
 import React, { useEffect, useState } from 'react';
-import type { Player, MiniGameMeta } from '../engine/types.ts';
+import type { PublicPlayer, MiniGameMeta } from '../engine/types.ts';
 import { sound } from '../engine/audio.ts';
-import { ArrowRight, HelpCircle } from 'lucide-react';
+import { HelpCircle, Clock } from 'lucide-react';
 
 interface Props {
   roundNumber: number;
   totalRounds: number;
-  fighterA: Player;
-  fighterB: Player;
+  fighterA: PublicPlayer;
+  fighterB: PublicPlayer;
   miniGame: MiniGameMeta;
-  isHost: boolean;
-  onContinueToBetting: () => void;
+  revealEndsAt?: number;
+  serverTimeOffset?: number;
 }
 
 export const FighterAnnouncement: React.FC<Props> = ({
@@ -26,26 +26,32 @@ export const FighterAnnouncement: React.FC<Props> = ({
   fighterA,
   fighterB,
   miniGame,
-  isHost,
-  onContinueToBetting,
+  revealEndsAt,
+  serverTimeOffset = 0,
 }) => {
-  const [countdown, setCountdown] = useState<number>(5);
+  const [secondsRemaining, setSecondsRemaining] = useState<number>(() => {
+    if (revealEndsAt) {
+      const now = Date.now() + serverTimeOffset;
+      return Math.max(1, Math.ceil((revealEndsAt - now) / 1000));
+    }
+    return 4;
+  });
 
   useEffect(() => {
     sound.playCountdown(true);
 
     const interval = setInterval(() => {
-      setCountdown(prev => Math.max(0, prev - 1));
-    }, 1000);
+      if (revealEndsAt) {
+        const now = Date.now() + serverTimeOffset;
+        const remaining = Math.max(0, Math.ceil((revealEndsAt - now) / 1000));
+        setSecondsRemaining(remaining);
+      } else {
+        setSecondsRemaining(prev => Math.max(0, prev - 1));
+      }
+    }, 250);
 
     return () => clearInterval(interval);
-  }, []);
-
-  useEffect(() => {
-    if (countdown === 0) {
-      onContinueToBetting();
-    }
-  }, [countdown, onContinueToBetting]);
+  }, [revealEndsAt, serverTimeOffset]);
 
   return (
     <div className="relative w-full max-w-xl mx-auto p-4 flex flex-col justify-between items-center text-center space-y-4">
@@ -103,18 +109,12 @@ export const FighterAnnouncement: React.FC<Props> = ({
         </ul>
       </div>
 
-      {/* Ready / Continue Action */}
+      {/* Timed Betting Transition Indicator */}
       <div className="w-full">
-        <button
-          onClick={() => {
-            sound.playCoin();
-            onContinueToBetting();
-          }}
-          className="w-full py-3.5 rounded-xl font-display font-black text-base uppercase tracking-wider bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer"
-        >
-          <span>OPEN BETTING WINDOW ({countdown}s)</span>
-          <ArrowRight className="w-4 h-4" />
-        </button>
+        <div className="w-full py-3.5 rounded-xl font-display font-black text-base uppercase tracking-wider bg-slate-900 border border-amber-500/60 text-amber-300 shadow-lg flex items-center justify-center gap-2">
+          <Clock className="w-4 h-4 animate-spin text-amber-400" />
+          <span>BETTING OPENS IN {secondsRemaining}s...</span>
+        </div>
       </div>
     </div>
   );

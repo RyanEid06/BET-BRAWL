@@ -114,7 +114,7 @@ test('Fighter rotation fairness over 10 rounds for 6, 7, 8, and 9 players', () =
 
 test('initAuthoritativeRound initializes clean round state and mini-game config', () => {
   const players = createMockRoster(6);
-  const round = initAuthoritativeRound(1, 8, players);
+  const { round, internalGame } = initAuthoritativeRound(1, 8, players);
 
   assert.equal(round.roundNumber, 1);
   assert.equal(round.maxRounds, 8);
@@ -124,6 +124,21 @@ test('initAuthoritativeRound initializes clean round state and mini-game config'
   assert.equal(round.bettingTimeRemaining, 15);
   assert.ok(round.miniGame !== undefined);
   assert.ok(Object.keys(round.odds).length === 2);
+  assert.ok(internalGame !== undefined);
+});
+
+test('selectRoundFighters excludes disconnected players from fighter selection', () => {
+  const players = createMockRoster(6);
+  players[0].connected = false;
+  players[1].connected = false;
+
+  for (let i = 0; i < 20; i++) {
+    const [f1, f2] = selectRoundFighters(players);
+    assert.notEqual(f1, players[0].id);
+    assert.notEqual(f2, players[0].id);
+    assert.notEqual(f1, players[1].id);
+    assert.notEqual(f2, players[1].id);
+  }
 });
 
 test('computeSessionAwards derives awards strictly from genuine session statistics', () => {

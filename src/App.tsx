@@ -110,7 +110,9 @@ export default function App() {
             networkInfo={client.networkInfo}
             totalRounds={client.totalRounds}
             onToggleReady={client.toggleReady}
+            onSetMatchLength={client.setMatchLength}
             onStartGame={client.startGame}
+            onCloseRoom={client.closeRoom}
             onAddDebugBot={client.addDebugBot}
             isDebug={client.isDebug}
           />
@@ -126,8 +128,8 @@ export default function App() {
             fighterA={activeFighterA}
             fighterB={activeFighterB}
             miniGame={client.currentRound.miniGame}
-            isHost={client.isHost}
-            onContinueToBetting={() => {}}
+            revealEndsAt={client.currentRound.revealEndsAt}
+            serverTimeOffset={client.serverTimeOffset}
           />
         </div>
       )}
@@ -139,10 +141,13 @@ export default function App() {
             fighterA={activeFighterA}
             fighterB={activeFighterB}
             odds={client.currentRound.odds}
-            currentBets={client.currentRound.bets}
             myPlayer={client.myPlayer}
+            myBet={client.myBet}
             onPlaceBet={client.placeBet}
             bettingTimeRemaining={client.currentRound.bettingTimeRemaining}
+            bettingEndsAt={client.currentRound.bettingEndsAt}
+            serverTimeOffset={client.serverTimeOffset}
+            lastRejectedBetReason={client.lastRejectedBetReason}
           />
         </div>
       )}
@@ -171,12 +176,10 @@ export default function App() {
               fighterB={activeFighterB}
               isPlayerFighter={playerFighterSlot !== 'spectator'}
               playerFighterSlot={playerFighterSlot}
-              onComplete={(winnerId, scores) => {
-                if (client.isHost) {
-                  client.sendFighterInput('RESOLVE', 1);
-                }
-              }}
-              onSendInput={(action, value) => client.sendFighterInput(action, value)}
+              fighterScores={client.currentRound.fighterScores}
+              gameStartsAt={client.currentRound.gameStartsAt}
+              serverTimeOffset={client.serverTimeOffset}
+              onSendAction={client.sendFighterAction}
             />
           )}
 
@@ -186,13 +189,11 @@ export default function App() {
               fighterB={activeFighterB}
               isPlayerFighter={playerFighterSlot !== 'spectator'}
               playerFighterSlot={playerFighterSlot}
+              fighterScores={client.currentRound.fighterScores}
               gameConfig={client.currentRound.gameConfig}
-              onComplete={(winnerId, scores) => {
-                if (client.isHost) {
-                  client.sendFighterInput('RESOLVE', 1);
-                }
-              }}
-              onSendInput={(action, value) => client.sendFighterInput(action, value)}
+              gameStartsAt={client.currentRound.gameStartsAt}
+              serverTimeOffset={client.serverTimeOffset}
+              onSendAction={client.sendFighterAction}
             />
           )}
 
@@ -202,13 +203,10 @@ export default function App() {
               fighterB={activeFighterB}
               isPlayerFighter={playerFighterSlot !== 'spectator'}
               playerFighterSlot={playerFighterSlot}
+              fighterScores={client.currentRound.fighterScores}
+              gameState={client.currentRound.gameState}
               gameConfig={client.currentRound.gameConfig}
-              onComplete={(winnerId, scores) => {
-                if (client.isHost) {
-                  client.sendFighterInput('RESOLVE', 1);
-                }
-              }}
-              onSendInput={(action, value) => client.sendFighterInput(action, value)}
+              onSendAction={client.sendFighterAction}
             />
           )}
 
@@ -218,13 +216,10 @@ export default function App() {
               fighterB={activeFighterB}
               isPlayerFighter={playerFighterSlot !== 'spectator'}
               playerFighterSlot={playerFighterSlot}
+              fighterScores={client.currentRound.fighterScores}
+              gameState={client.currentRound.gameState}
               gameConfig={client.currentRound.gameConfig}
-              onComplete={(winnerId, scores) => {
-                if (client.isHost) {
-                  client.sendFighterInput('RESOLVE', 1);
-                }
-              }}
-              onSendInput={(action, value) => client.sendFighterInput(action, value)}
+              onSendAction={client.sendFighterAction}
             />
           )}
 
@@ -234,13 +229,10 @@ export default function App() {
               fighterB={activeFighterB}
               isPlayerFighter={playerFighterSlot !== 'spectator'}
               playerFighterSlot={playerFighterSlot}
+              fighterScores={client.currentRound.fighterScores}
+              gameState={client.currentRound.gameState}
               gameConfig={client.currentRound.gameConfig}
-              onComplete={(winnerId, scores) => {
-                if (client.isHost) {
-                  client.sendFighterInput('RESOLVE', 1);
-                }
-              }}
-              onSendInput={(action, value) => client.sendFighterInput(action, value)}
+              onSendAction={client.sendFighterAction}
             />
           )}
 
@@ -250,13 +242,11 @@ export default function App() {
               fighterB={activeFighterB}
               isPlayerFighter={playerFighterSlot !== 'spectator'}
               playerFighterSlot={playerFighterSlot}
+              fighterScores={client.currentRound.fighterScores}
+              gameState={client.currentRound.gameState}
               gameConfig={client.currentRound.gameConfig}
-              onComplete={(winnerId, scores) => {
-                if (client.isHost) {
-                  client.sendFighterInput('RESOLVE', 1);
-                }
-              }}
-              onSendInput={(action, value) => client.sendFighterInput(action, value)}
+              serverTimeOffset={client.serverTimeOffset}
+              onSendAction={client.sendFighterAction}
             />
           )}
         </div>
@@ -295,7 +285,7 @@ export default function App() {
           <div className="flex gap-2">
             <span>Room: {client.roomCode || 'None'}</span>
             <span>Status: {client.status}</span>
-            {client.phase === 'LOBBY' && (
+            {client.phase === 'LOBBY' && client.isHost && (
               <button
                 onClick={client.addDebugBot}
                 className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:bg-amber-500/30 cursor-pointer"

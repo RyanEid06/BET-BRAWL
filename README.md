@@ -58,10 +58,17 @@ This enables the `+ Add Test Bot` button in the lobby, allowing a single develop
 ```bash
 npm test
 ```
-Runs 20 native Node 22 test cases covering:
-- Laplace smoothing and dynamic odds
-- Server-side bet validation (non-integer, negative, duplicate, fighter bets, bankroll checks)
-- Round payouts, honest net profit/loss, and tie refunds
-- Room capacity (min 6, max 9)
-- Fair fighter rotation across 6, 7, 8, and 9 players over 8 and 10 rounds
-- Genuine session-only awards
+Runs 36 comprehensive test cases covering:
+- **Authoritative Mini-Game Engine:** Pure server rule adjudication for all 6 games (Millisecond Stop elapsed timing & DNF timeout handling, Red Light Green Light schedule boundaries & score penalization, Speed Math question generation & 1.5s freeze penalty, Higher/Lower server-side validation against stable trivia dataset, Blind Pinpoint normalized coordinates & server-side Haversine kilometer distances, Quick Draw false-start foul detection & reaction time comparisons).
+- **Multi-Client WebSocket Integration:** Real WebSocket client/server lifecycle, connection authentication, token privacy enforcement (session tokens never leaked to public states), spectator wagering, and authoritative brawl resolution.
+- **LAN Network Discovery:** RFC1918 private IPv4 detection, link-local `169.254.x.x` rejection, candidate URL generation, and interface prioritization.
+- **Laplace Smoothing & Dynamic Odds:** Dynamic payout multipliers, underdog incentives, and bettor risk/reward balance.
+- **Strict Bet Validation:** Prevention of duplicate bets, self-betting by fighters, over-bankroll stakes, and invalid round phases.
+- **Authoritative Payouts & Refunds:** Honest net profit calculation (+net on wins, -stake on loss) and 0-net coin refunds on ties.
+- **Room Lifecycle & Fair Rotation:** 6–9 player room constraints, Fisher-Yates match scheduling across 8 and 10 rounds with equal opportunity distribution, and session awards calculated strictly from current session statistics.
+
+## Verification
+```bash
+npm run verify
+```
+Runs TypeScript verification (`tsc --noEmit`), the 36-test automated suite, and the Vite production build (`vite build`) in one command.

@@ -2,22 +2,27 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  * 
- * Bet & BRAWL: Mini-Game 3 - Speed Math (Fast Calculation)
+ * Bet & BRAWL: Mini-Game 3 - Speed Math (Authoritative Fast Calculation)
  */
 
 import React, { useState, useEffect } from 'react';
-import type { Player } from '../../engine/types.ts';
+import type { PublicPlayer } from '../../engine/types.ts';
 import { sound } from '../../engine/audio.ts';
-import { generateMathQuestions, MathQuestion } from '../../engine/miniGamesCatalog.ts';
+
+interface QuestionPublic {
+  q: string;
+  choices: number[];
+}
 
 interface Props {
-  fighterA: Player;
-  fighterB: Player;
+  fighterA: PublicPlayer;
+  fighterB: PublicPlayer;
   isPlayerFighter: boolean;
   playerFighterSlot: 'A' | 'B' | 'spectator';
+  fighterScores: Record<string, number>;
+  gameState?: Record<string, unknown>;
   gameConfig?: Record<string, unknown>;
-  onComplete: (winnerId: string | null, scores: Record<string, number>, isTie?: boolean) => void;
-  onSendInput?: (action: string, value: number) => void;
+  onSendAction: (action: { type: 'ANSWER'; questionIndex: number; answer: number }) => void;
 }
 
 export const SpeedMathGame: React.FC<Props> = ({
@@ -25,113 +30,42 @@ export const SpeedMathGame: React.FC<Props> = ({
   fighterB,
   isPlayerFighter,
   playerFighterSlot,
+  fighterScores,
+  gameState,
   gameConfig,
-  onComplete,
-  onSendInput,
+  onSendAction,
 }) => {
-  const [questions] = useState<MathQuestion[]>(() => {
-    return (gameConfig?.mathQuestions as MathQuestion[]) || generateMathQuestions(3);
-  });
+  const questions: QuestionPublic[] = (gameConfig?.questions as QuestionPublic[]) || [
+    { q: '12 + 15', choices: [27, 25, 29, 31] },
+    { q: '45 - 18', choices: [27, 23, 26, 28] },
+    { q: '7 × 8', choices: [56, 54, 48, 64] },
+  ];
 
-  const [stepA, setStepA] = useState<number>(0);
-  const [stepB, setStepB] = useState<number>(0);
-  const [penaltyA, setPenaltyA] = useState<boolean>(false);
-  const [penaltyB, setPenaltyB] = useState<boolean>(false);
-  const [completed, setCompleted] = useState<boolean>(false);
+  const scoreA = fighterScores[fighterA.id] || 0;
+  const scoreB = fighterScores[fighterB.id] || 0;
 
-  // Bot opponent simulation
-  useEffect(() => {
-    if (completed) return;
+  const myFighterId = playerFighterSlot === 'A' ? fighterA.id : playerFighterSlot === 'B' ? fighterB.id : null;
+  const myProgress = myFighterId ? (fighterScores[myFighterId] || 0) : 0;
 
-    const botInterval = setInterval(() => {
-      if (playerFighterSlot === 'A') {
-        if (!penaltyB && stepB < 3) {
-          if (Math.random() < 0.85) {
-            setStepB(prev => prev + 1);
-          } else {
-            setPenaltyB(true);
-            setTimeout(() => setPenaltyB(false), 1500); // 1.5s consistent penalty
-          }
-        }
-      } else if (playerFighterSlot === 'B') {
-        if (!penaltyA && stepA < 3) {
-          if (Math.random() < 0.85) {
-            setStepA(prev => prev + 1);
-          } else {
-            setPenaltyA(true);
-            setTimeout(() => setPenaltyA(false), 1500); // 1.5s consistent penalty
-          }
-        }
-      } else {
-        // Spectator view
-        setStepA(prev => Math.min(3, prev + 1));
-        setStepB(prev => Math.min(3, prev + 1));
-      }
-    }, 2500);
+  // Local feedback on selection
+  const [localPenalty, setLocalPenalty] = useState<boolean>(false);
+  const penalties = (gameState?.penaltyUntil as Record<string, number>) || {};
+  const isServerPenalized = myFighterId ? (penalties[myFighterId] && Date.now() < penalties[myFighterId]) : false;
+  const isPenalized = localPenalty || !!isServerPenalized;
 
-    return () => clearInterval(botInterval);
-  }, [stepA, stepB, penaltyA, penaltyB, completed, playerFighterSlot]);
-
-  // Handle player choice
   const handleSelectChoice = (choice: number) => {
-    if (completed) return;
-    const currentStep = playerFighterSlot === 'A' ? stepA : stepB;
-    if (currentStep >= 3) return;
+    if (!isPlayerFighter || isPenalized || myProgress >= 3) return;
 
-    const isCurrentPenalty = playerFighterSlot === 'A' ? penaltyA : penaltyB;
-    if (isCurrentPenalty) return;
-
-    const currentQ = questions[currentStep];
-    if (choice === currentQ.correct) {
-      sound.playTap(true);
-      if (playerFighterSlot === 'A') {
-        const nextStep = stepA + 1;
-        setStepA(nextStep);
-        if (onSendInput) onSendInput('ANSWER', nextStep);
-      } else if (playerFighterSlot === 'B') {
-        const nextStep = stepB + 1;
-        setStepB(nextStep);
-        if (onSendInput) onSendInput('ANSWER', nextStep);
-      }
-    } else {
-      sound.playTap(false);
-      // Consistent 1.5 second penalty freeze
-      if (playerFighterSlot === 'A') {
-        setPenaltyA(true);
-        setTimeout(() => setPenaltyA(false), 1500);
-      } else if (playerFighterSlot === 'B') {
-        setPenaltyB(true);
-        setTimeout(() => setPenaltyB(false), 1500);
-      }
-    }
+    sound.playTap(true);
+    onSendAction({
+      type: 'ANSWER',
+      questionIndex: myProgress,
+      answer: choice,
+    });
   };
 
-  // Check completion
-  useEffect(() => {
-    if (completed) return;
-
-    if (stepA >= 3 || stepB >= 3) {
-      setCompleted(true);
-      const isTie = stepA >= 3 && stepB >= 3;
-      const winnerId = isTie ? null : stepA >= 3 ? fighterA.id : fighterB.id;
-      sound.playFanfare();
-
-      setTimeout(() => {
-        onComplete(
-          winnerId,
-          {
-            [fighterA.id]: stepA,
-            [fighterB.id]: stepB,
-          },
-          isTie
-        );
-      }, 2200);
-    }
-  }, [stepA, stepB, completed, fighterA, fighterB, onComplete]);
-
-  const activeStep = playerFighterSlot === 'A' ? stepA : stepB;
-  const currentQ = questions[Math.min(2, activeStep)];
-  const isPenalized = playerFighterSlot === 'A' ? penaltyA : penaltyB;
+  const activeQuestionIndex = Math.min(2, myProgress);
+  const currentQ = questions[activeQuestionIndex];
 
   return (
     <div className="flex flex-col items-center justify-between w-full max-w-xl mx-auto p-4 py-6 bg-slate-950/90 rounded-3xl border border-cyan-500/30 text-white min-h-[460px]">
@@ -150,14 +84,14 @@ export const SpeedMathGame: React.FC<Props> = ({
         <div className="bg-slate-900/80 p-3 rounded-2xl border border-cyan-500/30">
           <div className="flex justify-between items-center text-xs font-mono mb-1">
             <span className="text-cyan-400 font-bold">{fighterA.avatar} {fighterA.name}</span>
-            <span className="text-cyan-300 font-bold">{stepA}/3</span>
+            <span className="text-cyan-300 font-bold">{scoreA}/3</span>
           </div>
           <div className="flex gap-1.5 h-3">
             {[0, 1, 2].map(idx => (
               <div
                 key={idx}
                 className={`flex-1 rounded-full transition-all ${
-                  idx < stepA ? 'bg-cyan-400 glow-cyan' : 'bg-slate-800'
+                  idx < scoreA ? 'bg-cyan-400 glow-cyan' : 'bg-slate-800'
                 }`}
               />
             ))}
@@ -167,14 +101,14 @@ export const SpeedMathGame: React.FC<Props> = ({
         <div className="bg-slate-900/80 p-3 rounded-2xl border border-amber-500/30">
           <div className="flex justify-between items-center text-xs font-mono mb-1">
             <span className="text-amber-400 font-bold">{fighterB.avatar} {fighterB.name}</span>
-            <span className="text-amber-300 font-bold">{stepB}/3</span>
+            <span className="text-amber-300 font-bold">{scoreB}/3</span>
           </div>
           <div className="flex gap-1.5 h-3">
             {[0, 1, 2].map(idx => (
               <div
                 key={idx}
                 className={`flex-1 rounded-full transition-all ${
-                  idx < stepB ? 'bg-amber-400 glow-gold' : 'bg-slate-800'
+                  idx < scoreB ? 'bg-amber-400 glow-gold' : 'bg-slate-800'
                 }`}
               />
             ))}
@@ -183,7 +117,7 @@ export const SpeedMathGame: React.FC<Props> = ({
       </div>
 
       {/* Main Math Problem Card */}
-      {isPlayerFighter && activeStep < 3 ? (
+      {isPlayerFighter && myProgress < 3 && currentQ ? (
         <div className="w-full flex flex-col items-center gap-4">
           <div
             className={`w-full py-8 rounded-3xl bg-slate-900 border-2 text-center transition-all ${
@@ -191,7 +125,7 @@ export const SpeedMathGame: React.FC<Props> = ({
             }`}
           >
             <div className="text-xs font-mono uppercase tracking-widest text-slate-400 mb-1">
-              {isPenalized ? '❌ 1.5s PENALTY FREEZE' : `QUESTION ${activeStep + 1} OF 3`}
+              {isPenalized ? '❌ 1.5s PENALTY FREEZE' : `QUESTION ${activeQuestionIndex + 1} OF 3`}
             </div>
             <div className="text-5xl font-mono font-black text-cyan-300 tracking-wider">
               {currentQ.q} = ?
@@ -204,7 +138,7 @@ export const SpeedMathGame: React.FC<Props> = ({
               <button
                 key={idx}
                 onClick={() => handleSelectChoice(choice)}
-                disabled={isPenalized || completed}
+                disabled={isPenalized}
                 className={`py-4 px-6 rounded-2xl font-mono text-2xl font-black transition-all transform active:scale-95 border-2 cursor-pointer ${
                   isPenalized
                     ? 'bg-slate-900 text-slate-600 border-slate-800 cursor-not-allowed'
@@ -220,7 +154,9 @@ export const SpeedMathGame: React.FC<Props> = ({
         <div className="p-8 rounded-2xl bg-slate-900 border border-slate-800 text-center w-full my-auto">
           <div className="text-4xl mb-2">🧮</div>
           <span className="text-sm font-mono text-cyan-300">
-            {activeStep >= 3 ? 'FINISHED! Calculating results...' : '👁️ SPECTATOR: Both fighters in mental arithmetic race!'}
+            {myProgress >= 3
+              ? 'SOLVED ALL 3 QUESTIONS! Syncing victory...'
+              : '👁️ SPECTATOR VIEW: Watching live arithmetic race!'}
           </span>
         </div>
       )}
