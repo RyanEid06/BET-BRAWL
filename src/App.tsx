@@ -111,7 +111,6 @@ export default function App() {
             networkInfo={client.networkInfo}
             totalRounds={client.totalRounds}
             onToggleReady={client.toggleReady}
-            onSetMatchLength={client.setMatchLength}
             onStartGame={client.startGame}
             onCloseRoom={client.closeRoom}
             onAddDebugBot={client.addDebugBot}
@@ -131,6 +130,7 @@ export default function App() {
             miniGame={client.currentRound.miniGame}
             revealEndsAt={client.currentRound.revealEndsAt}
             serverTimeOffset={client.serverTimeOffset}
+            isChampionship={client.currentRound.isChampionship}
           />
         </div>
       )}

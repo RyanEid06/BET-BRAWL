@@ -5,6 +5,8 @@ import {
   selectRoundFighters,
   initAuthoritativeRound,
   computeSessionAwards,
+  generateTournamentSchedule,
+  computeTournamentRankings,
   MIN_PLAYERS_TO_START,
   MAX_PLAYERS_CAPACITY,
 } from './roomEngine.ts';
@@ -52,80 +54,98 @@ test('Cryptographic session tokens and player IDs are unique and strong', () => 
   assert.equal(ids.size, 50, 'All 50 generated player IDs must be unique');
 });
 
-test('Room enforces minimum 6 players and maximum 9 players constant', () => {
-  assert.equal(MIN_PLAYERS_TO_START, 6);
+test('Room enforces minimum 3 players and maximum 9 players constant', () => {
+  assert.equal(MIN_PLAYERS_TO_START, 3);
   assert.equal(MAX_PLAYERS_CAPACITY, 9);
 });
 
-test('selectRoundFighters never selects the same player as both fighters', () => {
-  const players = createMockRoster(6);
-  for (let i = 0; i < 20; i++) {
-    const [f1, f2] = selectRoundFighters(players);
-    assert.notEqual(f1, f2, 'Fighters must be distinct');
-  }
-});
+test('generateTournamentSchedule creates circular qualifier graph for 3 to 9 players', () => {
+  for (let n = 3; n <= 9; n++) {
+    const players = createMockRoster(n);
+    const schedule = generateTournamentSchedule(players);
 
-test('Fighter rotation fairness over 8 rounds for 6 players', () => {
-  const players = createMockRoster(6);
-  let lastPairing: [string, string] | undefined = undefined;
+    // Exact count properties
+    assert.equal(schedule.totalPlayers, n, `Roster count must be ${n}`);
+    assert.equal(schedule.qualifierCount, n, `Must have exactly ${n} qualifier matches`);
+    assert.equal(schedule.totalRounds, n + 1, `Must have ${n + 1} total rounds (N qualifiers + 1 Championship)`);
+    assert.equal(schedule.matches.length, n + 1);
 
-  for (let round = 1; round <= 8; round++) {
-    const [f1, f2] = selectRoundFighters(players, lastPairing);
-    lastPairing = [f1, f2];
-    const p1 = players.find(p => p.id === f1)!;
-    const p2 = players.find(p => p.id === f2)!;
-    p1.matchesPlayed += 1;
-    p2.matchesPlayed += 1;
-  }
+    // Verify qualifier matches (0 to n - 1)
+    const appearances: Record<string, number> = {};
+    const opponents: Record<string, Set<string>> = {};
+    const pairings = new Set<string>();
 
-  // Over 8 rounds (16 fighter slots) across 6 players:
-  // 16 / 6 = 2.66 -> every player plays either 2 or 3 matches. Max diff is 1!
-  const playedCounts = players.map(p => p.matchesPlayed);
-  const minPlayed = Math.min(...playedCounts);
-  const maxPlayed = Math.max(...playedCounts);
-  assert.ok(maxPlayed - minPlayed <= 1, `Expected max diff <= 1, got min=${minPlayed}, max=${maxPlayed}`);
-});
+    for (let i = 0; i < n; i++) {
+      const match = schedule.matches[i];
+      assert.equal(match.isChampionship, false);
+      assert.equal(match.roundNumber, i + 1);
+      const [f1, f2] = match.fighterIds;
+      assert.notEqual(f1, f2, 'Fighters in match must be distinct');
 
-test('Fighter rotation fairness over 8 rounds for 7, 8, and 9 players', () => {
-  for (const playerCount of [7, 8, 9]) {
-    const players = createMockRoster(playerCount);
-    let lastPairing: [string, string] | undefined = undefined;
+      appearances[f1] = (appearances[f1] || 0) + 1;
+      appearances[f2] = (appearances[f2] || 0) + 1;
 
-    for (let round = 1; round <= 8; round++) {
-      const [f1, f2] = selectRoundFighters(players, lastPairing);
-      lastPairing = [f1, f2];
-      const p1 = players.find(p => p.id === f1)!;
-      const p2 = players.find(p => p.id === f2)!;
-      p1.matchesPlayed += 1;
-      p2.matchesPlayed += 1;
+      if (!opponents[f1]) opponents[f1] = new Set();
+      if (!opponents[f2]) opponents[f2] = new Set();
+      opponents[f1].add(f2);
+      opponents[f2].add(f1);
+
+      const pairKey = [f1, f2].sort().join(':');
+      assert.ok(!pairings.has(pairKey), `Duplicate pairing detected: ${pairKey}`);
+      pairings.add(pairKey);
     }
 
-    const playedCounts = players.map(p => p.matchesPlayed);
-    const minPlayed = Math.min(...playedCounts);
-    const maxPlayed = Math.max(...playedCounts);
-    assert.ok(maxPlayed - minPlayed <= 1, `Count ${playerCount}: min=${minPlayed}, max=${maxPlayed}`);
+    // Every player gets exactly 2 appearances and faces 2 distinct opponents
+    for (const p of players) {
+      assert.equal(appearances[p.id], 2, `Player ${p.id} must have exactly 2 qualifier appearances in ${n}-player room`);
+      assert.equal(opponents[p.id].size, 2, `Player ${p.id} must face 2 distinct opponents in ${n}-player room`);
+    }
+
+    // Championship match placeholder
+    const finalMatch = schedule.matches[n];
+    assert.equal(finalMatch.isChampionship, true);
+    assert.equal(finalMatch.roundNumber, n + 1);
   }
 });
 
-test('Fighter rotation fairness over 10 rounds for 6, 7, 8, and 9 players', () => {
-  for (const playerCount of [6, 7, 8, 9]) {
-    const players = createMockRoster(playerCount);
-    let lastPairing: [string, string] | undefined = undefined;
+test('generateTournamentSchedule strictly rejects fewer than 3 players or more than 9', () => {
+  assert.throws(() => generateTournamentSchedule(createMockRoster(2)), /at least 3 connected players/);
+  assert.throws(() => generateTournamentSchedule(createMockRoster(10)), /maximum capacity of 9/);
+});
 
-    for (let round = 1; round <= 10; round++) {
-      const [f1, f2] = selectRoundFighters(players, lastPairing);
-      lastPairing = [f1, f2];
-      const p1 = players.find(p => p.id === f1)!;
-      const p2 = players.find(p => p.id === f2)!;
-      p1.matchesPlayed += 1;
-      p2.matchesPlayed += 1;
-    }
+test('computeTournamentRankings ranks primarily by Brawl Points with head-to-head tiebreak', () => {
+  const players = createMockRoster(3);
+  const p1 = players[0];
+  const p2 = players[1];
+  const p3 = players[2];
 
-    const playedCounts = players.map(p => p.matchesPlayed);
-    const minPlayed = Math.min(...playedCounts);
-    const maxPlayed = Math.max(...playedCounts);
-    assert.ok(maxPlayed - minPlayed <= 1, `Count ${playerCount}: min=${minPlayed}, max=${maxPlayed}`);
-  }
+  // P1: 6 pts (2W), P2: 3 pts (1W), P3: 0 pts (0W)
+  p1.qualifierPoints = 6;
+  p1.qualifierWins = 2;
+  p2.qualifierPoints = 3;
+  p2.qualifierWins = 1;
+  p3.qualifierPoints = 0;
+  p3.qualifierWins = 0;
+
+  const matches = [
+    { matchIndex: 0, roundNumber: 1, fighterIds: [p1.id, p2.id] as [string, string], isChampionship: false, completed: true, winnerId: p1.id },
+    { matchIndex: 1, roundNumber: 2, fighterIds: [p2.id, p3.id] as [string, string], isChampionship: false, completed: true, winnerId: p2.id },
+    { matchIndex: 2, roundNumber: 3, fighterIds: [p3.id, p1.id] as [string, string], isChampionship: false, completed: true, winnerId: p1.id },
+  ];
+
+  const ranked = computeTournamentRankings(players, matches);
+  assert.equal(ranked[0].id, p1.id, 'Rank 1 must be P1 (6 pts)');
+  assert.equal(ranked[1].id, p2.id, 'Rank 2 must be P2 (3 pts)');
+  assert.equal(ranked[2].id, p3.id, 'Rank 3 must be P3 (0 pts)');
+  assert.equal(ranked[0].tournamentRank, 1);
+  assert.equal(ranked[1].tournamentRank, 2);
+  assert.equal(ranked[2].tournamentRank, 3);
+
+  // Test head-to-head tiebreak: P1 and P2 tied on 3 pts, but P1 beat P2 in match 0
+  p1.qualifierPoints = 3;
+  p2.qualifierPoints = 3;
+  const tiedRanked = computeTournamentRankings(players, matches);
+  assert.equal(tiedRanked[0].id, p1.id, 'P1 won head-to-head against P2, must rank higher');
 });
 
 test('initAuthoritativeRound initializes clean round state and mini-game config', () => {

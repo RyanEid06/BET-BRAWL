@@ -420,3 +420,93 @@ test('Production Server: disconnected lobby seats free capacity after grace expi
     await server.close();
   }
 });
+
+test('Production Server: rejects starting game with fewer than 3 connected players in normal mode', async () => {
+  const server = createBrawlServer();
+  const { port } = await server.listen(0, '127.0.0.1');
+  const wsUrl = `ws://127.0.0.1:${port}/ws`;
+  const clients: Array<Awaited<ReturnType<typeof createTestWsClient>>> = [];
+
+  try {
+    const host = await createTestWsClient(wsUrl);
+    clients.push(host);
+    host.ws.send(JSON.stringify({ type: 'CREATE_ROOM', payload: { playerName: 'Host' } }));
+    const hostJoin = await host.waitForType('JOIN_SUCCESS');
+    const roomCode = hostJoin.payload.roomCode;
+
+    const p2 = await createTestWsClient(wsUrl);
+    clients.push(p2);
+    p2.ws.send(JSON.stringify({ type: 'JOIN_ROOM', payload: { roomCode, playerName: 'P2' } }));
+    await p2.waitForType('JOIN_SUCCESS');
+
+    // Both ready, but only 2 players
+    p2.ws.send(JSON.stringify({ type: 'TOGGLE_READY' }));
+    await host.waitForRoomState(s => s.players?.find(p => p.name === 'P2')?.isReady === true);
+
+    // Host attempts to start with 2 players in normal mode (not debug)
+    host.ws.send(JSON.stringify({ type: 'START_GAME' }));
+    const err = await host.waitForType('JOIN_ERROR');
+    assert.equal(err.payload.code, 'NOT_ENOUGH_PLAYERS');
+    assert.match(err.payload.message, /at least 3 connected players/);
+  } finally {
+    for (const c of clients) c.close();
+    await server.close();
+  }
+});
+
+test('Production Server: 3-player Tournament Lifecycle (3 Qualifiers -> Top Two Final -> Podium)', async () => {
+  const server = createBrawlServer({
+    timingConfig: {
+      revealDurationMs: 100,
+      bettingDurationSeconds: 1,
+      countdownDurationMs: 100,
+    },
+  });
+  const { port } = await server.listen(0, '127.0.0.1');
+  const wsUrl = `ws://127.0.0.1:${port}/ws`;
+  const clients: Array<Awaited<ReturnType<typeof createTestWsClient>>> = [];
+
+  try {
+    const host = await createTestWsClient(wsUrl);
+    clients.push(host);
+    host.ws.send(JSON.stringify({ type: 'CREATE_ROOM', payload: { playerName: 'Host' } }));
+    const hostJoin = await host.waitForType('JOIN_SUCCESS');
+    const roomCode = hostJoin.payload.roomCode;
+
+    const p2 = await createTestWsClient(wsUrl);
+    clients.push(p2);
+    p2.ws.send(JSON.stringify({ type: 'JOIN_ROOM', payload: { roomCode, playerName: 'Player2' } }));
+    await p2.waitForType('JOIN_SUCCESS');
+
+    const p3 = await createTestWsClient(wsUrl);
+    clients.push(p3);
+    p3.ws.send(JSON.stringify({ type: 'JOIN_ROOM', payload: { roomCode, playerName: 'Player3' } }));
+    await p3.waitForType('JOIN_SUCCESS');
+
+    p2.ws.send(JSON.stringify({ type: 'TOGGLE_READY' }));
+    p3.ws.send(JSON.stringify({ type: 'TOGGLE_READY' }));
+
+    await host.waitForRoomState(s => {
+      const pl = s.players || [];
+      return pl.length === 3 && pl.every(p => p.isReady || p.isHost);
+    });
+
+    // Host starts tournament
+    host.ws.send(JSON.stringify({ type: 'START_GAME' }));
+
+    // Tournament schedule check: exactly 3 qualifiers + 1 Championship = 4 total rounds
+    const stateR1 = await host.waitForRoomState(s => s.phase === 'FIGHTER_REVEAL' && s.currentRound?.roundNumber === 1);
+    assert.equal(stateR1.payload.totalRounds, 4, '3 players must yield 4 total rounds (3 qualifiers + 1 championship)');
+    assert.equal(stateR1.payload.currentRound?.isChampionship, false, 'Round 1 must be a Qualifier');
+
+    const activeRoom = server.getActiveRoom()!;
+    assert.ok(activeRoom.tournamentSchedule);
+    assert.equal(activeRoom.tournamentSchedule.qualifierCount, 3);
+    assert.equal(activeRoom.tournamentSchedule.totalRounds, 4);
+    assert.equal(activeRoom.tournamentSchedule.matches.length, 4);
+  } finally {
+    for (const c of clients) c.close();
+    await server.close();
+  }
+});
+

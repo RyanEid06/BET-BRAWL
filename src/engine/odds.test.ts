@@ -28,6 +28,11 @@ const mockFighterA: Player = {
   totalCoinsLostInBets: 0,
   highestSingleBet: 0,
   highestSinglePayout: 0,
+  qualifierPoints: 6,
+  qualifierWins: 2,
+  qualifierTies: 0,
+  qualifierLosses: 0,
+  qualifierMatchesPlayed: 2,
 };
 
 const mockFighterB: Player = {
@@ -48,6 +53,11 @@ const mockFighterB: Player = {
   totalCoinsLostInBets: 0,
   highestSingleBet: 0,
   highestSinglePayout: 0,
+  qualifierPoints: 3,
+  qualifierWins: 1,
+  qualifierTies: 0,
+  qualifierLosses: 1,
+  qualifierMatchesPlayed: 2,
 };
 
 const mockSpectator: Player = {
@@ -68,6 +78,11 @@ const mockSpectator: Player = {
   totalCoinsLostInBets: 0,
   highestSingleBet: 0,
   highestSinglePayout: 0,
+  qualifierPoints: 0,
+  qualifierWins: 0,
+  qualifierTies: 0,
+  qualifierLosses: 0,
+  qualifierMatchesPlayed: 0,
 };
 
 const mockRound: RoundState = {

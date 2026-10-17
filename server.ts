@@ -23,6 +23,8 @@ import type {
   FighterAction,
   SecretBet,
   PublicRoomState,
+  TournamentSchedule,
+  TournamentMatch,
 } from './src/engine/types.ts';
 import { toPublicPlayer } from './src/engine/types.ts';
 import {
@@ -30,6 +32,8 @@ import {
   createFreshPlayer,
   initAuthoritativeRound,
   computeSessionAwards,
+  generateTournamentSchedule,
+  computeTournamentRankings,
   MIN_PLAYERS_TO_START,
   MAX_PLAYERS_CAPACITY,
   sanitizePlayerName,
@@ -99,11 +103,13 @@ export interface ServerRoom {
   totalRounds: number;
   currentRound: RoundState | null;
   internalGameState: InternalGameState | null;
+  tournamentSchedule: TournamentSchedule | null;
   roundHistory: Array<{
     roundNumber: number;
     miniGameName: string;
     winnerName: string;
     totalPotWon: number;
+    isChampionship?: boolean;
   }>;
   awards: Award[];
   lastPairing?: [string, string];
@@ -223,6 +229,7 @@ export function createBrawlServer(options: CreateServerOptions = {}) {
       players: publicPlayers,
       totalRounds: activeRoom.totalRounds,
       currentRound: publicRound,
+      tournamentSchedule: activeRoom.tournamentSchedule,
       roundHistory: activeRoom.roundHistory,
       awards: activeRoom.awards,
       debugMode: activeRoom.debugMode,
@@ -267,11 +274,34 @@ export function createBrawlServer(options: CreateServerOptions = {}) {
     clearRoundTimers(activeRoom.roundTimers);
 
     const playerList = Array.from(activeRoom.players.values());
+    let explicitFighters: [string, string] | undefined = undefined;
+    let isChampionship = false;
+
+    if (activeRoom.tournamentSchedule) {
+      if (roundNum <= activeRoom.tournamentSchedule.qualifierCount) {
+        // Qualifier match from pre-computed schedule
+        const match = activeRoom.tournamentSchedule.matches[roundNum - 1];
+        explicitFighters = match.fighterIds;
+        isChampionship = false;
+      } else if (roundNum === activeRoom.tournamentSchedule.totalRounds) {
+        // Championship Final!
+        const completedQualifiers = activeRoom.tournamentSchedule.matches.filter(m => !m.isChampionship);
+        const ranked = computeTournamentRankings(playerList, completedQualifiers);
+        const finalists: [string, string] = [ranked[0].id, ranked[1].id];
+        activeRoom.tournamentSchedule.finalists = finalists;
+        activeRoom.tournamentSchedule.matches[roundNum - 1].fighterIds = finalists;
+        explicitFighters = finalists;
+        isChampionship = true;
+      }
+    }
+
     const { round, internalGame } = initAuthoritativeRound(
       roundNum,
       activeRoom.totalRounds,
       playerList,
-      activeRoom.lastPairing
+      activeRoom.lastPairing,
+      explicitFighters,
+      isChampionship
     );
 
     const now = Date.now();
@@ -555,12 +585,57 @@ export function createBrawlServer(options: CreateServerOptions = {}) {
       activeRoom.players.set(p.sessionToken, p);
     }
 
+    // Update Tournament Schedule and Brawl Points
+    if (activeRoom.tournamentSchedule) {
+      const matchIndex = round.roundNumber - 1;
+      const match = activeRoom.tournamentSchedule.matches[matchIndex];
+      if (match) {
+        match.completed = true;
+        match.winnerId = winnerId;
+        match.tieResult = isTie;
+      }
+
+      const [f1Id, f2Id] = round.fighterIds;
+      const f1 = Array.from(activeRoom.players.values()).find(p => p.id === f1Id);
+      const f2 = Array.from(activeRoom.players.values()).find(p => p.id === f2Id);
+
+      if (!round.isChampionship) {
+        // QUALIFIER BRAWL:
+        // Win = 3 Brawl Points, Tie = 1 Brawl Point each, Loss = 0 Brawl Points
+        if (f1) f1.qualifierMatchesPlayed += 1;
+        if (f2) f2.qualifierMatchesPlayed += 1;
+
+        if (isTie) {
+          if (f1) { f1.qualifierPoints += 1; f1.qualifierTies += 1; }
+          if (f2) { f2.qualifierPoints += 1; f2.qualifierTies += 1; }
+        } else if (winnerId) {
+          const winnerFighter = f1?.id === winnerId ? f1 : f2;
+          const loserFighter = f1?.id === winnerId ? f2 : f1;
+          if (winnerFighter) {
+            winnerFighter.qualifierPoints += 3;
+            winnerFighter.qualifierWins += 1;
+          }
+          if (loserFighter) {
+            loserFighter.qualifierLosses += 1;
+          }
+        }
+
+        // Recompute current tournament rankings after qualifier match
+        const completedQualifiers = activeRoom.tournamentSchedule.matches.filter(m => !m.isChampionship && m.completed);
+        computeTournamentRankings(Array.from(activeRoom.players.values()), completedQualifiers);
+      } else {
+        // CHAMPIONSHIP FINAL:
+        activeRoom.tournamentSchedule.championId = isTie ? null : winnerId;
+      }
+    }
+
     const winningPlayer = updatedPlayers.find(p => p.id === winnerId);
     activeRoom.roundHistory.push({
       roundNumber: round.roundNumber,
       miniGameName: round.miniGame.name,
       winnerName: isTie ? 'TIE' : winningPlayer?.name || 'Unknown',
       totalPotWon: round.matchPot,
+      isChampionship: !!round.isChampionship,
     });
 
     activeRoom.phase = 'PAYOUT_RECAP';
@@ -633,9 +708,10 @@ export function createBrawlServer(options: CreateServerOptions = {}) {
             debugMode: !!debugMode,
             players: new Map([[hostPlayer.sessionToken, hostPlayer]]),
             clientSockets: new Map([[hostPlayer.sessionToken, ws]]),
-            totalRounds: 8,
+            totalRounds: 4,
             currentRound: null,
             internalGameState: null,
+            tournamentSchedule: null,
             roundHistory: [],
             awards: [],
             roundTimers: createEmptyRoundTimers(),
@@ -785,18 +861,7 @@ export function createBrawlServer(options: CreateServerOptions = {}) {
           return;
         }
 
-        // 4. SET_MATCH_LENGTH (Host-only, LOBBY-only)
-        if (msg.type === 'SET_MATCH_LENGTH') {
-          if (!player.isHost || activeRoom.phase !== 'LOBBY') return;
-          const total = (msg as any).payload?.totalRounds;
-          if (total === 8 || total === 10) {
-            activeRoom.totalRounds = total;
-            broadcastRoomState();
-          }
-          return;
-        }
-
-        // 5. START_GAME (Host-only, LOBBY-only)
+        // 4. START_GAME (Host-only, LOBBY-only)
         if (msg.type === 'START_GAME') {
           if (!player.isHost) {
             ws.send(JSON.stringify({
@@ -832,6 +897,51 @@ export function createBrawlServer(options: CreateServerOptions = {}) {
               payload: { code: 'NOT_ALL_READY', message: 'All connected players must be READY before starting.' },
             }));
             return;
+          }
+
+          // Authoritative Tournament Schedule Generation:
+          // Freeze session roster, shuffle once, generate N circular qualifiers + 1 Championship Final
+          let schedule: TournamentSchedule;
+          if (connectedPlayers.length < 3 && activeRoom.debugMode) {
+            const pA = connectedPlayers[0];
+            const pB = connectedPlayers[1] || connectedPlayers[0];
+            schedule = {
+              totalPlayers: connectedPlayers.length,
+              qualifierCount: 1,
+              totalRounds: 2,
+              matches: [
+                {
+                  matchIndex: 0,
+                  roundNumber: 1,
+                  fighterIds: [pA.id, pB.id],
+                  isChampionship: false,
+                  completed: false,
+                  winnerId: null,
+                },
+                {
+                  matchIndex: 1,
+                  roundNumber: 2,
+                  fighterIds: [pA.id, pB.id],
+                  isChampionship: true,
+                  completed: false,
+                  winnerId: null,
+                },
+              ],
+            };
+          } else {
+            schedule = generateTournamentSchedule(connectedPlayers);
+          }
+          activeRoom.tournamentSchedule = schedule;
+          activeRoom.totalRounds = schedule.totalRounds;
+
+          // Reset all players' tournament stats for fresh tournament
+          for (const p of activeRoom.players.values()) {
+            p.qualifierPoints = 0;
+            p.qualifierWins = 0;
+            p.qualifierTies = 0;
+            p.qualifierLosses = 0;
+            p.qualifierMatchesPlayed = 0;
+            p.tournamentRank = undefined;
           }
 
           startRound(1);
@@ -937,7 +1047,8 @@ export function createBrawlServer(options: CreateServerOptions = {}) {
 
           if (activeRoom.currentRound.roundNumber >= activeRoom.totalRounds) {
             activeRoom.phase = 'FINAL_PODIUM';
-            activeRoom.awards = computeSessionAwards(Array.from(activeRoom.players.values()));
+            const champId = activeRoom.tournamentSchedule?.championId;
+            activeRoom.awards = computeSessionAwards(Array.from(activeRoom.players.values()), champId);
             broadcastRoomState();
           } else {
             startRound(activeRoom.currentRound.roundNumber + 1);
@@ -961,11 +1072,18 @@ export function createBrawlServer(options: CreateServerOptions = {}) {
             p.totalCoinsLostInBets = 0;
             p.highestSingleBet = 0;
             p.highestSinglePayout = 0;
+            p.qualifierPoints = 0;
+            p.qualifierWins = 0;
+            p.qualifierTies = 0;
+            p.qualifierLosses = 0;
+            p.qualifierMatchesPlayed = 0;
+            p.tournamentRank = undefined;
             p.isReady = false;
           }
           activeRoom.phase = 'LOBBY';
           activeRoom.currentRound = null;
           activeRoom.internalGameState = null;
+          activeRoom.tournamentSchedule = null;
           activeRoom.roundHistory = [];
           activeRoom.awards = [];
           broadcastRoomState();

@@ -7,7 +7,7 @@
 
 import React, { useEffect, useState } from 'react';
 import QRCode from 'qrcode';
-import { Users, Wifi, Play, Bot, WifiOff, LogOut } from 'lucide-react';
+import { Users, Wifi, Play, Bot, WifiOff, LogOut, Trophy } from 'lucide-react';
 import type { PublicPlayer, RoomNetworkInfo } from '../engine/types.ts';
 import { MIN_PLAYERS_TO_START, MAX_PLAYERS_CAPACITY } from '../engine/roomEngine.ts';
 import { sound } from '../engine/audio.ts';
@@ -18,9 +18,8 @@ interface Props {
   isHost: boolean;
   myPlayer: PublicPlayer | null;
   networkInfo: RoomNetworkInfo | null;
-  totalRounds: number;
+  totalRounds?: number;
   onToggleReady: () => void;
-  onSetMatchLength: (rounds: 8 | 10) => void;
   onStartGame: () => void;
   onCloseRoom?: () => void;
   onAddDebugBot?: () => void;
@@ -33,9 +32,7 @@ export const LobbyScreen: React.FC<Props> = ({
   isHost,
   myPlayer,
   networkInfo,
-  totalRounds,
   onToggleReady,
-  onSetMatchLength,
   onStartGame,
   onCloseRoom,
   onAddDebugBot,
@@ -157,43 +154,31 @@ export const LobbyScreen: React.FC<Props> = ({
         )}
       </div>
 
-      {/* Host Match Length Selector (8 vs 10 Rounds) */}
-      <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-3.5 flex flex-col sm:flex-row items-center justify-between gap-3">
-        <div className="text-center sm:text-left">
-          <div className="text-xs font-mono text-slate-400 uppercase">MATCH LENGTH SETTING</div>
-          <div className="text-sm font-bold text-white font-display">
-            {totalRounds} Rounds {totalRounds === 8 ? '(Standard Party Match)' : '(Extended Marathon)'}
+      {/* Tournament Format Card */}
+      <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-3 text-center sm:text-left">
+        <div className="space-y-1">
+          <div className="text-xs font-mono text-cyan-400 font-bold uppercase tracking-wider flex items-center justify-center sm:justify-start gap-1.5">
+            <Trophy className="w-4 h-4 text-amber-400" />
+            <span>TOURNAMENT FORMAT</span>
+          </div>
+          <div className="text-base font-black text-white font-display">
+            {connectedPlayers.length >= 3
+              ? `${connectedPlayers.length} Qualifiers → Top Two → Championship Final`
+              : 'Qualifiers (Circular Graph) → Top Two → Championship Final'}
+          </div>
+          <div className="text-xs text-slate-400">
+            Every brawler fights in 2 qualifier brawls. Win = 3 Brawl Pts, Tie = 1 Pt. Top 2 fighters advance to the Championship Final!
           </div>
         </div>
 
-        {isHost ? (
-          <div className="flex gap-2">
-            <button
-              onClick={() => onSetMatchLength(8)}
-              className={`px-3 py-1.5 rounded-xl font-mono text-xs font-bold transition-all cursor-pointer ${
-                totalRounds === 8
-                  ? 'bg-amber-500 text-slate-950 glow-gold'
-                  : 'bg-slate-950 text-slate-300 border border-slate-700 hover:border-slate-500'
-              }`}
-            >
-              8 ROUNDS
-            </button>
-            <button
-              onClick={() => onSetMatchLength(10)}
-              className={`px-3 py-1.5 rounded-xl font-mono text-xs font-bold transition-all cursor-pointer ${
-                totalRounds === 10
-                  ? 'bg-amber-500 text-slate-950 glow-gold'
-                  : 'bg-slate-950 text-slate-300 border border-slate-700 hover:border-slate-500'
-              }`}
-            >
-              10 ROUNDS
-            </button>
+        <div className="shrink-0 flex items-center gap-2">
+          <div className="px-3.5 py-2 rounded-xl bg-slate-950 border border-cyan-500/40 text-center font-mono shadow-inner">
+            <span className="text-[10px] text-slate-400 uppercase block font-bold">Total Brawls</span>
+            <span className="text-base font-black text-amber-400">
+              {connectedPlayers.length >= 3 ? `${connectedPlayers.length + 1} Rounds` : 'N + 1'}
+            </span>
           </div>
-        ) : (
-          <span className="text-xs font-mono text-amber-400 font-bold bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800">
-            Host selected: {totalRounds} Rounds
-          </span>
-        )}
+        </div>
       </div>
 
       {/* Players in Room */}

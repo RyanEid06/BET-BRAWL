@@ -6,7 +6,7 @@
  */
 
 import crypto from 'crypto';
-import type { Player, RoundState, Award, MiniGameId } from './types.ts';
+import type { Player, RoundState, Award, MiniGameId, TournamentMatch, TournamentSchedule } from './types.ts';
 import { calculateDynamicOdds } from './odds.ts';
 import { MINI_GAMES } from './miniGamesCatalog.ts';
 import { initMiniGameServerState, InternalGameState } from './gameEngine.ts';
@@ -16,7 +16,7 @@ const PLAYER_COLORS = [
   '#ec4899', '#3b82f6', '#14b8a6', '#f97316'
 ];
 
-export const MIN_PLAYERS_TO_START = 6;
+export const MIN_PLAYERS_TO_START = 3;
 export const MAX_PLAYERS_CAPACITY = 9;
 
 export function getRandomPlayerColor(): string {
@@ -109,6 +109,11 @@ export function createFreshPlayer(
     totalCoinsLostInBets: 0,
     highestSingleBet: 0,
     highestSinglePayout: 0,
+    qualifierPoints: 0,
+    qualifierWins: 0,
+    qualifierTies: 0,
+    qualifierLosses: 0,
+    qualifierMatchesPlayed: 0,
   };
 }
 
@@ -168,24 +173,164 @@ export const MINI_GAME_ROTATION: MiniGameId[] = [
 ];
 
 /**
+ * Order circular qualifier matches to minimize back-to-back appearances.
+ */
+export function orderTournamentMatches(pairs: Array<[string, string]>): Array<[string, string]> {
+  if (pairs.length <= 1) return [...pairs];
+  const remaining = pairs.map(p => [...p] as [string, string]);
+  const ordered: Array<[string, string]> = [];
+
+  // Start with the first pairing
+  ordered.push(remaining.shift()!);
+
+  while (remaining.length > 0) {
+    const prev = ordered[ordered.length - 1];
+    // Find candidate that shares 0 players with the previous match
+    let bestIdx = remaining.findIndex(
+      p => p[0] !== prev[0] && p[0] !== prev[1] && p[1] !== prev[0] && p[1] !== prev[1]
+    );
+
+    // If 0 overlap is not possible (e.g. 3 players or edge cases), pick first
+    if (bestIdx === -1) {
+      bestIdx = 0;
+    }
+
+    ordered.push(remaining.splice(bestIdx, 1)[0]);
+  }
+
+  return ordered;
+}
+
+/**
+ * Constructs a circular qualifier graph from a fairly shuffled roster.
+ * Exactly N qualifier brawls for N players (where N is 3-9).
+ * - Every player gets exactly 2 qualifier appearances.
+ * - Every player faces 2 different opponents.
+ * - No duplicate qualifier pairing.
+ * - Round N+1 is the Championship Final between the top 2 ranked brawlers.
+ */
+export function generateTournamentSchedule(players: Player[]): TournamentSchedule {
+  const eligible = players.filter(p => p.connected !== false);
+  if (eligible.length < MIN_PLAYERS_TO_START) {
+    throw new Error(`Tournament requires at least ${MIN_PLAYERS_TO_START} connected players (got ${eligible.length})`);
+  }
+  if (eligible.length > MAX_PLAYERS_CAPACITY) {
+    throw new Error(`Tournament exceeds maximum capacity of ${MAX_PLAYERS_CAPACITY} players`);
+  }
+
+  // 1. Freeze and fairly shuffle the session roster
+  const shuffled = fisherYatesShuffle(eligible);
+  const n = shuffled.length;
+
+  // 2. Construct circular qualifier graph: P0 vs P1, P1 vs P2, ..., P(n-1) vs P0
+  const circularPairs: Array<[string, string]> = [];
+  for (let i = 0; i < n; i++) {
+    circularPairs.push([shuffled[i].id, shuffled[(i + 1) % n].id]);
+  }
+
+  // 3. Order matches to minimize back-to-back fighter appearances
+  const orderedPairs = orderTournamentMatches(circularPairs);
+
+  // 4. Construct N qualifier matches
+  const matches: TournamentMatch[] = orderedPairs.map((pair, idx) => ({
+    matchIndex: idx,
+    roundNumber: idx + 1,
+    fighterIds: pair,
+    isChampionship: false,
+    completed: false,
+    winnerId: null,
+  }));
+
+  // 5. Championship Final (Round N+1) placeholder
+  matches.push({
+    matchIndex: n,
+    roundNumber: n + 1,
+    fighterIds: ['', ''],
+    isChampionship: true,
+    completed: false,
+    winnerId: null,
+  });
+
+  return {
+    totalPlayers: n,
+    qualifierCount: n,
+    totalRounds: n + 1,
+    matches,
+  };
+}
+
+/**
+ * Authoritatively computes tournament rankings based primarily on fighting performance:
+ * 1. Qualifier Brawl Points DESC (Win = 3, Tie = 1, Loss = 0)
+ * 2. Head-to-head match result between tied players
+ * 3. Total bankroll / coins DESC
+ * 4. Qualifier wins DESC
+ * 5. Deterministic fallback (id comparison)
+ */
+export function computeTournamentRankings(
+  players: Player[],
+  qualifierMatches: TournamentMatch[]
+): Player[] {
+  const sorted = [...players].sort((a, b) => {
+    // 1. Brawl Points DESC
+    if (b.qualifierPoints !== a.qualifierPoints) {
+      return b.qualifierPoints - a.qualifierPoints;
+    }
+
+    // 2. Head-to-head match tiebreaker: if they fought each other in a completed qualifier
+    const h2h = qualifierMatches.find(
+      m =>
+        m.completed &&
+        ((m.fighterIds[0] === a.id && m.fighterIds[1] === b.id) ||
+         (m.fighterIds[0] === b.id && m.fighterIds[1] === a.id))
+    );
+    if (h2h && h2h.winnerId) {
+      if (h2h.winnerId === a.id) return -1;
+      if (h2h.winnerId === b.id) return 1;
+    }
+
+    // 3. Bankroll / coins DESC
+    if (b.coins !== a.coins) {
+      return b.coins - a.coins;
+    }
+
+    // 4. Qualifier wins DESC
+    if (b.qualifierWins !== a.qualifierWins) {
+      return b.qualifierWins - a.qualifierWins;
+    }
+
+    // 5. Stable ID fallback
+    return a.id.localeCompare(b.id);
+  });
+
+  sorted.forEach((p, idx) => {
+    p.tournamentRank = idx + 1;
+  });
+
+  return sorted;
+}
+
+/**
  * Initializes a new authoritative round along with internal private game state.
  */
 export function initAuthoritativeRound(
   roundNumber: number,
   totalRounds: number,
   players: Player[],
-  lastPairing?: [string, string]
+  lastPairing?: [string, string],
+  explicitFighters?: [string, string],
+  isChampionship = false
 ): { round: RoundState; internalGame: InternalGameState } {
   const gameIndex = (roundNumber - 1) % MINI_GAME_ROTATION.length;
   const miniGameId = MINI_GAME_ROTATION[gameIndex];
   const miniGame = MINI_GAMES[miniGameId];
 
-  const fighterIds = selectRoundFighters(players, lastPairing);
+  const fighterIds = explicitFighters || selectRoundFighters(players, lastPairing);
   const fighterA = players.find(p => p.id === fighterIds[0])!;
   const fighterB = players.find(p => p.id === fighterIds[1])!;
 
   const initialOdds = calculateDynamicOdds(fighterA, fighterB, []);
-  const matchPot = 250; // virtual coin bounty for winner
+  const matchPot = isChampionship ? 500 : 250; // 500c championship bounty, 250c qualifier bounty
 
   const now = Date.now();
   const revealDurationMs = 4500;
@@ -213,6 +358,7 @@ export function initAuthoritativeRound(
     bettingTimeRemaining: 15,
     gameTimeRemaining: miniGame.durationSeconds,
     winnerId: null,
+    isChampionship,
     fighterScores: {
       [fighterIds[0]]: 0,
       [fighterIds[1]]: 0,
@@ -232,10 +378,72 @@ export function initAuthoritativeRound(
 /**
  * Computes end-of-game superlative awards using ONLY genuine current session stats.
  */
-export function computeSessionAwards(players: Player[]): Award[] {
+export function computeSessionAwards(players: Player[], championId?: string | null): Award[] {
   const awards: Award[] = [];
 
-  // 1. Biggest Risk Taker
+  // 1. Tournament Champion
+  if (championId) {
+    const champ = players.find(p => p.id === championId);
+    if (champ) {
+      awards.push({
+        id: 'tournament_champion',
+        title: 'Tournament Champion',
+        icon: '🏆',
+        badgeColor: '#eab308',
+        recipientId: champ.id,
+        recipientName: champ.name,
+        description: 'Crowned Bet & BRAWL Tournament Champion in the Final!',
+        metric: `Champion (${champ.qualifierPoints} Brawl Pts)`,
+      });
+    }
+  }
+
+  // 2. Brawl King (most matches won in the ring)
+  const mostWins = [...players].sort((a, b) => b.matchesWon - a.matchesWon)[0];
+  if (mostWins && mostWins.matchesWon > 0) {
+    awards.push({
+      id: 'brawl_king',
+      title: 'Brawl King',
+      icon: '👑',
+      badgeColor: '#eab308',
+      recipientId: mostWins.id,
+      recipientName: mostWins.name,
+      description: 'Dominated the arena with the most brawl victories.',
+      metric: `${mostWins.matchesWon} Brawl Wins`,
+    });
+  }
+
+  // 3. High Roller (largest single winning payout)
+  const largestPayout = [...players].sort((a, b) => b.highestSinglePayout - a.highestSinglePayout)[0];
+  if (largestPayout && largestPayout.highestSinglePayout > 0) {
+    awards.push({
+      id: 'high_roller',
+      title: 'High Roller',
+      icon: '💎',
+      badgeColor: '#06b6d4',
+      recipientId: largestPayout.id,
+      recipientName: largestPayout.name,
+      description: 'Cashed in the largest single winning payout.',
+      metric: `+${largestPayout.highestSinglePayout} coin payout`,
+    });
+  }
+
+  // 4. Wealth Champion (highest total coin bankroll)
+  const highRollerCoins = [...players].sort((a, b) => b.coins - a.coins)[0];
+  if (highRollerCoins && highRollerCoins.coins > 1000) {
+    awards.push({
+      id: 'wealth_champion',
+      title: 'Money Bags',
+      icon: '💰',
+      badgeColor: '#10b981',
+      recipientId: highRollerCoins.id,
+      recipientName: highRollerCoins.name,
+      description: 'Amassed the largest coin fortune of the session.',
+      metric: `${highRollerCoins.coins.toLocaleString()} Coins`,
+    });
+  }
+
+  // 5. Biggest Risk Taker
   const riskTaker = [...players].sort((a, b) => b.highestSingleBet - a.highestSingleBet)[0];
   if (riskTaker && riskTaker.highestSingleBet > 0) {
     awards.push({
@@ -250,39 +458,7 @@ export function computeSessionAwards(players: Player[]): Award[] {
     });
   }
 
-  // 2. Unluckiest Bettor
-  const unluckiest = [...players].sort((a, b) => b.totalCoinsLostInBets - a.totalCoinsLostInBets)[0];
-  if (unluckiest && unluckiest.totalCoinsLostInBets > 0) {
-    awards.push({
-      id: 'unlucky_bettor',
-      title: 'Unluckiest Bettor',
-      icon: '📉',
-      badgeColor: '#f97316',
-      recipientId: unluckiest.id,
-      recipientName: unluckiest.name,
-      description: 'Defied the odds in the worst possible way.',
-      metric: `Lost ${unluckiest.totalCoinsLostInBets} coins in bets`,
-    });
-  }
-
-  // 3. Brawl King / The Clutch Fighter
-  const brawlKing = [...players]
-    .filter(p => p.matchesPlayed > 0)
-    .sort((a, b) => b.matchesWon - a.matchesWon)[0];
-  if (brawlKing && brawlKing.matchesWon > 0) {
-    awards.push({
-      id: 'brawl_king',
-      title: 'Brawl King',
-      icon: '👑',
-      badgeColor: '#eab308',
-      recipientId: brawlKing.id,
-      recipientName: brawlKing.name,
-      description: 'Most 1v1 brawl mini-game victories.',
-      metric: `${brawlKing.matchesWon} Brawl Victories`,
-    });
-  }
-
-  // 4. The Oracle (highest betting win rate, min 2 bets placed)
+  // 6. The Oracle (highest betting win rate, min 2 bets placed)
   const oracle = [...players]
     .filter(p => p.totalBetsPlaced >= 2)
     .sort((a, b) => (b.totalBetsWon / b.totalBetsPlaced) - (a.totalBetsWon / a.totalBetsPlaced))[0];
@@ -300,18 +476,18 @@ export function computeSessionAwards(players: Player[]): Award[] {
     });
   }
 
-  // 5. High Roller (largest single payout)
-  const highRoller = [...players].sort((a, b) => b.highestSinglePayout - a.highestSinglePayout)[0];
-  if (highRoller && highRoller.highestSinglePayout > 0) {
+  // 7. Unluckiest Bettor
+  const unluckiest = [...players].sort((a, b) => b.totalCoinsLostInBets - a.totalCoinsLostInBets)[0];
+  if (unluckiest && unluckiest.totalCoinsLostInBets > 0) {
     awards.push({
-      id: 'high_roller',
-      title: 'High Roller',
-      icon: '💎',
-      badgeColor: '#06b6d4',
-      recipientId: highRoller.id,
-      recipientName: highRoller.name,
-      description: 'Cashed in the largest single winning payout.',
-      metric: `+${highRoller.highestSinglePayout} coin payout`,
+      id: 'unlucky_bettor',
+      title: 'Unluckiest Bettor',
+      icon: '📉',
+      badgeColor: '#f97316',
+      recipientId: unluckiest.id,
+      recipientName: unluckiest.name,
+      description: 'Defied the odds in the worst possible way.',
+      metric: `Lost ${unluckiest.totalCoinsLostInBets} coins in bets`,
     });
   }
 

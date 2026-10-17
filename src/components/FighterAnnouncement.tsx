@@ -18,6 +18,7 @@ interface Props {
   miniGame: MiniGameMeta;
   revealEndsAt?: number;
   serverTimeOffset?: number;
+  isChampionship?: boolean;
 }
 
 export const FighterAnnouncement: React.FC<Props> = ({
@@ -28,6 +29,7 @@ export const FighterAnnouncement: React.FC<Props> = ({
   miniGame,
   revealEndsAt,
   serverTimeOffset = 0,
+  isChampionship = false,
 }) => {
   const [secondsRemaining, setSecondsRemaining] = useState<number>(() => {
     if (revealEndsAt) {
@@ -53,42 +55,64 @@ export const FighterAnnouncement: React.FC<Props> = ({
     return () => clearInterval(interval);
   }, [revealEndsAt, serverTimeOffset]);
 
+  const qualifierTotal = Math.max(1, totalRounds - 1);
+
   return (
     <div className="relative w-full max-w-xl mx-auto p-4 flex flex-col justify-between items-center text-center space-y-4">
       {/* Round & Game Header */}
       <div className="space-y-1">
-        <span className="px-3 py-1 rounded-full bg-cyan-950 text-cyan-300 border border-cyan-700/60 font-mono text-xs font-bold uppercase">
-          ROUND {roundNumber} OF {totalRounds}
-        </span>
-        <h2 className="text-2xl sm:text-3xl font-black font-display text-white tracking-wide mt-1">
+        {isChampionship ? (
+          <span className="px-4 py-1.5 rounded-full bg-amber-950 text-amber-300 border-2 border-amber-400 font-mono text-xs font-black uppercase tracking-wider glow-gold inline-flex items-center gap-1.5">
+            <span>👑</span>
+            <span>TOURNAMENT CHAMPIONSHIP FINAL</span>
+            <span>👑</span>
+          </span>
+        ) : (
+          <span className="px-3 py-1 rounded-full bg-cyan-950 text-cyan-300 border border-cyan-700/60 font-mono text-xs font-bold uppercase">
+            QUALIFIER BRAWL {roundNumber} OF {qualifierTotal}
+          </span>
+        )}
+        <h2 className={`text-2xl sm:text-3xl font-black font-display tracking-wide mt-1 ${
+          isChampionship ? 'text-transparent bg-clip-text bg-gradient-to-r from-amber-400 via-yellow-200 to-amber-500' : 'text-white'
+        }`}>
           {miniGame.name.toUpperCase()}
         </h2>
-        <p className="text-slate-400 text-xs">{miniGame.tagline}</p>
+        <p className="text-slate-400 text-xs">
+          {isChampionship ? '★ TITLE FIGHT FOR THE CHAMPIONSHIP · 500c BOUNTY ★' : miniGame.tagline}
+        </p>
       </div>
 
       {/* VS Splash Cards */}
       <div className="w-full grid grid-cols-2 gap-3 relative items-center">
         {/* Fighter A */}
-        <div className="p-4 rounded-2xl bg-cyan-950/40 border-2 border-cyan-400 shadow-lg flex flex-col items-center space-y-2 glow-cyan">
-          <span className="text-[10px] font-mono font-bold text-cyan-300 uppercase">BLUE CORNER</span>
+        <div className={`p-4 rounded-2xl bg-cyan-950/40 border-2 border-cyan-400 shadow-lg flex flex-col items-center space-y-2 glow-cyan ${
+          isChampionship ? 'border-amber-400' : ''
+        }`}>
+          <span className="text-[10px] font-mono font-bold text-cyan-300 uppercase">
+            {isChampionship ? 'TOP SEED FINALIST' : 'BLUE CORNER'}
+          </span>
           <div className="text-5xl p-2 bg-slate-950 rounded-2xl border border-cyan-500/40">
             {fighterA.avatar}
           </div>
           <h3 className="text-lg font-black text-white font-display truncate max-w-full">{fighterA.name}</h3>
           <div className="text-xs font-mono text-cyan-300 font-bold">
-            {fighterA.matchesWon}W · {fighterA.matchesPlayed - fighterA.matchesWon}L
+            {fighterA.qualifierPoints} Brawl Pts ({fighterA.qualifierWins}W · {fighterA.qualifierLosses}L)
           </div>
         </div>
 
         {/* Fighter B */}
-        <div className="p-4 rounded-2xl bg-rose-950/40 border-2 border-rose-500 shadow-lg flex flex-col items-center space-y-2 glow-crimson">
-          <span className="text-[10px] font-mono font-bold text-rose-300 uppercase">RED CORNER</span>
+        <div className={`p-4 rounded-2xl bg-rose-950/40 border-2 border-rose-500 shadow-lg flex flex-col items-center space-y-2 glow-crimson ${
+          isChampionship ? 'border-amber-400' : ''
+        }`}>
+          <span className="text-[10px] font-mono font-bold text-rose-300 uppercase">
+            {isChampionship ? 'RUNNER-UP FINALIST' : 'RED CORNER'}
+          </span>
           <div className="text-5xl p-2 bg-slate-950 rounded-2xl border border-rose-500/40">
             {fighterB.avatar}
           </div>
           <h3 className="text-lg font-black text-white font-display truncate max-w-full">{fighterB.name}</h3>
           <div className="text-xs font-mono text-rose-300 font-bold">
-            {fighterB.matchesWon}W · {fighterB.matchesPlayed - fighterB.matchesWon}L
+            {fighterB.qualifierPoints} Brawl Pts ({fighterB.qualifierWins}W · {fighterB.qualifierLosses}L)
           </div>
         </div>
       </div>

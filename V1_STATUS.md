@@ -21,6 +21,10 @@ Last Updated: Final Hardening & Acceptance Verification Pass
 - **Higher/Lower Trivia Quality:** Shuffled selection of 4 trivia questions using Fisher-Yates, curated stable scientific/astronomic/physical/historical facts, and added instant answer feedback.
 - **Authentic Equirectangular World Map:** Bundled genuine equirectangular coastlines in Blind Pinpoint aligned with `x = lon + 180` and `y = 90 - lat` (Natural Earth Public Domain standard).
 - **Synchronized 3-2-1 Countdown:** Integrated `SynchronizedCountdown` deriving 3.. 2.. 1.. BRAWL! from authoritative `gameStartsAt` and `serverTimeOffset`.
+- **Room Limit Updated to 3–9 Players:** Updated `MIN_PLAYERS_TO_START = 3` and `MAX_PLAYERS_CAPACITY = 9`. Production rooms strictly enforce a minimum of 3 connected ready players, rejecting attempts to start with fewer.
+- **Tournament Format (Qualifiers → Top Two → Championship Final):** Completely replaced obsolete manual 8/10 round selection with a fair circular tournament graph (`P0 vs P1`, `P1 vs P2`, ..., `P(n-1) vs P0`). Every player participates in exactly 2 qualifier brawls facing 2 different opponents.
+- **Authoritative Brawl Points System:** Qualifier victories award 3 Brawl Points, ties award 1 Brawl Point each, and defeats award 0. Standings are ranked primarily by Brawl Points, with head-to-head qualifier outcomes as primary tiebreaker, followed by coin bankroll.
+- **Championship Final Title Bout:** The top 2 ranked seeds from qualifiers advance to the Championship Final with a +500 coin match pot. The winner is crowned Tournament Champion on the podium with specialized awards and celebration.
 - **Package Reproducibility:** Fixed `package.json` devDependencies and generated `package-lock.json`. Clean installs via `npm ci` verified.
 
 ---
@@ -29,15 +33,15 @@ Last Updated: Final Hardening & Acceptance Verification Pass
 
 ### AUTOMATED VERIFIED (PASSING IN THIS ENVIRONMENT)
 - [x] `npm run typecheck`: **PASSING** (0 TypeScript errors)
-- [x] `npm test`: **PASSING** (44/44 automated tests passing)
+- [x] `npm test`: **PASSING** (45/45 automated tests passing)
 - [x] `npm run build`: **PASSING** (Clean Vite static production bundle in `dist/`)
 - [x] `npm run verify`: **PASSING** (typecheck + test + build pipeline)
-- [x] Genuine Production Server WebSocket Integration Tests: **PASSING** (4 real WebSocket integration suites exercising `createBrawlServer`)
+- [x] Genuine Production Server WebSocket Integration Tests: **PASSING** (Multi-client integration suites exercising `createBrawlServer` across 3-player and 6-player tournaments)
 - [x] Production Server Standalone Launch (`npm start` / `server.ts`): **PASSING** (HTTP 200 on index, `/api/network-info` JSON payload verified, production `dist/` served directly)
 - [x] Reproducible dependency locking: `package-lock.json` present and tested with `npm ci`
 
 ### MANUAL VERIFICATION REQUIRED (NOT PERFORMED IN CONTAINER ENVIRONMENT)
-- [ ] **Physical Multi-Phone Wi-Fi Testing:** Because this development container has no physical radio hardware or physical smartphones connected to a home router, manual physical testing is required on a physical Windows/Mac/Linux host with 6–9 real phones. Specifically test:
+- [ ] **Physical Multi-Phone Wi-Fi Testing:** Because this development container has no physical radio hardware or physical smartphones connected to a home router, manual physical testing is recommended on a physical Windows/Mac/Linux host with 3–9 real phones. Specifically test:
   - Windows Defender Firewall permission prompt ("Allow access on private networks").
   - Wi-Fi router AP Client Isolation settings (some guest Wi-Fi networks block client-to-client traffic).
   - iOS Safari and Android Chrome touch responsiveness during rapid tapping.
@@ -53,22 +57,22 @@ Last Updated: Final Hardening & Acceptance Verification Pass
   ```
 - `npm test`:
   ```
-  # tests 44
+  # tests 45
   # suites 0
-  # pass 44
+  # pass 45
   # fail 0
   (exit code 0)
   ```
 - `npm run build`:
   ```
-  ✓ built in 753ms
+  ✓ built in 760ms
   dist/index.html                   0.96 kB
-  dist/assets/index-DpZGCeP5.css   59.41 kB
-  dist/assets/index-L9ACB9dZ.js   586.83 kB
+  dist/assets/index-*.css          59.41 kB
+  dist/assets/index-*.js          587.00 kB
   (exit code 0)
   ```
 - `npm run verify`:
   ```
-  typecheck -> test (44/44 pass) -> build (clean dist)
+  typecheck -> test (45/45 pass) -> build (clean dist)
   (exit code 0)
   ```

@@ -19,10 +19,19 @@ interface Props {
 }
 
 export const PodiumScreen: React.FC<Props> = ({ players, awards, isHost, onPlayAgain }) => {
-  const ranked = [...players].sort((a, b) => b.coins - a.coins);
-  const first = ranked[0];
-  const second = ranked[1];
-  const third = ranked[2];
+  const champAward = awards.find(a => a.id === 'tournament_champion');
+  const championPlayer = champAward ? players.find(p => p.id === champAward.recipientId) : null;
+
+  const rankedByBrawl = [...players].sort((a, b) => {
+    if (b.qualifierPoints !== a.qualifierPoints) {
+      return b.qualifierPoints - a.qualifierPoints;
+    }
+    return b.coins - a.coins;
+  });
+
+  const first = championPlayer || rankedByBrawl[0];
+  const second = rankedByBrawl.find(p => p.id !== first?.id) || rankedByBrawl[1];
+  const third = rankedByBrawl.find(p => p.id !== first?.id && p.id !== second?.id) || rankedByBrawl[2];
 
   useEffect(() => {
     sound.playFanfare();
@@ -73,8 +82,8 @@ export const PodiumScreen: React.FC<Props> = ({ players, awards, isHost, onPlayA
             <div className="text-xs font-bold text-slate-200 truncate max-w-[85px]">
               {second.name}
             </div>
-            <div className="text-[11px] font-mono text-amber-400 font-bold mb-1.5">
-              {second.coins.toLocaleString()}c
+            <div className="text-[11px] font-mono text-cyan-300 font-bold mb-1.5">
+              {second.qualifierPoints} pts · <span className="text-amber-400">{second.coins.toLocaleString()}c</span>
             </div>
             <div className="w-full h-24 rounded-t-2xl bg-gradient-to-t from-slate-800 to-slate-600 border-t-4 border-slate-300 shadow-xl flex flex-col items-center justify-start pt-2 text-slate-200 font-display font-black text-2xl">
               2nd
@@ -90,8 +99,8 @@ export const PodiumScreen: React.FC<Props> = ({ players, awards, isHost, onPlayA
             <div className="text-sm font-black text-amber-300 truncate max-w-[95px]">
               {first.name}
             </div>
-            <div className="text-xs font-mono text-amber-400 font-black mb-1.5">
-              {first.coins.toLocaleString()}c
+            <div className="text-xs font-mono text-amber-300 font-black mb-1.5">
+              {first.qualifierPoints} pts · <span className="text-amber-400">{first.coins.toLocaleString()}c</span>
             </div>
             <div className="w-full h-36 rounded-t-2xl bg-gradient-to-t from-amber-900 to-amber-500 border-t-4 border-amber-200 shadow-2xl flex flex-col items-center justify-start pt-2 text-slate-950 font-display font-black text-3xl glow-gold">
               1st
@@ -107,8 +116,8 @@ export const PodiumScreen: React.FC<Props> = ({ players, awards, isHost, onPlayA
             <div className="text-xs font-bold text-amber-600 truncate max-w-[85px]">
               {third.name}
             </div>
-            <div className="text-[11px] font-mono text-amber-400 font-bold mb-1.5">
-              {third.coins.toLocaleString()}c
+            <div className="text-[11px] font-mono text-cyan-300 font-bold mb-1.5">
+              {third.qualifierPoints} pts · <span className="text-amber-400">{third.coins.toLocaleString()}c</span>
             </div>
             <div className="w-full h-20 rounded-t-2xl bg-gradient-to-t from-amber-950 to-amber-800 border-t-4 border-amber-700 shadow-xl flex flex-col items-center justify-start pt-2 text-amber-300 font-display font-black text-xl">
               3rd
@@ -149,24 +158,40 @@ export const PodiumScreen: React.FC<Props> = ({ players, awards, isHost, onPlayA
 
       {/* Complete Room Rankings Table */}
       <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 shadow-xl text-left space-y-2">
-        <div className="text-xs font-mono text-slate-400 uppercase border-b border-slate-800 pb-1.5">
-          FINAL BANKROLL STANDINGS
+        <div className="text-xs font-mono text-slate-400 uppercase border-b border-slate-800 pb-1.5 flex items-center justify-between">
+          <span>FINAL TOURNAMENT STANDINGS</span>
+          <span>BRAWL PTS · COINS</span>
         </div>
         <div className="space-y-1.5">
-          {ranked.map((p, idx) => (
+          {rankedByBrawl.map((p, idx) => (
             <div
               key={p.id}
-              className="flex items-center justify-between p-2 rounded-xl bg-slate-950/80 border border-slate-800 text-xs font-mono"
+              className={`flex items-center justify-between p-2.5 rounded-xl border text-xs font-mono ${
+                p.id === first?.id
+                  ? 'bg-amber-950/40 border-amber-500/60 shadow-md'
+                  : 'bg-slate-950/80 border-slate-800'
+              }`}
             >
               <div className="flex items-center gap-2">
                 <span className="font-bold text-slate-500 w-4">{idx + 1}.</span>
                 <span>{p.avatar}</span>
                 <span className="font-bold text-white font-sans">{p.name}</span>
-                {idx === 0 && <span>👑</span>}
+                {p.id === first?.id && (
+                  <span className="text-[10px] font-mono px-1.5 py-0.5 bg-amber-950 text-amber-300 border border-amber-600 rounded font-black">
+                    CHAMPION 👑
+                  </span>
+                )}
+                {p.id === second?.id && (
+                  <span className="text-[10px] font-mono px-1.5 py-0.5 bg-slate-800 text-slate-300 border border-slate-600 rounded">
+                    FINALIST
+                  </span>
+                )}
               </div>
-              <div className="text-right">
-                <span className="font-bold text-amber-400">{p.coins.toLocaleString()}c</span>
-                <span className="text-slate-500 ml-2">({p.matchesWon}W - {p.matchesPlayed - p.matchesWon}L)</span>
+              <div className="text-right flex items-center gap-3">
+                <span className="text-cyan-400 font-bold">
+                  {p.qualifierPoints} pts <span className="text-slate-500 text-[11px] font-normal">({p.qualifierWins}W-{p.qualifierLosses}L)</span>
+                </span>
+                <span className="font-bold text-amber-400 min-w-[70px] text-right">{p.coins.toLocaleString()}c</span>
               </div>
             </div>
           ))}

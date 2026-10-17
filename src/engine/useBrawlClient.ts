@@ -16,6 +16,7 @@ import type {
   RoomNetworkInfo,
   FighterAction,
   SecretBet,
+  TournamentSchedule,
 } from './types.ts';
 import { sound } from './audio.ts';
 
@@ -35,11 +36,13 @@ export interface BrawlClientState {
   players: PublicPlayer[];
   totalRounds: number;
   currentRound: RoundState | null;
+  tournamentSchedule: TournamentSchedule | null;
   roundHistory: Array<{
     roundNumber: number;
     miniGameName: string;
     winnerName: string;
     totalPotWon: number;
+    isChampionship?: boolean;
   }>;
   awards: Award[];
   lastRejectedBetReason: string | null;
@@ -60,8 +63,9 @@ export function useBrawlClient() {
       phase: 'ENTRY',
       roomCode: '',
       players: [],
-      totalRounds: 8,
+      totalRounds: 4,
       currentRound: null,
+      tournamentSchedule: null,
       roundHistory: [],
       awards: [],
       lastRejectedBetReason: null,
@@ -237,6 +241,7 @@ export function useBrawlClient() {
               players: payload.players,
               totalRounds: payload.totalRounds,
               currentRound: payload.currentRound,
+              tournamentSchedule: payload.tournamentSchedule || null,
               roundHistory: payload.roundHistory,
               awards: payload.awards || [],
               myPlayer: myUpdated,
@@ -350,13 +355,6 @@ export function useBrawlClient() {
     send({ type: 'TOGGLE_READY' });
   }, [send]);
 
-  const setMatchLength = useCallback((totalRounds: 8 | 10) => {
-    send({
-      type: 'SET_MATCH_LENGTH',
-      payload: { totalRounds },
-    });
-  }, [send]);
-
   const startGame = useCallback(() => {
     send({
       type: 'START_GAME',
@@ -407,7 +405,6 @@ export function useBrawlClient() {
     hostGame,
     joinGame,
     toggleReady,
-    setMatchLength,
     startGame,
     placeBet,
     sendFighterAction,

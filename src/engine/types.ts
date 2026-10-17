@@ -24,7 +24,7 @@ export interface MiniGameMeta {
 
 export type GamePhase =
   | 'ENTRY'                // Start screen: Host vs Join
-  | 'LOBBY'                // Waiting for 6-9 players, ready checks, QR display
+  | 'LOBBY'                // Waiting for 3-9 players, ready checks, QR display
   | 'FIGHTER_REVEAL'       // VS splash announcing 2 selected brawlers + instructions
   | 'BETTING_WINDOW'       // 15s secret spectator betting phase with dynamic odds
   | 'MINIGAME_COUNTDOWN'   // 3.. 2.. 1.. BRAWL!
@@ -55,6 +55,14 @@ export interface PublicPlayer {
   totalCoinsLostInBets: number;
   highestSingleBet: number;
   highestSinglePayout: number;
+
+  // Tournament & Brawl Points
+  qualifierPoints: number;
+  qualifierWins: number;
+  qualifierTies: number;
+  qualifierLosses: number;
+  qualifierMatchesPlayed: number;
+  tournamentRank?: number;
 }
 
 /**
@@ -104,18 +112,38 @@ export interface RoundPayoutItem {
   summary: string;          // e.g. "360 returned · +160 profit" or "150 refunded · 0 net"
 }
 
+export interface TournamentMatch {
+  matchIndex: number;
+  roundNumber: number;
+  fighterIds: [string, string];
+  isChampionship: boolean;
+  completed: boolean;
+  winnerId: string | null;
+  tieResult?: boolean;
+}
+
+export interface TournamentSchedule {
+  totalPlayers: number;
+  qualifierCount: number; // Exactly N qualifiers for N players
+  totalRounds: number;    // N + 1 (N qualifiers + 1 Championship Final)
+  matches: TournamentMatch[];
+  finalists?: [string, string];
+  championId?: string | null;
+}
+
 export interface RoundState {
   roundNumber: number;
   maxRounds: number;
   miniGame: MiniGameMeta;
   fighterIds: [string, string];
-  matchPot: number; // Virtual stakes awarded to winning fighter (+250c)
+  matchPot: number; // Virtual stakes awarded to winning fighter (+250c qualifier, +500c championship)
   odds: Record<string, FighterOdds>;
   bets: SecretBet[];
   bettingTimeRemaining: number;
   gameTimeRemaining: number;
   winnerId: string | null;
   tieResult?: boolean;
+  isChampionship?: boolean;
   fighterScores: Record<string, number>;
   payouts: RoundPayoutItem[];
   // Timestamps for synchronized client clock tracking
@@ -163,11 +191,13 @@ export interface PublicRoomState {
   players: PublicPlayer[];
   totalRounds: number;
   currentRound: RoundState | null;
+  tournamentSchedule?: TournamentSchedule | null;
   roundHistory: Array<{
     roundNumber: number;
     miniGameName: string;
     winnerName: string;
     totalPotWon: number;
+    isChampionship?: boolean;
   }>;
   awards: Award[];
   debugMode?: boolean;
@@ -178,7 +208,6 @@ export type ClientMessage =
   | { type: 'JOIN_ROOM'; payload: { roomCode: string; playerName?: string; avatar?: string; sessionToken?: string } }
   | { type: 'TOGGLE_READY' }
   | { type: 'START_GAME'; payload?: { debug?: boolean } }
-  | { type: 'SET_MATCH_LENGTH'; payload: { totalRounds: 8 | 10 } }
   | { type: 'PLACE_BET'; payload: { fighterId: string; amount: number } }
   | { type: 'FIGHTER_ACTION'; payload: FighterAction }
   | { type: 'NEXT_ROUND' }

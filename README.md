@@ -1,6 +1,6 @@
 # Bet & BRAWL: Local Wi-Fi Party Game Engine
 
-An offline, low-latency party game for 6 to 9 friends in the same physical room on the same local Wi-Fi network. Two players compete in fast 15-second mini-games while spectators place live secret wagers with dynamic odds.
+An offline, low-latency party game for 3 to 9 friends in the same physical room on the same local Wi-Fi network. Two players compete in fast 15-second mini-games while spectators place live secret wagers with dynamic odds.
 
 ---
 
@@ -36,7 +36,7 @@ This permits incoming connections on port 3000 from mobile phones connected to t
 
 ### 1. Requirements
 - Node.js 20+ installed on the host computer.
-- All 6 to 9 players connected to the **same local Wi-Fi network** (or a phone hotspot).
+- All 3 to 9 players connected to the **same local Wi-Fi network** (or a phone hotspot).
 - Zero cloud servers, zero internet API keys, and zero external fonts needed.
 
 ### 2. Join the Game from Phones
@@ -47,7 +47,32 @@ This permits incoming connections on port 3000 from mobile phones connected to t
    - Open the displayed local URL (e.g. `http://192.168.1.50:3000`) and enter the room code.
 4. Enter an alias and choose an avatar.
 5. In the lobby, each player taps **SET READY**.
-6. When at least 6 connected players are ready, the host clicks **START BRAWL MATCH!**.
+6. When at least 3 connected players are ready (all connected players ready), the host clicks **START BRAWL MATCH!**.
+
+---
+
+## Tournament Format & Brawl Points
+
+Bet & BRAWL features a structured tournament architecture:
+
+**QUALIFIERS → TOP TWO SEEDS → CHAMPIONSHIP FINAL**
+
+1. **Qualifier Scheduling:**
+   - The server freezes the connected session roster of N players (3–9 players).
+   - Generates a fair circular pairing graph (`P0 vs P1`, `P1 vs P2`, ..., `P(n-1) vs P0`).
+   - Every player receives exactly 2 qualifier appearances against 2 distinct opponents.
+   - Qualifier match bounty: +250 coins.
+2. **Brawl Points Scoring:**
+   - **Win:** 3 Brawl Points
+   - **Tie:** 1 Brawl Point each
+   - **Loss:** 0 Brawl Points
+3. **Championship Qualification:**
+   - Ranked primarily by Brawl Points earned in qualifiers.
+   - Head-to-head qualifier outcomes serve as primary tiebreaker, followed by coin bankroll.
+   - Top 2 ranked fighters advance to the Championship Final!
+4. **Championship Final:**
+   - High-stakes title brawl with a +500 coin victory bounty.
+   - The victor is crowned **Tournament Champion** on the podium.
 
 ---
 
@@ -63,11 +88,11 @@ This permits incoming connections on port 3000 from mobile phones connected to t
 ---
 
 ## Developer / Debug Mode
-To test with fewer than 6 physical devices, open:
+To test with fewer physical devices, open:
 ```
 http://localhost:3000?debug=1
 ```
-This enables the `+ Add Bot (debug)` button in the lobby, allowing a single developer to populate 6-9 players and test all gameplay loops.
+This enables the `+ Add Bot (debug)` button in the lobby, allowing a single developer to populate 3-9 players and test all gameplay loops.
 
 ---
 
@@ -79,8 +104,9 @@ npm run verify
 ```
 This executes:
 1. `npm run typecheck` (`tsc --noEmit`): 0 TypeScript errors.
-2. `npm test` (`tsx --test ...`): 44 comprehensive tests covering:
-   - **Genuine Production Server Integration:** Real WebSocket multi-client lifecycle exercising `createBrawlServer`, connection authentication, token privacy enforcement (session tokens never leaked in public states), spectator wagering, separate fighter action processing, payout synchronization, and room closure.
+2. `npm test` (`tsx --test ...`): 45 comprehensive tests covering:
+   - **Production Server Integration:** Real WebSocket multi-client lifecycles exercising `createBrawlServer`, 3-player and 6-player tournament scheduling, token privacy, spectator wagering, fighter action processing, payout synchronization, and room closure.
+   - **Tournament & Brawl Points Fairness:** Circular qualifier graph generation, N qualifiers for N players, head-to-head tiebreak resolution, top 2 finalist promotion, and championship crowning.
    - **Old-Socket Reconnect Race Protection:** Verified that a socket closing after reconnect replacement cannot disconnect the seat.
    - **Connection Grace Timers Separation:** Verified host reconnect grace timer survives round completion and mini-game resolution.
    - **Disconnected Seat Expiry:** Verified stale disconnected lobby seats automatically clean up after grace expiry to restore room capacity.
@@ -89,7 +115,7 @@ This executes:
    - **Runtime Payload Sanity Validation:** Strict rejection of malformed guesses, invalid coordinates, and negative indices.
    - **LAN Network Discovery:** RFC1918 private IPv4 detection, link-local `169.254.x.x` rejection, candidate URL generation, and interface prioritization.
    - **Laplace Smoothing & Dynamic Odds:** Dynamic payout multipliers, underdog incentives, and bettor risk/reward balance.
-   - **Room Lifecycle & Fair Rotation:** 6–9 player room constraints, Fisher-Yates match scheduling across 8 and 10 rounds with equal opportunity distribution, and session awards calculated strictly from genuine session statistics.
+   - **Room Lifecycle:** 3–9 player room constraints, strict rejection of fewer than 3 players in production mode, and genuine session awards.
 3. `npm run build` (`vite build`): Generates static production assets in `dist/`.
 
 ---

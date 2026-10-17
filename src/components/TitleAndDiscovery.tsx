@@ -234,7 +234,7 @@ export const TitleAndDiscovery: React.FC<Props> = ({
 
       {/* Footer */}
       <footer className="w-full max-w-md text-center text-xs text-slate-500 font-mono pt-4">
-        <span>6 to 9 friends · 100% Offline Local Network · Zero Cloud Required</span>
+        <span>3 to 9 friends · 100% Offline Local Network · Zero Cloud Required</span>
       </footer>
     </div>
   );
