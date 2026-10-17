@@ -271,52 +271,90 @@ export function computeTournamentRankings(
   qualifierMatches: TournamentMatch[],
   stableRosterOrder?: string[]
 ): Player[] {
-  const sorted = [...players].sort((a, b) => {
-    // 1. Brawl Points DESC
-    if (b.qualifierPoints !== a.qualifierPoints) {
-      return b.qualifierPoints - a.qualifierPoints;
-    }
+  // Group players by primary ranking criteria: qualifierPoints and qualifierWins
+  const groupsMap = new Map<string, { points: number; wins: number; players: Player[] }>();
 
-    // 2. Qualifier wins DESC
-    if (b.qualifierWins !== a.qualifierWins) {
-      return b.qualifierWins - a.qualifierWins;
+  for (const player of players) {
+    const key = `${player.qualifierPoints}_${player.qualifierWins}`;
+    let group = groupsMap.get(key);
+    if (!group) {
+      group = {
+        points: player.qualifierPoints,
+        wins: player.qualifierWins,
+        players: [],
+      };
+      groupsMap.set(key, group);
     }
+    group.players.push(player);
+  }
 
-    // 3. Head-to-head result between tied players:
-    // Only applies if they actually fought in a completed qualifier and there was a decisive winner
-    const h2h = qualifierMatches.find(
-      m =>
-        m.completed &&
-        ((m.fighterIds[0] === a.id && m.fighterIds[1] === b.id) ||
-         (m.fighterIds[0] === b.id && m.fighterIds[1] === a.id))
-    );
-    if (h2h && h2h.winnerId) {
-      if (h2h.winnerId === a.id) return -1;
-      if (h2h.winnerId === b.id) return 1;
-    }
-
-    // 4. Bankroll / coins DESC
-    if (b.coins !== a.coins) {
-      return b.coins - a.coins;
-    }
-
-    // 5. Stable server-generated session seed/order
-    if (stableRosterOrder && stableRosterOrder.length > 0) {
-      const idxA = stableRosterOrder.indexOf(a.id);
-      const idxB = stableRosterOrder.indexOf(b.id);
-      if (idxA !== -1 && idxB !== -1 && idxA !== idxB) {
-        return idxA - idxB;
-      }
-    }
-
-    return 0;
+  // Sort groups descending by Brawl Points, then Wins
+  const sortedGroups = Array.from(groupsMap.values()).sort((gA, gB) => {
+    if (gB.points !== gA.points) return gB.points - gA.points;
+    return gB.wins - gA.wins;
   });
 
-  sorted.forEach((p, idx) => {
+  const finalRanked: Player[] = [];
+
+  for (const group of sortedGroups) {
+    const tied = group.players;
+
+    if (tied.length === 1) {
+      finalRanked.push(tied[0]);
+    } else if (tied.length === 2) {
+      const [p1, p2] = tied;
+      // If exactly 2 players are tied on points + wins and they played a completed decisive qualifier
+      // against each other, use that decisive head-to-head result.
+      const h2h = qualifierMatches.find(
+        m =>
+          m.completed &&
+          ((m.fighterIds[0] === p1.id && m.fighterIds[1] === p2.id) ||
+           (m.fighterIds[0] === p2.id && m.fighterIds[1] === p1.id))
+      );
+
+      if (h2h && h2h.winnerId === p1.id) {
+        finalRanked.push(p1, p2);
+      } else if (h2h && h2h.winnerId === p2.id) {
+        finalRanked.push(p2, p1);
+      } else {
+        // Tied H2H or did not play: resolve by bankroll DESC, then stableRosterOrder
+        const sortedTwo = [p1, p2].sort((a, b) => {
+          if (b.coins !== a.coins) return b.coins - a.coins;
+          if (stableRosterOrder && stableRosterOrder.length > 0) {
+            const idxA = stableRosterOrder.indexOf(a.id);
+            const idxB = stableRosterOrder.indexOf(b.id);
+            if (idxA !== -1 && idxB !== -1 && idxA !== idxB) {
+              return idxA - idxB;
+            }
+          }
+          return 0;
+        });
+        finalRanked.push(...sortedTwo);
+      }
+    } else {
+      // 3+ players remain tied on points + wins: do NOT use pairwise head-to-head comparisons
+      // that can create non-transitive cycles (e.g. A beats B, B beats C, C beats A).
+      // Resolve deterministically by bankroll DESC, then stableRosterOrder.
+      const sortedTied = [...tied].sort((a, b) => {
+        if (b.coins !== a.coins) return b.coins - a.coins;
+        if (stableRosterOrder && stableRosterOrder.length > 0) {
+          const idxA = stableRosterOrder.indexOf(a.id);
+          const idxB = stableRosterOrder.indexOf(b.id);
+          if (idxA !== -1 && idxB !== -1 && idxA !== idxB) {
+            return idxA - idxB;
+          }
+        }
+        return 0;
+      });
+      finalRanked.push(...sortedTied);
+    }
+  }
+
+  finalRanked.forEach((p, idx) => {
     p.tournamentRank = idx + 1;
   });
 
-  return sorted;
+  return finalRanked;
 }
 
 /**

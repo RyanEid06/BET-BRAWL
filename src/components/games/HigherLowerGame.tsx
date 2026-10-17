@@ -13,8 +13,6 @@ interface PublicTriviaCard {
   baseItem: string;
   baseStat: string;
   challengerItem: string;
-  challengerStat?: string;
-  isHigher?: boolean;
 }
 
 interface Props {
@@ -25,6 +23,12 @@ interface Props {
   fighterScores: Record<string, number>;
   gameState?: Record<string, unknown>;
   gameConfig?: Record<string, unknown>;
+  lastActionFeedback?: {
+    fighterId?: string;
+    questionIndex: number;
+    isCorrect: boolean;
+    challengerStat: string;
+  } | null;
   onSendAction: (action: { type: 'GUESS'; questionIndex: number; guess: 'HIGHER' | 'LOWER' }) => void;
 }
 
@@ -36,6 +40,7 @@ export const HigherLowerGame: React.FC<Props> = ({
   fighterScores,
   gameState,
   gameConfig,
+  lastActionFeedback,
   onSendAction,
 }) => {
   const cards: PublicTriviaCard[] = (gameConfig?.cards as PublicTriviaCard[]) || [];
@@ -49,35 +54,53 @@ export const HigherLowerGame: React.FC<Props> = ({
 
   const [feedback, setFeedback] = useState<{ isCorrect: boolean; challengerStat: string } | null>(null);
   const [waitingNext, setWaitingNext] = useState<boolean>(false);
+  const [submittedIndex, setSubmittedIndex] = useState<number | null>(null);
 
   const handleGuess = (guess: 'HIGHER' | 'LOWER') => {
     if (!isPlayerFighter || waitingNext || myStepIndex >= cards.length) return;
 
-    const card = cards[myStepIndex];
-    if (card && card.isHigher !== undefined) {
-      const isCorrect = (guess === 'HIGHER') === card.isHigher;
-      setFeedback({
-        isCorrect,
-        challengerStat: card.challengerStat || '',
-      });
-      if (isCorrect) sound.playCoin();
-      else sound.playBuzzer();
-    } else {
-      sound.playTap(true);
-    }
-
+    sound.playTap(true);
     setWaitingNext(true);
+    setSubmittedIndex(myStepIndex);
+
     onSendAction({
       type: 'GUESS',
       questionIndex: myStepIndex,
       guess,
     });
-
-    setTimeout(() => {
-      setFeedback(null);
-      setWaitingNext(false);
-    }, 700);
   };
+
+  React.useEffect(() => {
+    if (submittedIndex === null) return;
+
+    // Check authoritative feedback from server action result or sanitized gameState reveals
+    const reveal = (lastActionFeedback && lastActionFeedback.questionIndex === submittedIndex)
+      ? lastActionFeedback
+      : (myFighterId && gameState?.reveals && (gameState.reveals as Record<string, Record<number, any>>)[myFighterId]?.[submittedIndex])
+        ? (gameState.reveals as Record<string, Record<number, any>>)[myFighterId][submittedIndex]
+        : null;
+
+    if (reveal) {
+      setFeedback({
+        isCorrect: reveal.isCorrect,
+        challengerStat: reveal.challengerStat || '',
+      });
+
+      if (reveal.isCorrect) {
+        sound.playCoin();
+      } else {
+        sound.playBuzzer();
+      }
+
+      const timer = setTimeout(() => {
+        setFeedback(null);
+        setWaitingNext(false);
+        setSubmittedIndex(null);
+      }, 700);
+
+      return () => clearTimeout(timer);
+    }
+  }, [lastActionFeedback, gameState, submittedIndex, myFighterId]);
 
   const currentCard = cards[Math.min(cards.length - 1, myStepIndex)];
 

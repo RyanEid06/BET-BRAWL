@@ -46,6 +46,7 @@ export interface BrawlClientState {
   }>;
   awards: Award[];
   lastRejectedBetReason: string | null;
+  lastActionFeedback: { questionIndex: number; isCorrect: boolean; challengerStat: string } | null;
   serverTimeOffset: number; // in ms
   isDebug: boolean;
 }
@@ -69,6 +70,7 @@ export function useBrawlClient() {
       roundHistory: [],
       awards: [],
       lastRejectedBetReason: null,
+      lastActionFeedback: null,
       serverTimeOffset: 0,
       isDebug,
     };
@@ -246,12 +248,22 @@ export function useBrawlClient() {
               awards: payload.awards || [],
               myPlayer: myUpdated,
               myBet: preservedBet,
+              lastActionFeedback: isBettingOrPlaying ? prev.lastActionFeedback : null,
             };
           });
           return;
         }
 
-        // 5. BET_ACCEPTED
+        // 5. ACTION_RESULT (Authoritative feedback for fighter action)
+        if (msg.type === 'ACTION_RESULT') {
+          setState(prev => ({
+            ...prev,
+            lastActionFeedback: msg.payload,
+          }));
+          return;
+        }
+
+        // 6. BET_ACCEPTED
         if (msg.type === 'BET_ACCEPTED') {
           setState(prev => ({
             ...prev,
@@ -262,7 +274,7 @@ export function useBrawlClient() {
           return;
         }
 
-        // 6. BET_REJECTED
+        // 7. BET_REJECTED
         if (msg.type === 'BET_REJECTED') {
           setState(prev => ({
             ...prev,
@@ -272,7 +284,7 @@ export function useBrawlClient() {
           return;
         }
 
-        // 7. ROOM_CLOSED
+        // 8. ROOM_CLOSED
         if (msg.type === 'ROOM_CLOSED') {
           setState(prev => ({
             ...prev,
@@ -281,6 +293,7 @@ export function useBrawlClient() {
             currentRound: null,
             myPlayer: null,
             myBet: null,
+            lastActionFeedback: null,
             errorMessage: msg.payload.reason || 'The room has been closed.',
           }));
           return;

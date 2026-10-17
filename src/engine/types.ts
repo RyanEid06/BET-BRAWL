@@ -243,7 +243,8 @@ export type ServerMessage =
   | { type: 'BET_ACCEPTED'; timestamp: number; payload: { bet: SecretBet; myBankroll: number } }
   | { type: 'BET_REJECTED'; timestamp: number; payload: { reason: string } }
   | { type: 'ROOM_CLOSED'; timestamp: number; payload: { reason: string } }
-  | { type: 'PONG'; timestamp: number; payload: { clientSentAt?: number; serverNow: number } };
+  | { type: 'PONG'; timestamp: number; payload: { clientSentAt?: number; serverNow: number } }
+  | { type: 'ACTION_RESULT'; timestamp: number; payload: { fighterId?: string; questionIndex: number; isCorrect: boolean; challengerStat: string } };
 
 export interface RoomNetworkInfo {
   localIp: string;

@@ -219,6 +219,7 @@ export default function App() {
               fighterScores={client.currentRound.fighterScores}
               gameState={client.currentRound.gameState}
               gameConfig={client.currentRound.gameConfig}
+              lastActionFeedback={client.lastActionFeedback}
               onSendAction={client.sendFighterAction}
             />
           )}

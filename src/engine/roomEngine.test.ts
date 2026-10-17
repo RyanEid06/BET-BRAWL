@@ -170,6 +170,47 @@ test('computeTournamentRankings ranks primarily by Brawl Points with 5-tier tieb
   assert.equal(stableRanked[0].id, p2.id, 'Stable roster order breaks final tie');
 });
 
+test('computeTournamentRankings: 3-way cyclical tie (A beats B, B beats C, C beats A) resolves deterministically via stableRosterOrder without non-transitive sorting cycles', () => {
+  const players = createMockRoster(3);
+  const [pA, pB, pC] = players;
+
+  // All 3 players finish with identical points, wins, and bankrolls
+  pA.qualifierPoints = 3;
+  pA.qualifierWins = 1;
+  pA.coins = 1000;
+
+  pB.qualifierPoints = 3;
+  pB.qualifierWins = 1;
+  pB.coins = 1000;
+
+  pC.qualifierPoints = 3;
+  pC.qualifierWins = 1;
+  pC.coins = 1000;
+
+  // Cyclical head-to-head: A beats B, B beats C, C beats A
+  const cyclicalMatches: TournamentMatch[] = [
+    { matchIndex: 0, roundNumber: 1, fighterIds: [pA.id, pB.id], isChampionship: false, completed: true, winnerId: pA.id },
+    { matchIndex: 1, roundNumber: 2, fighterIds: [pB.id, pC.id], isChampionship: false, completed: true, winnerId: pB.id },
+    { matchIndex: 2, roundNumber: 3, fighterIds: [pC.id, pA.id], isChampionship: false, completed: true, winnerId: pC.id },
+  ];
+
+  // Test 1: Order with stable order [pA, pB, pC]
+  const ranked1 = computeTournamentRankings([pC, pB, pA], cyclicalMatches, [pA.id, pB.id, pC.id]);
+  assert.deepEqual(ranked1.map(p => p.id), [pA.id, pB.id, pC.id]);
+  assert.equal(ranked1[0].tournamentRank, 1);
+  assert.equal(ranked1[1].tournamentRank, 2);
+  assert.equal(ranked1[2].tournamentRank, 3);
+
+  // Test 2: Order with reverse stable order [pC, pB, pA]
+  const ranked2 = computeTournamentRankings([pA, pB, pC], cyclicalMatches, [pC.id, pB.id, pA.id]);
+  assert.deepEqual(ranked2.map(p => p.id), [pC.id, pB.id, pA.id]);
+
+  // Test 3: If bankrolls differ, bankroll breaks tie before stableRosterOrder
+  pB.coins = 1500;
+  const rankedBankroll = computeTournamentRankings([pA, pB, pC], cyclicalMatches, [pA.id, pB.id, pC.id]);
+  assert.equal(rankedBankroll[0].id, pB.id, 'pB has higher bankroll so pB wins 3-way tie');
+});
+
 test('getFinalTournamentStandings ranks Champion, Runner-up, Third Place, and remaining qualifiers', () => {
   const players = createMockRoster(4);
   const [p1, p2, p3, p4] = players;

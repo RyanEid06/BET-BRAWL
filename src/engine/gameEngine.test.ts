@@ -221,6 +221,44 @@ test('Higher or Lower: rejects invalid guess string and malformed payload', () =
   assert.equal(badIdxRes.rejectionReason, 'Invalid questionIndex');
 });
 
+test('Higher or Lower: secret answer data (isHigher, challengerStat) is absent from client-visible state before submission', () => {
+  const gameStartsAt = 1000;
+  const { internal, publicConfig } = initMiniGameServerState('higher_lower', ['f1', 'f2'], gameStartsAt);
+
+  assert.ok(publicConfig.cards, 'publicConfig must have cards');
+  assert.equal(publicConfig.cards.length, 4, 'Must have 4 cards');
+
+  // Verify that EVERY card in publicConfig lacks secret fields before submission
+  for (const card of publicConfig.cards) {
+    assert.ok(card.baseItem, 'Must have public baseItem');
+    assert.ok(card.baseStat, 'Must have public baseStat');
+    assert.ok(card.challengerItem, 'Must have public challengerItem');
+    assert.equal((card as any).isHigher, undefined, 'isHigher must NOT be leaked in publicConfig');
+    assert.equal((card as any).challengerStat, undefined, 'challengerStat must NOT be leaked in publicConfig');
+  }
+
+  // Fighter 1 submits answer to question 0
+  const scores: Record<string, number> = { f1: 0, f2: 0 };
+  const card0 = internal.higherLower!.cards[0];
+  const rightGuess = card0.isHigher ? 'HIGHER' : 'LOWER';
+
+  const resF1 = processFighterAction(internal, scores, 'f1', {
+    type: 'GUESS',
+    questionIndex: 0,
+    guess: rightGuess,
+  }, gameStartsAt + 100);
+
+  // Authoritative feedback returned for F1 only upon submission
+  assert.ok(resF1.actionFeedback, 'actionFeedback must be provided after submission');
+  assert.equal(resF1.actionFeedback.fighterId, 'f1');
+  assert.equal(resF1.actionFeedback.questionIndex, 0);
+  assert.equal(resF1.actionFeedback.isCorrect, true);
+  assert.equal(resF1.actionFeedback.challengerStat, card0.challengerStat);
+
+  // Verify Fighter 2 still has no reveals
+  assert.equal(internal.higherLower!.reveals?.f2?.[0], undefined, 'Fighter 2 must not have reveals before submitting');
+});
+
 // ---------------------------------------------------------------------------
 // 5. BLIND PINPOINT TESTS
 // ---------------------------------------------------------------------------

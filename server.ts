@@ -226,30 +226,65 @@ export function createBrawlServer(options: CreateServerOptions = {}) {
       };
     }
 
-    const payload: PublicRoomState = {
-      roomId: activeRoom.roomId,
-      roomCode: activeRoom.roomCode,
-      phase: activeRoom.phase,
-      players: publicPlayers,
-      totalRounds: activeRoom.totalRounds,
-      currentRound: publicRound,
-      tournamentSchedule: activeRoom.tournamentSchedule,
-      roundHistory: activeRoom.roundHistory,
-      awards: activeRoom.awards,
-      debugMode: activeRoom.debugMode,
-    };
+    for (const [token, client] of activeRoom.clientSockets.entries()) {
+      if (client.readyState !== WebSocket.OPEN) continue;
+      const player = activeRoom.players.get(token);
 
-    const message: ServerMessage = {
-      type: 'ROOM_STATE',
-      timestamp: Date.now(),
-      payload,
-    };
+      let tailoredRound = publicRound;
+      // Per-client answer security: in higher_lower during MINIGAME_ACTIVE,
+      // never reveal answers/challengerStats of other fighters for questions this player hasn't yet submitted!
+      if (publicRound && publicRound.miniGame.id === 'higher_lower' && publicRound.gameState && activeRoom.phase === 'MINIGAME_ACTIVE') {
+        const playerId = player?.id || '';
+        const origGameState = publicRound.gameState;
+        const origReveals = (origGameState.reveals as Record<string, Record<number, any>>) || {};
+        const stepIndices = (origGameState.stepIndex as Record<string, number>) || {};
+        const myStep = stepIndices[playerId] || 0;
 
-    const data = JSON.stringify(message);
-    for (const client of activeRoom.clientSockets.values()) {
-      if (client.readyState === WebSocket.OPEN) {
-        client.send(data);
+        const sanitizedReveals: Record<string, Record<number, any>> = {};
+        for (const [fId, fReveals] of Object.entries(origReveals)) {
+          if (fId === playerId) {
+            sanitizedReveals[fId] = fReveals;
+          } else {
+            const filtered: Record<number, any> = {};
+            for (const [qIdxStr, val] of Object.entries(fReveals)) {
+              const qIdx = Number(qIdxStr);
+              if (qIdx < myStep) {
+                filtered[qIdx] = val;
+              }
+            }
+            sanitizedReveals[fId] = filtered;
+          }
+        }
+
+        tailoredRound = {
+          ...publicRound,
+          gameState: {
+            ...origGameState,
+            reveals: sanitizedReveals,
+          },
+        };
       }
+
+      const payload: PublicRoomState = {
+        roomId: activeRoom.roomId,
+        roomCode: activeRoom.roomCode,
+        phase: activeRoom.phase,
+        players: publicPlayers,
+        totalRounds: activeRoom.totalRounds,
+        currentRound: tailoredRound,
+        tournamentSchedule: activeRoom.tournamentSchedule,
+        roundHistory: activeRoom.roundHistory,
+        awards: activeRoom.awards,
+        debugMode: activeRoom.debugMode,
+      };
+
+      const message: ServerMessage = {
+        type: 'ROOM_STATE',
+        timestamp: Date.now(),
+        payload,
+      };
+
+      client.send(JSON.stringify(message));
     }
   }
 
@@ -1103,6 +1138,14 @@ export function createBrawlServer(options: CreateServerOptions = {}) {
             };
           }
 
+          if (result.actionFeedback) {
+            ws.send(JSON.stringify({
+              type: 'ACTION_RESULT',
+              timestamp: Date.now(),
+              payload: result.actionFeedback,
+            }));
+          }
+
           if (result.resolved) {
             resolveCurrentGame(result.winnerId, result.isTie);
           } else {
@@ -1383,6 +1426,9 @@ export function createBrawlServer(options: CreateServerOptions = {}) {
     close,
     setupStaticAndVite,
     getActiveRoom: () => activeRoom,
+    resolveCurrentGame: (winnerId: string | null, isTie: boolean) => {
+      resolveCurrentGame(winnerId, isTie);
+    },
     resetActiveRoom: () => {
       if (activeRoom) {
         clearAllRoomTimers(activeRoom);

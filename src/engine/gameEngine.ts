@@ -45,6 +45,7 @@ export interface InternalGameState {
   higherLower?: {
     cards: HigherLowerTrivia[];
     stepIndex: Record<string, number>;
+    reveals?: Record<string, Record<number, { isCorrect: boolean; challengerStat: string }>>;
   };
   blindPinpoint?: {
     targetCity: CityLocation;
@@ -65,6 +66,12 @@ export interface GameActionResult {
   scoreUpdate?: Record<string, number>;
   gameStatePatch?: Record<string, unknown>;
   rejectionReason?: string;
+  actionFeedback?: {
+    fighterId: string;
+    questionIndex: number;
+    isCorrect: boolean;
+    challengerStat: string;
+  };
 }
 
 export function getLightAtServerTime(schedule: LightScheduleStep[], elapsedMs: number): 'GREEN' | 'RED' {
@@ -140,14 +147,14 @@ export function initMiniGameServerState(
     internal.higherLower = {
       cards,
       stepIndex: { [f1]: 0, [f2]: 0 },
+      reveals: { [f1]: {}, [f2]: {} },
     };
-    // Public card info displays base items; challenger values revealed only after guess
+    // Scrub secret answers and challenger stats from public config!
+    // Question displays baseItem, baseStat, and challengerItem only.
     publicConfig.cards = cards.map(c => ({
       baseItem: c.baseItem,
       baseStat: c.baseStat,
       challengerItem: c.challengerItem,
-      challengerStat: c.challengerStat,
-      isHigher: c.isHigher,
     }));
   } else if (miniGameId === 'blind_pinpoint') {
     const cityIdx = Math.floor(Math.random() * WORLD_CITIES.length);
@@ -351,6 +358,20 @@ export function processFighterAction(
     fighterScores[fighterId] = newScore;
     hl.stepIndex[fighterId] = currentStep + 1;
 
+    if (!hl.reveals) hl.reveals = {};
+    if (!hl.reveals[fighterId]) hl.reveals[fighterId] = {};
+    hl.reveals[fighterId][currentStep] = {
+      isCorrect,
+      challengerStat: card.challengerStat,
+    };
+
+    const actionFeedback = {
+      fighterId,
+      questionIndex: currentStep,
+      isCorrect,
+      challengerStat: card.challengerStat,
+    };
+
     // First to 3 correct wins immediately
     if (newScore >= 3) {
       return {
@@ -358,7 +379,11 @@ export function processFighterAction(
         isTie: false,
         winnerId: fighterId,
         scoreUpdate: { ...fighterScores },
-        gameStatePatch: { stepIndex: hl.stepIndex },
+        gameStatePatch: {
+          stepIndex: { ...hl.stepIndex },
+          reveals: { ...hl.reveals },
+        },
+        actionFeedback,
       };
     }
 
@@ -367,7 +392,11 @@ export function processFighterAction(
       isTie: false,
       winnerId: null,
       scoreUpdate: { ...fighterScores },
-      gameStatePatch: { stepIndex: hl.stepIndex },
+      gameStatePatch: {
+        stepIndex: { ...hl.stepIndex },
+        reveals: { ...hl.reveals },
+      },
+      actionFeedback,
     };
   }
 
