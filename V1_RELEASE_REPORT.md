@@ -59,13 +59,13 @@ Bet & BRAWL is a self-hosted, zero-cloud party game engine engineered specifical
 
 ## 3. Automated Verification Results
 
-All automated test suites, type checking, linting, and production builds were executed and verified from a clean state.
+All automated tests across 5 test files, type checking, linting, and production builds were executed and verified from a clean state.
 
 | Check | Command | Result | Details |
 |---|---|---|---|
 | **TypeScript Typecheck** | `npm run typecheck` | **PASS** | 0 errors (`tsc --noEmit`) |
 | **Code Linting** | `npm run lint` | **PASS** | Clean syntax and import graph |
-| **Automated Test Suite** | `npm test` | **PASS** | **52 / 52 passing** across 5 suites (13.08s) |
+| **Automated Test Suite** | `npm test` | **PASS** | **52 / 52 passing** across 5 test files (13.15s) |
 | **Production Vite Build** | `npm run build` | **PASS** | Clean `dist/` bundle generated (689ms) |
 | **Full Verification Pipeline** | `npm run verify` | **PASS** | Composite typecheck, test, and build pipeline |
 | **AI Studio Applet Compilation**| `compile_applet` | **PASS** | Build succeeded |

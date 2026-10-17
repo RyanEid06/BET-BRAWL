@@ -46,11 +46,11 @@ Last Updated: Final Hardening & Championship Series Acceptance Pass
 
 ### AUTOMATED VERIFIED (PASSING IN THIS ENVIRONMENT)
 - [x] `npm run typecheck`: **PASSING** (0 TypeScript errors)
-- [x] `npm test`: **PASSING** (52/52 automated tests passing across 5 test suites)
+- [x] `npm test`: **PASSING** (52/52 automated tests passing across 5 test files)
 - [x] `npm run lint`: **PASSING** (`tsc --noEmit` clean)
 - [x] `npm run build`: **PASSING** (Clean Vite static production bundle in `dist/`)
 - [x] `npm run verify`: **PASSING** (typecheck + test [52/52 pass] + build pipeline)
-- [x] Genuine Production Server WebSocket Integration Tests: **PASSING** (Multi-client integration suites exercising `createBrawlServer` across full 3-player and 6-player tournaments)
+- [x] Genuine Production Server WebSocket Integration Tests: **PASSING** (Multi-client integration tests exercising `createBrawlServer` across full 3-player and 6-player tournaments)
 - [x] Production Server Standalone Launch (`npm start` / `server.ts`): **PASSING** (HTTP 200 on index, `/api/network-info` JSON payload verified, production `dist/` served directly)
 - [x] Reproducible dependency locking: `package-lock.json` present and tested with `npm ci`
 

@@ -105,7 +105,7 @@ npm run verify
 ```
 This executes:
 1. `npm run typecheck` (`tsc --noEmit`): 0 TypeScript errors.
-2. `npm test` (`tsx --test ...`): 52 comprehensive tests covering:
+2. `npm test` (`tsx --test ...`): 52 automated tests across 5 test files covering:
    - **Full Production Server Tournament Lifecycle:** Real WebSocket multi-client integration test driving an entire 3-player tournament from lobby through 3 circular qualifiers, 5-tier ranking resolution, locked finalists, a 2–1 Championship Series with an intervening tie, qualifier points invariance, and final podium crowning.
    - **Production Server Multi-Player Operations:** 6-player lifecycle exercising `createBrawlServer`, session token confidentiality, secret wagering during betting window, live fighter action processing, payout synchronization, and room closure.
    - **Tournament & Brawl Points Fairness:** Circular qualifier graph generation, N qualifiers for N players, head-to-head tiebreak resolution, top 2 finalist promotion, and championship crowning.
