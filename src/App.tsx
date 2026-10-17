@@ -81,7 +81,7 @@ export default function App() {
       {client.status === 'DISCONNECTED' && (
         <div className="fixed top-0 left-0 right-0 z-50 bg-rose-950/95 border-b border-rose-600 text-rose-200 text-xs font-mono py-2 px-4 flex items-center justify-center gap-2 shadow-xl">
           <WifiOff className="w-4 h-4 animate-pulse" />
-          <span>Connection to host lost. Reconnecting to local Wi-Fi server...</span>
+          <span>Connection lost — reconnecting…</span>
         </div>
       )}
 
@@ -131,6 +131,10 @@ export default function App() {
             revealEndsAt={client.currentRound.revealEndsAt}
             serverTimeOffset={client.serverTimeOffset}
             isChampionship={client.currentRound.isChampionship}
+            qualifierIndex={client.currentRound.qualifierIndex}
+            qualifierTotal={client.currentRound.qualifierTotal}
+            championshipGameNumber={client.currentRound.championshipGameNumber}
+            championshipWins={client.tournamentSchedule?.championshipWins}
           />
         </div>
       )}
@@ -257,7 +261,8 @@ export default function App() {
             myPlayer={client.myPlayer}
             isHost={client.isHost}
             onNextRound={client.nextRound}
-            isFinalRound={client.currentRound.roundNumber >= client.totalRounds}
+            isFinalRound={client.tournamentSchedule ? client.tournamentSchedule.stage === 'COMPLETE' : client.currentRound.roundNumber >= client.totalRounds}
+            tournamentSchedule={client.tournamentSchedule}
           />
         </div>
       )}
@@ -270,6 +275,7 @@ export default function App() {
             awards={client.awards}
             isHost={client.isHost}
             onPlayAgain={client.restartGame}
+            tournamentSchedule={client.tournamentSchedule}
           />
         </div>
       )}

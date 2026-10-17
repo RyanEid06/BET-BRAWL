@@ -10,7 +10,7 @@
  * strict bet validation, authoritative timestamp boundaries, and honest net profit/loss calculations.
  */
 
-import type { FighterOdds, Player, SecretBet, RoundState, RoundPayoutItem } from './types.ts';
+import type { FighterOdds, Player, SecretBet, RoundState, RoundPayoutItem, RoundResolutionReason } from './types.ts';
 
 export interface OddsCalculationConfig {
   riskFactor?: number;      // Default 1.0 (scales underdog vs favorite disparity)
@@ -204,7 +204,8 @@ export function computeRoundPayouts(
   fighterIds: [string, string],
   matchPot: number,
   bets: SecretBet[],
-  players: Player[]
+  players: Player[],
+  resolutionReason: RoundResolutionReason = isTie ? 'TIE' : (winnerId ? 'PLAYED' : 'VOID')
 ): {
   payouts: RoundPayoutItem[];
   updatedPlayers: Player[];
@@ -215,8 +216,29 @@ export function computeRoundPayouts(
   const fighterA = playerMap.get(fighterIds[0]);
   const fighterB = playerMap.get(fighterIds[1]);
 
-  if (isTie || !winnerId) {
-    // Tie handling: split match pot, refund bets
+  // 1. VOID Round (e.g. both fighters disconnected)
+  if (resolutionReason === 'VOID' || (!winnerId && !isTie)) {
+    for (const bet of bets) {
+      const bettor = playerMap.get(bet.bettorId);
+      if (!bettor) continue;
+      bettor.coins += bet.amount; // full refund
+      payouts.push({
+        playerId: bettor.id,
+        playerName: bettor.name,
+        avatar: bettor.avatar,
+        type: 'BET_REFUND',
+        stake: bet.amount,
+        totalReturn: bet.amount,
+        netChange: 0,
+        newBankroll: bettor.coins,
+        summary: `ROUND VOID: ${bet.amount} coins refunded · 0 net`,
+      });
+    }
+    return { payouts, updatedPlayers: Array.from(playerMap.values()) };
+  }
+
+  // 2. TIE Result
+  if (isTie || resolutionReason === 'TIE') {
     if (fighterA) {
       const splitPot = Math.floor(matchPot / 2);
       fighterA.coins += splitPot;
@@ -267,8 +289,54 @@ export function computeRoundPayouts(
     return { payouts, updatedPlayers: Array.from(playerMap.values()) };
   }
 
-  // 1. Process winning fighter match pot
-  const winningFighter = playerMap.get(winnerId);
+  // 3. DISCONNECT FORFEIT Result (Winner gets matchPot, all bets REFUNDED without win/loss tally)
+  if (resolutionReason === 'DISCONNECT_FORFEIT') {
+    const winningFighter = playerMap.get(winnerId!);
+    const losingFighterId = fighterIds[0] === winnerId ? fighterIds[1] : fighterIds[0];
+    const losingFighter = playerMap.get(losingFighterId);
+
+    if (winningFighter) {
+      winningFighter.coins += matchPot;
+      winningFighter.matchesWon += 1;
+      winningFighter.matchesPlayed += 1;
+      payouts.push({
+        playerId: winningFighter.id,
+        playerName: winningFighter.name,
+        avatar: winningFighter.avatar,
+        type: 'FIGHTER_BOUNTY',
+        netChange: matchPot,
+        newBankroll: winningFighter.coins,
+        summary: `WIN BY DISCONNECT (+${matchPot}c bounty)`,
+      });
+    }
+
+    if (losingFighter) {
+      losingFighter.matchesPlayed += 1;
+    }
+
+    // Spectator bets for a disconnect-forfeit brawl must be REFUNDED
+    for (const bet of bets) {
+      const bettor = playerMap.get(bet.bettorId);
+      if (!bettor) continue;
+      bettor.coins += bet.amount; // Refund full stake
+      payouts.push({
+        playerId: bettor.id,
+        playerName: bettor.name,
+        avatar: bettor.avatar,
+        type: 'BET_REFUND',
+        stake: bet.amount,
+        totalReturn: bet.amount,
+        netChange: 0,
+        newBankroll: bettor.coins,
+        summary: `FORFEIT REFUND: ${bet.amount} coins refunded · 0 net`,
+      });
+    }
+
+    return { payouts, updatedPlayers: Array.from(playerMap.values()) };
+  }
+
+  // 4. NORMAL PLAYED Result
+  const winningFighter = playerMap.get(winnerId!);
   const losingFighterId = fighterIds[0] === winnerId ? fighterIds[1] : fighterIds[0];
   const losingFighter = playerMap.get(losingFighterId);
 

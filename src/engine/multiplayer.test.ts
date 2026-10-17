@@ -494,16 +494,18 @@ test('Production Server: 3-player Tournament Lifecycle (3 Qualifiers -> Top Two 
     // Host starts tournament
     host.ws.send(JSON.stringify({ type: 'START_GAME' }));
 
-    // Tournament schedule check: exactly 3 qualifiers + 1 Championship = 4 total rounds
+    // Tournament schedule check: exactly 3 qualifiers + championship series (first to 2 decisive wins)
     const stateR1 = await host.waitForRoomState(s => s.phase === 'FIGHTER_REVEAL' && s.currentRound?.roundNumber === 1);
-    assert.equal(stateR1.payload.totalRounds, 4, '3 players must yield 4 total rounds (3 qualifiers + 1 championship)');
     assert.equal(stateR1.payload.currentRound?.isChampionship, false, 'Round 1 must be a Qualifier');
+    assert.equal(stateR1.payload.currentRound?.stage, 'QUALIFIERS');
+    assert.equal(stateR1.payload.currentRound?.qualifierIndex, 1);
+    assert.equal(stateR1.payload.currentRound?.qualifierTotal, 3);
 
     const activeRoom = server.getActiveRoom()!;
     assert.ok(activeRoom.tournamentSchedule);
+    assert.equal(activeRoom.tournamentSchedule.stage, 'QUALIFIERS');
     assert.equal(activeRoom.tournamentSchedule.qualifierCount, 3);
-    assert.equal(activeRoom.tournamentSchedule.totalRounds, 4);
-    assert.equal(activeRoom.tournamentSchedule.matches.length, 4);
+    assert.equal(activeRoom.tournamentSchedule.matches.length, 3);
   } finally {
     for (const c of clients) c.close();
     await server.close();

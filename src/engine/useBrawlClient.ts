@@ -318,7 +318,7 @@ export function useBrawlClient() {
     };
 
     ws.onerror = () => {
-      setState(prev => ({ ...prev, status: 'ERROR', errorMessage: 'WebSocket connection failed' }));
+      setState(prev => ({ ...prev, status: 'ERROR', errorMessage: "Couldn’t connect to the game." }));
     };
   }, [send]);
 

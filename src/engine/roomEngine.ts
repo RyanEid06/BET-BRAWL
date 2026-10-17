@@ -6,7 +6,7 @@
  */
 
 import crypto from 'crypto';
-import type { Player, RoundState, Award, MiniGameId, TournamentMatch, TournamentSchedule } from './types.ts';
+import type { Player, PublicPlayer, RoundState, Award, MiniGameId, TournamentMatch, TournamentSchedule, TournamentStage } from './types.ts';
 import { calculateDynamicOdds } from './odds.ts';
 import { MINI_GAMES } from './miniGamesCatalog.ts';
 import { initMiniGameServerState, InternalGameState } from './gameEngine.ts';
@@ -207,7 +207,7 @@ export function orderTournamentMatches(pairs: Array<[string, string]>): Array<[s
  * - Every player gets exactly 2 qualifier appearances.
  * - Every player faces 2 different opponents.
  * - No duplicate qualifier pairing.
- * - Round N+1 is the Championship Final between the top 2 ranked brawlers.
+ * - Top two qualify for the Championship Series (First to 2 Decisive Wins).
  */
 export function generateTournamentSchedule(players: Player[]): TournamentSchedule {
   const eligible = players.filter(p => p.connected !== false);
@@ -221,6 +221,7 @@ export function generateTournamentSchedule(players: Player[]): TournamentSchedul
   // 1. Freeze and fairly shuffle the session roster
   const shuffled = fisherYatesShuffle(eligible);
   const n = shuffled.length;
+  const stableRosterOrder = shuffled.map(p => p.id);
 
   // 2. Construct circular qualifier graph: P0 vs P1, P1 vs P2, ..., P(n-1) vs P0
   const circularPairs: Array<[string, string]> = [];
@@ -241,35 +242,34 @@ export function generateTournamentSchedule(players: Player[]): TournamentSchedul
     winnerId: null,
   }));
 
-  // 5. Championship Final (Round N+1) placeholder
-  matches.push({
-    matchIndex: n,
-    roundNumber: n + 1,
-    fighterIds: ['', ''],
-    isChampionship: true,
-    completed: false,
-    winnerId: null,
-  });
-
   return {
+    stage: 'QUALIFIERS',
     totalPlayers: n,
     qualifierCount: n,
-    totalRounds: n + 1,
+    qualifiersCompleted: 0,
+    totalRounds: n + 2, // Dynamic, estimated at N + 2 minimum
     matches,
+    championshipWins: {},
+    championshipGamesPlayed: 0,
+    championId: null,
+    runnerUpId: null,
+    thirdPlaceId: null,
+    stableRosterOrder,
   };
 }
 
 /**
- * Authoritatively computes tournament rankings based primarily on fighting performance:
+ * Authoritatively computes tournament rankings based strictly on:
  * 1. Qualifier Brawl Points DESC (Win = 3, Tie = 1, Loss = 0)
- * 2. Head-to-head match result between tied players
- * 3. Total bankroll / coins DESC
- * 4. Qualifier wins DESC
- * 5. Deterministic fallback (id comparison)
+ * 2. Qualifier Wins DESC
+ * 3. Head-to-head match result, ONLY when the tied players actually fought and there is a decisive applicable result
+ * 4. Current bankroll / coins DESC
+ * 5. Stable server-generated session seed/order (frozen roster order)
  */
 export function computeTournamentRankings(
   players: Player[],
-  qualifierMatches: TournamentMatch[]
+  qualifierMatches: TournamentMatch[],
+  stableRosterOrder?: string[]
 ): Player[] {
   const sorted = [...players].sort((a, b) => {
     // 1. Brawl Points DESC
@@ -277,7 +277,13 @@ export function computeTournamentRankings(
       return b.qualifierPoints - a.qualifierPoints;
     }
 
-    // 2. Head-to-head match tiebreaker: if they fought each other in a completed qualifier
+    // 2. Qualifier wins DESC
+    if (b.qualifierWins !== a.qualifierWins) {
+      return b.qualifierWins - a.qualifierWins;
+    }
+
+    // 3. Head-to-head result between tied players:
+    // Only applies if they actually fought in a completed qualifier and there was a decisive winner
     const h2h = qualifierMatches.find(
       m =>
         m.completed &&
@@ -289,18 +295,21 @@ export function computeTournamentRankings(
       if (h2h.winnerId === b.id) return 1;
     }
 
-    // 3. Bankroll / coins DESC
+    // 4. Bankroll / coins DESC
     if (b.coins !== a.coins) {
       return b.coins - a.coins;
     }
 
-    // 4. Qualifier wins DESC
-    if (b.qualifierWins !== a.qualifierWins) {
-      return b.qualifierWins - a.qualifierWins;
+    // 5. Stable server-generated session seed/order
+    if (stableRosterOrder && stableRosterOrder.length > 0) {
+      const idxA = stableRosterOrder.indexOf(a.id);
+      const idxB = stableRosterOrder.indexOf(b.id);
+      if (idxA !== -1 && idxB !== -1 && idxA !== idxB) {
+        return idxA - idxB;
+      }
     }
 
-    // 5. Stable ID fallback
-    return a.id.localeCompare(b.id);
+    return 0;
   });
 
   sorted.forEach((p, idx) => {
@@ -308,6 +317,68 @@ export function computeTournamentRankings(
   });
 
   return sorted;
+}
+
+/**
+ * Pure function providing the authoritative final tournament podium & standings order:
+ * 1st = Champion (winner of championship series)
+ * 2nd = Runner-up (loser of championship series)
+ * 3rd = Third Place (highest-ranked non-finalist from qualifier rankings)
+ * 4th+ = Remaining players in qualifier ranking order
+ */
+export function getFinalTournamentStandings<T extends { id: string; qualifierPoints: number; qualifierWins: number; coins: number; tournamentRank?: number }>(
+  players: T[],
+  championId?: string | null,
+  runnerUpId?: string | null,
+  thirdPlaceId?: string | null
+): T[] {
+  const champ = championId ? players.find(p => p.id === championId) : null;
+  const runnerUp = runnerUpId ? players.find(p => p.id === runnerUpId) : null;
+  const third = thirdPlaceId ? players.find(p => p.id === thirdPlaceId) : null;
+
+  const nonFinalists = players.filter(
+    p => p.id !== champ?.id && p.id !== runnerUp?.id && p.id !== third?.id
+  ).sort((a, b) => {
+    if (a.tournamentRank !== undefined && b.tournamentRank !== undefined) {
+      return a.tournamentRank - b.tournamentRank;
+    }
+    if (b.qualifierPoints !== a.qualifierPoints) return b.qualifierPoints - a.qualifierPoints;
+    if (b.qualifierWins !== a.qualifierWins) return b.qualifierWins - a.qualifierWins;
+    return b.coins - a.coins;
+  });
+
+  const ordered: T[] = [];
+  if (champ) ordered.push(champ);
+  if (runnerUp) ordered.push(runnerUp);
+  if (third) ordered.push(third);
+  ordered.push(...nonFinalists);
+  return ordered;
+}
+
+/**
+ * Selects mini-game ensuring variety and avoiding immediate back-to-back repetitions.
+ */
+export function selectMiniGame(
+  roundIndex: number,
+  lastMiniGameId?: MiniGameId,
+  isChampionship = false,
+  championshipGameNumber = 1
+): MiniGameId {
+  if (isChampionship) {
+    const champIndex = (championshipGameNumber - 1) % MINI_GAME_ROTATION.length;
+    let selected = MINI_GAME_ROTATION[champIndex];
+    if (selected === lastMiniGameId && MINI_GAME_ROTATION.length > 1) {
+      selected = MINI_GAME_ROTATION[(champIndex + 1) % MINI_GAME_ROTATION.length];
+    }
+    return selected;
+  }
+
+  const gameIndex = roundIndex % MINI_GAME_ROTATION.length;
+  let candidate = MINI_GAME_ROTATION[gameIndex];
+  if (candidate === lastMiniGameId && MINI_GAME_ROTATION.length > 1) {
+    candidate = MINI_GAME_ROTATION[(gameIndex + 1) % MINI_GAME_ROTATION.length];
+  }
+  return candidate;
 }
 
 /**
@@ -319,10 +390,19 @@ export function initAuthoritativeRound(
   players: Player[],
   lastPairing?: [string, string],
   explicitFighters?: [string, string],
-  isChampionship = false
+  isChampionship = false,
+  stage: TournamentStage = 'QUALIFIERS',
+  qualifierIndex?: number,
+  qualifierTotal?: number,
+  championshipGameNumber?: number,
+  lastMiniGameId?: MiniGameId
 ): { round: RoundState; internalGame: InternalGameState } {
-  const gameIndex = (roundNumber - 1) % MINI_GAME_ROTATION.length;
-  const miniGameId = MINI_GAME_ROTATION[gameIndex];
+  const miniGameId = selectMiniGame(
+    roundNumber - 1,
+    lastMiniGameId,
+    isChampionship,
+    championshipGameNumber ?? 1
+  );
   const miniGame = MINI_GAMES[miniGameId];
 
   const fighterIds = explicitFighters || selectRoundFighters(players, lastPairing);
@@ -350,6 +430,10 @@ export function initAuthoritativeRound(
   const round: RoundState = {
     roundNumber,
     maxRounds: totalRounds,
+    stage,
+    qualifierIndex,
+    qualifierTotal,
+    championshipGameNumber,
     miniGame,
     fighterIds,
     matchPot,

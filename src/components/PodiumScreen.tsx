@@ -7,7 +7,8 @@
 
 import React, { useEffect } from 'react';
 import confetti from 'canvas-confetti';
-import type { PublicPlayer, Award } from '../engine/types.ts';
+import type { PublicPlayer, Award, TournamentSchedule } from '../engine/types.ts';
+import { getFinalTournamentStandings } from '../engine/roomEngine.ts';
 import { sound } from '../engine/audio.ts';
 import { RotateCcw, Sparkles } from 'lucide-react';
 
@@ -16,22 +17,20 @@ interface Props {
   awards: Award[];
   isHost: boolean;
   onPlayAgain: () => void;
+  tournamentSchedule?: TournamentSchedule | null;
 }
 
-export const PodiumScreen: React.FC<Props> = ({ players, awards, isHost, onPlayAgain }) => {
+export const PodiumScreen: React.FC<Props> = ({ players, awards, isHost, onPlayAgain, tournamentSchedule }) => {
   const champAward = awards.find(a => a.id === 'tournament_champion');
-  const championPlayer = champAward ? players.find(p => p.id === champAward.recipientId) : null;
+  const champId = tournamentSchedule?.championId || champAward?.recipientId;
+  const runnerUpId = tournamentSchedule?.runnerUpId;
+  const thirdPlaceId = tournamentSchedule?.thirdPlaceId;
 
-  const rankedByBrawl = [...players].sort((a, b) => {
-    if (b.qualifierPoints !== a.qualifierPoints) {
-      return b.qualifierPoints - a.qualifierPoints;
-    }
-    return b.coins - a.coins;
-  });
+  const finalStandings = getFinalTournamentStandings(players, champId, runnerUpId, thirdPlaceId);
 
-  const first = championPlayer || rankedByBrawl[0];
-  const second = rankedByBrawl.find(p => p.id !== first?.id) || rankedByBrawl[1];
-  const third = rankedByBrawl.find(p => p.id !== first?.id && p.id !== second?.id) || rankedByBrawl[2];
+  const first = finalStandings[0] || null;
+  const second = finalStandings[1] || null;
+  const third = finalStandings[2] || null;
 
   useEffect(() => {
     sound.playFanfare();
@@ -163,12 +162,14 @@ export const PodiumScreen: React.FC<Props> = ({ players, awards, isHost, onPlayA
           <span>BRAWL PTS · COINS</span>
         </div>
         <div className="space-y-1.5">
-          {rankedByBrawl.map((p, idx) => (
+          {finalStandings.map((p, idx) => (
             <div
               key={p.id}
               className={`flex items-center justify-between p-2.5 rounded-xl border text-xs font-mono ${
                 p.id === first?.id
                   ? 'bg-amber-950/40 border-amber-500/60 shadow-md'
+                  : p.id === second?.id
+                  ? 'bg-slate-900 border-slate-700'
                   : 'bg-slate-950/80 border-slate-800'
               }`}
             >
@@ -176,14 +177,19 @@ export const PodiumScreen: React.FC<Props> = ({ players, awards, isHost, onPlayA
                 <span className="font-bold text-slate-500 w-4">{idx + 1}.</span>
                 <span>{p.avatar}</span>
                 <span className="font-bold text-white font-sans">{p.name}</span>
-                {p.id === first?.id && (
+                {idx === 0 && (
                   <span className="text-[10px] font-mono px-1.5 py-0.5 bg-amber-950 text-amber-300 border border-amber-600 rounded font-black">
                     CHAMPION 👑
                   </span>
                 )}
-                {p.id === second?.id && (
-                  <span className="text-[10px] font-mono px-1.5 py-0.5 bg-slate-800 text-slate-300 border border-slate-600 rounded">
-                    FINALIST
+                {idx === 1 && (
+                  <span className="text-[10px] font-mono px-1.5 py-0.5 bg-slate-800 text-slate-300 border border-slate-600 rounded font-bold">
+                    RUNNER-UP 🥈
+                  </span>
+                )}
+                {idx === 2 && (
+                  <span className="text-[10px] font-mono px-1.5 py-0.5 bg-amber-950/60 text-amber-400 border border-amber-800 rounded font-bold">
+                    3RD PLACE 🥉
                   </span>
                 )}
               </div>

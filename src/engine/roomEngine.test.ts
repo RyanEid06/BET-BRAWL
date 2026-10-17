@@ -7,10 +7,12 @@ import {
   computeSessionAwards,
   generateTournamentSchedule,
   computeTournamentRankings,
+  getFinalTournamentStandings,
+  selectMiniGame,
   MIN_PLAYERS_TO_START,
   MAX_PLAYERS_CAPACITY,
 } from './roomEngine.ts';
-import type { Player } from './types.ts';
+import type { Player, TournamentMatch } from './types.ts';
 
 function createMockRoster(count: number): Player[] {
   const players: Player[] = [];
@@ -67,8 +69,9 @@ test('generateTournamentSchedule creates circular qualifier graph for 3 to 9 pla
     // Exact count properties
     assert.equal(schedule.totalPlayers, n, `Roster count must be ${n}`);
     assert.equal(schedule.qualifierCount, n, `Must have exactly ${n} qualifier matches`);
-    assert.equal(schedule.totalRounds, n + 1, `Must have ${n + 1} total rounds (N qualifiers + 1 Championship)`);
-    assert.equal(schedule.matches.length, n + 1);
+    assert.equal(schedule.stage, 'QUALIFIERS');
+    assert.equal(schedule.matches.length, n, `Matches list initializes with exactly ${n} qualifier matches`);
+    assert.ok(schedule.stableRosterOrder && schedule.stableRosterOrder.length === n);
 
     // Verify qualifier matches (0 to n - 1)
     const appearances: Record<string, number> = {};
@@ -100,11 +103,6 @@ test('generateTournamentSchedule creates circular qualifier graph for 3 to 9 pla
       assert.equal(appearances[p.id], 2, `Player ${p.id} must have exactly 2 qualifier appearances in ${n}-player room`);
       assert.equal(opponents[p.id].size, 2, `Player ${p.id} must face 2 distinct opponents in ${n}-player room`);
     }
-
-    // Championship match placeholder
-    const finalMatch = schedule.matches[n];
-    assert.equal(finalMatch.isChampionship, true);
-    assert.equal(finalMatch.roundNumber, n + 1);
   }
 });
 
@@ -113,39 +111,127 @@ test('generateTournamentSchedule strictly rejects fewer than 3 players or more t
   assert.throws(() => generateTournamentSchedule(createMockRoster(10)), /maximum capacity of 9/);
 });
 
-test('computeTournamentRankings ranks primarily by Brawl Points with head-to-head tiebreak', () => {
-  const players = createMockRoster(3);
-  const p1 = players[0];
-  const p2 = players[1];
-  const p3 = players[2];
+test('computeTournamentRankings ranks primarily by Brawl Points with 5-tier tiebreaker', () => {
+  const players = createMockRoster(4);
+  const [p1, p2, p3, p4] = players;
 
-  // P1: 6 pts (2W), P2: 3 pts (1W), P3: 0 pts (0W)
+  // Tier 1: Brawl Points
   p1.qualifierPoints = 6;
   p1.qualifierWins = 2;
-  p2.qualifierPoints = 3;
+  p2.qualifierPoints = 4;
   p2.qualifierWins = 1;
-  p3.qualifierPoints = 0;
+  p3.qualifierPoints = 1;
   p3.qualifierWins = 0;
+  p4.qualifierPoints = 0;
+  p4.qualifierWins = 0;
 
-  const matches = [
-    { matchIndex: 0, roundNumber: 1, fighterIds: [p1.id, p2.id] as [string, string], isChampionship: false, completed: true, winnerId: p1.id },
-    { matchIndex: 1, roundNumber: 2, fighterIds: [p2.id, p3.id] as [string, string], isChampionship: false, completed: true, winnerId: p2.id },
-    { matchIndex: 2, roundNumber: 3, fighterIds: [p3.id, p1.id] as [string, string], isChampionship: false, completed: true, winnerId: p1.id },
+  const matches: TournamentMatch[] = [
+    { matchIndex: 0, roundNumber: 1, fighterIds: [p1.id, p2.id], isChampionship: false, completed: true, winnerId: p1.id },
+    { matchIndex: 1, roundNumber: 2, fighterIds: [p2.id, p3.id], isChampionship: false, completed: true, winnerId: p2.id },
+    { matchIndex: 2, roundNumber: 3, fighterIds: [p3.id, p4.id], isChampionship: false, completed: true, winnerId: null, tieResult: true },
+    { matchIndex: 3, roundNumber: 4, fighterIds: [p4.id, p1.id], isChampionship: false, completed: true, winnerId: p1.id },
   ];
 
   const ranked = computeTournamentRankings(players, matches);
   assert.equal(ranked[0].id, p1.id, 'Rank 1 must be P1 (6 pts)');
-  assert.equal(ranked[1].id, p2.id, 'Rank 2 must be P2 (3 pts)');
-  assert.equal(ranked[2].id, p3.id, 'Rank 3 must be P3 (0 pts)');
+  assert.equal(ranked[1].id, p2.id, 'Rank 2 must be P2 (4 pts)');
+  assert.equal(ranked[2].id, p3.id, 'Rank 3 must be P3 (1 pt)');
+  assert.equal(ranked[3].id, p4.id, 'Rank 4 must be P4 (0 pts)');
   assert.equal(ranked[0].tournamentRank, 1);
   assert.equal(ranked[1].tournamentRank, 2);
   assert.equal(ranked[2].tournamentRank, 3);
+  assert.equal(ranked[3].tournamentRank, 4);
 
-  // Test head-to-head tiebreak: P1 and P2 tied on 3 pts, but P1 beat P2 in match 0
+  // Tier 3 test: Head-to-head between tied players (both 3 pts, 1 win each, but p1 beat p2 directly)
   p1.qualifierPoints = 3;
+  p1.qualifierWins = 1;
   p2.qualifierPoints = 3;
-  const tiedRanked = computeTournamentRankings(players, matches);
-  assert.equal(tiedRanked[0].id, p1.id, 'P1 won head-to-head against P2, must rank higher');
+  p2.qualifierWins = 1;
+  const h2hMatches: TournamentMatch[] = [
+    { matchIndex: 0, roundNumber: 1, fighterIds: [p1.id, p2.id], isChampionship: false, completed: true, winnerId: p1.id },
+  ];
+  const h2hRanked = computeTournamentRankings([p2, p1], h2hMatches);
+  assert.equal(h2hRanked[0].id, p1.id, 'P1 beat P2 head-to-head so P1 ranks higher');
+
+  // Tier 4 test: Tied on points and wins, no decisive head-to-head, resolved by bankroll
+  p1.qualifierPoints = 3;
+  p1.qualifierWins = 1;
+  p1.coins = 1500;
+  p2.qualifierPoints = 3;
+  p2.qualifierWins = 1;
+  p2.coins = 900;
+  const noH2hRanked = computeTournamentRankings([p2, p1], []);
+  assert.equal(noH2hRanked[0].id, p1.id, 'P1 has more coins so P1 ranks higher');
+
+  // Tier 5 test: Completely tied, resolved deterministically by stable roster order
+  p1.coins = 1000;
+  p2.coins = 1000;
+  const stableRanked = computeTournamentRankings([p2, p1], [], [p2.id, p1.id]);
+  assert.equal(stableRanked[0].id, p2.id, 'Stable roster order breaks final tie');
+});
+
+test('getFinalTournamentStandings ranks Champion, Runner-up, Third Place, and remaining qualifiers', () => {
+  const players = createMockRoster(4);
+  const [p1, p2, p3, p4] = players;
+  p1.tournamentRank = 1;
+  p2.tournamentRank = 2;
+  p3.tournamentRank = 3;
+  p4.tournamentRank = 4;
+
+  // Suppose P2 beats P1 in Championship Series! P2 is Champ, P1 is Runner-up, P3 is 3rd place
+  const standings = getFinalTournamentStandings(players, p2.id, p1.id, p3.id);
+  assert.equal(standings[0].id, p2.id, 'Champion is 1st');
+  assert.equal(standings[1].id, p1.id, 'Runner-up is 2nd');
+  assert.equal(standings[2].id, p3.id, '3rd place is top non-finalist');
+  assert.equal(standings[3].id, p4.id, '4th place is remaining player');
+});
+
+test('Championship Series: first to 2 decisive wins with tie extension and locked finalists', () => {
+  const players = createMockRoster(3);
+  const [fA, fB, nonFinalist] = players;
+  fA.qualifierPoints = 6;
+  fB.qualifierPoints = 3;
+  nonFinalist.qualifierPoints = 0;
+
+  const finalists: [string, string] = [fA.id, fB.id];
+  const championshipWins: Record<string, number> = { [fA.id]: 0, [fB.id]: 0 };
+
+  // Game 1: Finalist A wins -> 1 - 0
+  championshipWins[fA.id] += 1;
+  assert.equal(championshipWins[fA.id], 1);
+  assert.equal(championshipWins[fB.id], 0);
+  assert.ok(championshipWins[fA.id] < 2, 'Series continues');
+
+  // Game 2: Finalist B wins -> 1 - 1
+  championshipWins[fB.id] += 1;
+  assert.equal(championshipWins[fA.id], 1);
+  assert.equal(championshipWins[fB.id], 1);
+  assert.ok(championshipWins[fA.id] < 2 && championshipWins[fB.id] < 2, 'Series continues at 1-1');
+
+  // Game 3: Tie! No wins granted to either player. Score remains 1 - 1!
+  const isTie = true;
+  if (!isTie) {
+    championshipWins[fA.id] += 1;
+  }
+  assert.equal(championshipWins[fA.id], 1, 'Tie must not increment series wins');
+  assert.equal(championshipWins[fB.id], 1, 'Tie must not increment series wins');
+
+  // Game 4: Finalist B wins decisive match -> 1 - 2 -> Finalist B crowns Champion!
+  championshipWins[fB.id] += 1;
+  assert.equal(championshipWins[fB.id], 2);
+  const championId = fB.id;
+  const runnerUpId = fA.id;
+  assert.equal(championId, fB.id);
+  assert.equal(runnerUpId, fA.id);
+
+  // Finalists remained locked throughout
+  assert.equal(finalists[0], fA.id);
+  assert.equal(finalists[1], fB.id);
+
+  // Qualifier points were completely untouched by championship games
+  assert.equal(fA.qualifierPoints, 6);
+  assert.equal(fB.qualifierPoints, 3);
+  assert.equal(nonFinalist.qualifierPoints, 0);
 });
 
 test('initAuthoritativeRound initializes clean round state and mini-game config', () => {

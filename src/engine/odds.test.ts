@@ -259,3 +259,69 @@ test('computeRoundPayouts handles tie by splitting pot and refunding bets', () =
   assert.ok(refund.summary.includes('refunded'));
   assert.ok(refund.summary.includes('0 net'));
 });
+
+test('computeRoundPayouts handles DISCONNECT_FORFEIT by awarding bounty to winner and REFUNDING spectator bets', () => {
+  const spectator1: Player = { ...mockSpectator, id: 's1', coins: 800, totalBetsWon: 0, totalCoinsWonInBets: 0, totalCoinsLostInBets: 0 };
+  const spectator2: Player = { ...mockSpectator, id: 's2', coins: 700, totalBetsWon: 0, totalCoinsWonInBets: 0, totalCoinsLostInBets: 0 };
+
+  const bets: SecretBet[] = [
+    { bettorId: 's1', fighterId: 'f1', amount: 200, oddsAtBet: 1.80, timestamp: 1, potentialReturn: 360 },
+    { bettorId: 's2', fighterId: 'f2', amount: 100, oddsAtBet: 2.20, timestamp: 2, potentialReturn: 220 },
+  ];
+
+  const result = computeRoundPayouts(
+    'f1', // Opponent f1 declared winner due to f2 disconnect forfeit
+    false,
+    ['f1', 'f2'],
+    250,
+    bets,
+    [mockFighterA, mockFighterB, spectator1, spectator2],
+    'DISCONNECT_FORFEIT'
+  );
+
+  const f1Payout = result.payouts.find(p => p.playerId === 'f1')!;
+  assert.equal(f1Payout.type, 'FIGHTER_BOUNTY');
+  assert.equal(f1Payout.netChange, 250);
+
+  const s1Refund = result.payouts.find(p => p.playerId === 's1')!;
+  assert.equal(s1Refund.type, 'BET_REFUND');
+  assert.equal(s1Refund.netChange, 0);
+  assert.equal(s1Refund.totalReturn, 200);
+  assert.equal(s1Refund.newBankroll, 800 + 200);
+
+  const s2Refund = result.payouts.find(p => p.playerId === 's2')!;
+  assert.equal(s2Refund.type, 'BET_REFUND');
+  assert.equal(s2Refund.netChange, 0);
+  assert.equal(s2Refund.totalReturn, 100);
+  assert.equal(s2Refund.newBankroll, 700 + 100);
+
+  // Spectator stats must NOT count forfeit as a win or loss
+  const s1Updated = result.updatedPlayers.find(p => p.id === 's1')!;
+  assert.equal(s1Updated.totalBetsWon, 0);
+  assert.equal(s1Updated.totalCoinsWonInBets, 0);
+  assert.equal(s1Updated.totalCoinsLostInBets, 0);
+});
+
+test('computeRoundPayouts handles VOID round by refunding all spectator bets', () => {
+  const spectator: Player = { ...mockSpectator, id: 's1', coins: 500 };
+  const bets: SecretBet[] = [
+    { bettorId: 's1', fighterId: 'f1', amount: 150, oddsAtBet: 2.0, timestamp: 1, potentialReturn: 300 },
+  ];
+
+  const result = computeRoundPayouts(
+    null,
+    false,
+    ['f1', 'f2'],
+    250,
+    bets,
+    [mockFighterA, mockFighterB, spectator],
+    'VOID'
+  );
+
+  assert.equal(result.payouts.length, 1);
+  assert.equal(result.payouts[0].type, 'BET_REFUND');
+  assert.equal(result.payouts[0].netChange, 0);
+  assert.equal(result.payouts[0].totalReturn, 150);
+  assert.equal(result.payouts[0].newBankroll, 500 + 150);
+});
+

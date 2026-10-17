@@ -74,16 +74,8 @@ export const TitleAndDiscovery: React.FC<Props> = ({
       {/* Background glow */}
       <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-gradient-to-tr from-cyan-600/15 via-amber-500/10 to-rose-600/10 rounded-full blur-3xl pointer-events-none" />
 
-      {/* Top Local Network Status Header */}
-      <header className="w-full max-w-md flex items-center justify-between z-10 pt-2">
-        <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-slate-900/90 border border-slate-700/80 text-xs font-mono text-slate-300">
-          <Wifi className="w-3.5 h-3.5 text-emerald-400" />
-          <span>Local Wi-Fi Server</span>
-          {networkInfo && (
-            <span className="text-cyan-400 font-bold">{networkInfo.localIp}:{networkInfo.port}</span>
-          )}
-        </div>
-      </header>
+      {/* Top spacer */}
+      <div className="w-full max-w-md h-6" />
 
       {/* Centerpiece Hero */}
       <main className="flex flex-col items-center justify-center my-auto z-10 max-w-sm sm:max-w-md w-full space-y-6 text-center">
@@ -233,8 +225,8 @@ export const TitleAndDiscovery: React.FC<Props> = ({
       </main>
 
       {/* Footer */}
-      <footer className="w-full max-w-md text-center text-xs text-slate-500 font-mono pt-4">
-        <span>3 to 9 friends · 100% Offline Local Network · Zero Cloud Required</span>
+      <footer className="w-full max-w-md text-center text-xs text-slate-400 font-mono pt-4">
+        <span>3–9 players · Same Wi-Fi · No internet needed</span>
       </footer>
     </div>
   );

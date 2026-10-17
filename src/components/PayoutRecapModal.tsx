@@ -6,7 +6,7 @@
  */
 
 import React from 'react';
-import type { PublicPlayer, RoundState } from '../engine/types.ts';
+import type { PublicPlayer, RoundState, TournamentSchedule } from '../engine/types.ts';
 import { ArrowRight, Trophy, Coins } from 'lucide-react';
 
 interface Props {
@@ -16,6 +16,7 @@ interface Props {
   isHost: boolean;
   onNextRound: () => void;
   isFinalRound: boolean;
+  tournamentSchedule?: TournamentSchedule | null;
 }
 
 export const PayoutRecapModal: React.FC<Props> = ({
@@ -25,6 +26,7 @@ export const PayoutRecapModal: React.FC<Props> = ({
   isHost,
   onNextRound,
   isFinalRound,
+  tournamentSchedule,
 }) => {
   const winner = players.find(p => p.id === round.winnerId);
   // Sort tournament leaderboard by Brawl Points DESC, then bankroll DESC
@@ -38,20 +40,52 @@ export const PayoutRecapModal: React.FC<Props> = ({
   // Find current player's personal outcome for this round
   const myPayout = myPlayer ? round.payouts.find(p => p.playerId === myPlayer.id) : null;
   const isFighter = myPlayer && (myPlayer.id === round.fighterIds[0] || myPlayer.id === round.fighterIds[1]);
-  const isLastQualifier = round.roundNumber === round.maxRounds - 1;
+  const isLastQualifier = tournamentSchedule
+    ? tournamentSchedule.qualifiersCompleted === tournamentSchedule.qualifierCount && !round.isChampionship
+    : false;
+
+  const fA = players.find(p => p.id === round.fighterIds[0]);
+  const fB = players.find(p => p.id === round.fighterIds[1]);
+  const winsA = tournamentSchedule?.championshipWins && fA ? (tournamentSchedule.championshipWins[fA.id] || 0) : 0;
+  const winsB = tournamentSchedule?.championshipWins && fB ? (tournamentSchedule.championshipWins[fB.id] || 0) : 0;
 
   return (
     <div className="w-full max-w-lg mx-auto p-3 sm:p-4 space-y-4">
       {/* 1. Winner Hero Splash */}
       <div className="bg-gradient-to-r from-amber-950/90 via-slate-900 to-amber-950/90 border-2 border-amber-400/80 rounded-2xl p-4 shadow-xl text-center space-y-2 glow-gold">
         <span className="px-3 py-0.5 rounded-full bg-amber-950 text-amber-300 border border-amber-600/60 font-mono text-[11px] font-bold uppercase">
-          {round.isChampionship ? '👑 CHAMPIONSHIP FINAL RESULT' : `QUALIFIER ROUND ${round.roundNumber} RESULT`}
+          {round.isChampionship
+            ? `👑 CHAMPIONSHIP · GAME ${round.championshipGameNumber ?? 1} RESULT`
+            : `QUALIFIER ${round.qualifierIndex ?? round.roundNumber} RESULT`}
         </span>
 
         {round.tieResult ? (
           <div className="py-2">
-            <h2 className="text-2xl font-black font-display text-amber-300">IT'S A DRAW!</h2>
-            <p className="text-xs font-mono text-slate-300">Match pot split &amp; spectator wagers refunded</p>
+            <h2 className="text-2xl font-black font-display text-amber-300">
+              {round.isChampionship ? `SERIES STILL TIED · ${winsA} – ${winsB}` : "IT'S A DRAW!"}
+            </h2>
+            <p className="text-xs font-mono text-slate-300">
+              {round.isChampionship
+                ? 'Neither finalist receives a series point · Series continues!'
+                : 'Match pot split & spectator wagers refunded'}
+            </p>
+          </div>
+        ) : round.resolutionReason === 'DISCONNECT_FORFEIT' ? (
+          <div className="flex items-center justify-center gap-3 py-1">
+            <span className="text-5xl p-2 bg-slate-950 rounded-2xl border border-amber-400">
+              {winner?.avatar || '👑'}
+            </span>
+            <div className="text-left">
+              <div className="text-[11px] font-mono text-amber-400 font-bold uppercase">
+                WIN BY DISCONNECT
+              </div>
+              <h2 className="text-2xl font-black font-display text-white">{winner?.name}</h2>
+              <div className="text-xs font-mono text-cyan-300 font-bold">
+                {round.isChampionship
+                  ? `Earns Series Win (${winsA} – ${winsB}) · Bets refunded`
+                  : `+3 BRAWL POINTS (${winner?.qualifierPoints} pts) · Bets refunded`}
+              </div>
+            </div>
           </div>
         ) : (
           <div className="flex items-center justify-center gap-3 py-1">
@@ -60,11 +94,16 @@ export const PayoutRecapModal: React.FC<Props> = ({
             </span>
             <div className="text-left">
               <div className="text-[11px] font-mono text-amber-400 font-bold uppercase">
-                {round.isChampionship ? 'TOURNAMENT CHAMPION' : 'BRAWL VICTOR (+3 PTS)'}
+                {round.isChampionship
+                  ? (tournamentSchedule?.championId ? 'TOURNAMENT CHAMPION 🏆' : `SERIES LEAD (${winsA} – ${winsB})`)
+                  : '+3 BRAWL POINTS'}
               </div>
               <h2 className="text-2xl font-black font-display text-white">{winner?.name}</h2>
               <div className="text-xs font-mono text-emerald-400 font-bold flex items-center gap-1">
-                <Coins className="w-3.5 h-3.5" /> +{round.matchPot}c Victory Bounty
+                <Coins className="w-3.5 h-3.5" />
+                {round.isChampionship
+                  ? `Series Game Winner (+${round.matchPot}c pot)`
+                  : `${winner?.name} moves to ${winner?.qualifierPoints} pts (+${round.matchPot}c)`}
               </div>
             </div>
           </div>
@@ -75,10 +114,10 @@ export const PayoutRecapModal: React.FC<Props> = ({
       {isLastQualifier && (
         <div className="p-3 bg-gradient-to-r from-amber-950/90 to-yellow-950/90 border border-amber-500/80 rounded-2xl text-center space-y-1 shadow-lg glow-gold">
           <div className="text-xs font-black font-mono text-amber-300 uppercase tracking-wider">
-            ★ QUALIFIERS CONCLUDED! ★
+            ★ QUALIFIERS COMPLETE · TOP TWO ADVANCE ★
           </div>
           <p className="text-xs text-white font-display">
-            Top 2 Seeds <span className="font-black text-amber-300">{sortedLeaderboard[0]?.name}</span> &amp; <span className="font-black text-amber-300">{sortedLeaderboard[1]?.name}</span> advance to the Championship Final!
+            Top 2 Seeds <span className="font-black text-amber-300">{sortedLeaderboard[0]?.name}</span> &amp; <span className="font-black text-amber-300">{sortedLeaderboard[1]?.name}</span> advance to the Championship Series!
           </p>
         </div>
       )}
@@ -149,7 +188,11 @@ export const PayoutRecapModal: React.FC<Props> = ({
           <span className="flex items-center gap-1.5 text-amber-400 font-bold">
             <Trophy className="w-3.5 h-3.5" /> TOURNAMENT STANDINGS (BRAWL PTS)
           </span>
-          <span>Round {round.roundNumber} / {round.maxRounds}</span>
+          {round.isChampionship ? (
+            <span className="text-amber-400 font-bold">Championship Game {round.championshipGameNumber ?? 1}</span>
+          ) : (
+            <span>Qualifier {round.qualifierIndex ?? round.roundNumber} / {round.qualifierTotal ?? tournamentSchedule?.qualifierCount ?? round.maxRounds}</span>
+          )}
         </div>
 
         <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
@@ -193,7 +236,15 @@ export const PayoutRecapModal: React.FC<Props> = ({
             onClick={onNextRound}
             className="w-full py-4 rounded-xl font-display font-black text-lg uppercase tracking-wider bg-gradient-to-r from-cyan-500 via-amber-500 to-rose-500 hover:from-cyan-400 hover:to-rose-400 text-slate-950 shadow-xl transition-all transform active:scale-95 glow-gold border border-amber-300 flex items-center justify-center gap-2 cursor-pointer"
           >
-            <span>{isFinalRound ? 'REVEAL FINAL PODIUM 🏆' : `PROCEED TO ROUND ${round.roundNumber + 1}`}</span>
+            <span>
+              {isFinalRound || tournamentSchedule?.stage === 'COMPLETE'
+                ? 'REVEAL FINAL PODIUM 🏆'
+                : tournamentSchedule?.stage === 'CHAMPIONSHIP'
+                ? `PLAY CHAMPIONSHIP GAME ${(round.championshipGameNumber ?? 1) + 1} →`
+                : isLastQualifier
+                ? 'BEGIN CHAMPIONSHIP SERIES 👑 →'
+                : `PROCEED TO QUALIFIER ${(round.qualifierIndex ?? round.roundNumber) + 1} →`}
+            </span>
             <ArrowRight className="w-4 h-4" />
           </button>
         ) : (

@@ -112,28 +112,44 @@ export interface RoundPayoutItem {
   summary: string;          // e.g. "360 returned · +160 profit" or "150 refunded · 0 net"
 }
 
+export type TournamentStage = 'QUALIFIERS' | 'CHAMPIONSHIP' | 'COMPLETE';
+export type RoundResolutionReason = 'PLAYED' | 'TIE' | 'DISCONNECT_FORFEIT' | 'VOID';
+
 export interface TournamentMatch {
   matchIndex: number;
   roundNumber: number;
   fighterIds: [string, string];
   isChampionship: boolean;
+  championshipGameNumber?: number; // 1, 2, 3...
   completed: boolean;
   winnerId: string | null;
   tieResult?: boolean;
+  resolutionReason?: RoundResolutionReason;
 }
 
 export interface TournamentSchedule {
+  stage: TournamentStage;
   totalPlayers: number;
   qualifierCount: number; // Exactly N qualifiers for N players
-  totalRounds: number;    // N + 1 (N qualifiers + 1 Championship Final)
+  qualifiersCompleted: number;
+  totalRounds: number;    // Estimated or legacy field
   matches: TournamentMatch[];
   finalists?: [string, string];
+  championshipWins: Record<string, number>; // finalistId -> wins (first to 2)
+  championshipGamesPlayed: number;
   championId?: string | null;
+  runnerUpId?: string | null;
+  thirdPlaceId?: string | null;
+  stableRosterOrder: string[]; // Deterministic frozen session seed
 }
 
 export interface RoundState {
   roundNumber: number;
   maxRounds: number;
+  stage?: TournamentStage;
+  qualifierIndex?: number;
+  qualifierTotal?: number;
+  championshipGameNumber?: number;
   miniGame: MiniGameMeta;
   fighterIds: [string, string];
   matchPot: number; // Virtual stakes awarded to winning fighter (+250c qualifier, +500c championship)
@@ -143,6 +159,7 @@ export interface RoundState {
   gameTimeRemaining: number;
   winnerId: string | null;
   tieResult?: boolean;
+  resolutionReason?: RoundResolutionReason;
   isChampionship?: boolean;
   fighterScores: Record<string, number>;
   payouts: RoundPayoutItem[];
@@ -198,6 +215,8 @@ export interface PublicRoomState {
     winnerName: string;
     totalPotWon: number;
     isChampionship?: boolean;
+    championshipGameNumber?: number;
+    resolutionReason?: RoundResolutionReason;
   }>;
   awards: Award[];
   debugMode?: boolean;

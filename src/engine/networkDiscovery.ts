@@ -39,6 +39,17 @@ export function isLoopback(ip: string): boolean {
   return ip.startsWith('127.');
 }
 
+export function isLoopbackUrl(url: string | undefined): boolean {
+  if (!url) return true;
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname;
+    return host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0' || host === '::1';
+  } catch {
+    return url.includes('localhost') || url.includes('127.0.0.1') || url.includes('0.0.0.0') || url.includes('::1');
+  }
+}
+
 interface ScoredInterface {
   address: string;
   interfaceName: string;

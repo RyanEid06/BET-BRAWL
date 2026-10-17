@@ -19,6 +19,10 @@ interface Props {
   revealEndsAt?: number;
   serverTimeOffset?: number;
   isChampionship?: boolean;
+  qualifierIndex?: number;
+  qualifierTotal?: number;
+  championshipGameNumber?: number;
+  championshipWins?: Record<string, number>;
 }
 
 export const FighterAnnouncement: React.FC<Props> = ({
@@ -30,6 +34,10 @@ export const FighterAnnouncement: React.FC<Props> = ({
   revealEndsAt,
   serverTimeOffset = 0,
   isChampionship = false,
+  qualifierIndex,
+  qualifierTotal,
+  championshipGameNumber,
+  championshipWins,
 }) => {
   const [secondsRemaining, setSecondsRemaining] = useState<number>(() => {
     if (revealEndsAt) {
@@ -55,21 +63,32 @@ export const FighterAnnouncement: React.FC<Props> = ({
     return () => clearInterval(interval);
   }, [revealEndsAt, serverTimeOffset]);
 
-  const qualifierTotal = Math.max(1, totalRounds - 1);
+  const qNum = qualifierIndex ?? roundNumber;
+  const qTotal = qualifierTotal ?? Math.max(1, totalRounds - 1);
+  const winsA = championshipWins ? (championshipWins[fighterA.id] || 0) : 0;
+  const winsB = championshipWins ? (championshipWins[fighterB.id] || 0) : 0;
 
   return (
     <div className="relative w-full max-w-xl mx-auto p-4 flex flex-col justify-between items-center text-center space-y-4">
       {/* Round & Game Header */}
-      <div className="space-y-1">
+      <div className="space-y-1.5">
         {isChampionship ? (
-          <span className="px-4 py-1.5 rounded-full bg-amber-950 text-amber-300 border-2 border-amber-400 font-mono text-xs font-black uppercase tracking-wider glow-gold inline-flex items-center gap-1.5">
-            <span>👑</span>
-            <span>TOURNAMENT CHAMPIONSHIP FINAL</span>
-            <span>👑</span>
-          </span>
+          <div className="space-y-1">
+            <span className="px-4 py-1.5 rounded-full bg-amber-950 text-amber-300 border-2 border-amber-400 font-mono text-xs font-black uppercase tracking-wider glow-gold inline-flex items-center gap-1.5">
+              <span>👑</span>
+              <span>CHAMPIONSHIP · GAME {championshipGameNumber ?? 1}</span>
+              <span>👑</span>
+            </span>
+            <div className="text-amber-400 font-mono font-bold text-xs uppercase tracking-wider">
+              FIRST TO 2 WINS
+              <span className="text-white ml-2 font-black font-sans">
+                · {fighterA.name} {winsA} – {winsB} {fighterB.name}
+              </span>
+            </div>
+          </div>
         ) : (
           <span className="px-3 py-1 rounded-full bg-cyan-950 text-cyan-300 border border-cyan-700/60 font-mono text-xs font-bold uppercase">
-            QUALIFIER BRAWL {roundNumber} OF {qualifierTotal}
+            QUALIFIER {qNum} / {qTotal}
           </span>
         )}
         <h2 className={`text-2xl sm:text-3xl font-black font-display tracking-wide mt-1 ${
@@ -89,7 +108,7 @@ export const FighterAnnouncement: React.FC<Props> = ({
           isChampionship ? 'border-amber-400' : ''
         }`}>
           <span className="text-[10px] font-mono font-bold text-cyan-300 uppercase">
-            {isChampionship ? 'TOP SEED FINALIST' : 'BLUE CORNER'}
+            {isChampionship ? `FINALIST (${winsA} WINS)` : 'BLUE CORNER'}
           </span>
           <div className="text-5xl p-2 bg-slate-950 rounded-2xl border border-cyan-500/40">
             {fighterA.avatar}
@@ -105,7 +124,7 @@ export const FighterAnnouncement: React.FC<Props> = ({
           isChampionship ? 'border-amber-400' : ''
         }`}>
           <span className="text-[10px] font-mono font-bold text-rose-300 uppercase">
-            {isChampionship ? 'RUNNER-UP FINALIST' : 'RED CORNER'}
+            {isChampionship ? `FINALIST (${winsB} WINS)` : 'RED CORNER'}
           </span>
           <div className="text-5xl p-2 bg-slate-950 rounded-2xl border border-rose-500/40">
             {fighterB.avatar}

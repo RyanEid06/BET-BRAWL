@@ -79,9 +79,11 @@ export const LobbyScreen: React.FC<Props> = ({
     ? `${selectedBaseUrl}?room=${roomCode}`
     : selectedBaseUrl;
 
-  // Generate real join QR code
+  const isLanReady = !isLoopbackUrl(selectedBaseUrl);
+
+  // Generate real join QR code ONLY when non-loopback LAN URL exists (BLOCKER 7)
   useEffect(() => {
-    if (joinUrlWithRoom) {
+    if (joinUrlWithRoom && isLanReady) {
       QRCode.toDataURL(joinUrlWithRoom, {
         margin: 1,
         width: 160,
@@ -92,8 +94,10 @@ export const LobbyScreen: React.FC<Props> = ({
       })
         .then(url => setQrDataUrl(url))
         .catch(err => console.error('QR code generation error:', err));
+    } else {
+      setQrDataUrl('');
     }
-  }, [joinUrlWithRoom]);
+  }, [joinUrlWithRoom, isLanReady]);
 
   const connectedPlayers = players.filter(p => p.connected);
   const enoughPlayers = connectedPlayers.length >= MIN_PLAYERS_TO_START || isDebug;
@@ -102,56 +106,76 @@ export const LobbyScreen: React.FC<Props> = ({
 
   return (
     <div className="w-full max-w-4xl mx-auto p-3 sm:p-4 md:p-6 space-y-5">
-      {/* Prominent Host Wi-Fi Join Card */}
-      <div className="bg-slate-900/95 border-2 border-cyan-500/40 rounded-3xl p-5 shadow-2xl flex flex-col md:flex-row items-center justify-between gap-6">
-        <div className="flex-1 space-y-2 text-center md:text-left">
+      {/* Primary Party Lobby Invitation Card */}
+      <div className="bg-slate-900/95 border-2 border-cyan-500/40 rounded-3xl p-5 sm:p-6 shadow-2xl flex flex-col md:flex-row items-center justify-between gap-6">
+        <div className="flex-1 space-y-3 text-center md:text-left w-full">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-950 text-cyan-300 border border-cyan-700/60 text-xs font-mono">
             <Wifi className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
-            <span>Friends on the same Wi-Fi can join:</span>
+            <span>Same Wi-Fi · Scan QR or enter room code</span>
           </div>
 
-          <h2 className="text-lg sm:text-xl md:text-2xl font-black font-display text-white">
-            JOIN AT: <span className="text-cyan-300 font-mono text-base md:text-xl break-all">{selectedBaseUrl}</span>
-          </h2>
-
-          {/* Multiple Candidate LAN URLs selector if host has multiple adapters */}
-          {networkInfo?.candidateUrls && networkInfo.candidateUrls.length > 1 && isHost && (
-            <div className="text-xs font-mono text-slate-400 flex items-center gap-2 flex-wrap">
-              <span>Adapter URL:</span>
-              {networkInfo.candidateUrls.map(url => (
-                <button
-                  key={url}
-                  onClick={() => setSelectedBaseUrl(url)}
-                  className={`px-2 py-0.5 rounded text-[11px] cursor-pointer transition-colors ${
-                    selectedBaseUrl === url
-                      ? 'bg-cyan-500 text-slate-950 font-bold'
-                      : 'bg-slate-950 text-slate-300 border border-slate-700 hover:border-slate-500'
-                  }`}
-                >
-                  {url}
-                </button>
-              ))}
+          <div className="space-y-0.5">
+            <span className="text-xs font-mono text-slate-400 uppercase tracking-widest font-bold block">ROOM CODE</span>
+            <div className="text-5xl sm:text-6xl font-black font-mono tracking-widest text-amber-400 select-all py-1">
+              {roomCode}
             </div>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-center md:justify-start gap-2 pt-1">
+            <div className="px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-700 font-mono text-xs text-slate-300 flex items-center gap-1.5">
+              <Users className="w-3.5 h-3.5 text-cyan-400" />
+              <span>{connectedPlayers.length}/{MAX_PLAYERS_CAPACITY} Players</span>
+            </div>
+          </div>
+
+          {/* Host-only troubleshooting disclosure */}
+          {isHost && (
+            <details className="text-xs text-slate-400 pt-2 border-t border-slate-800/80">
+              <summary className="cursor-pointer hover:text-slate-200 font-mono transition-colors">
+                Having trouble joining?
+              </summary>
+              <div className="mt-2 space-y-2 p-3 rounded-xl bg-slate-950/80 border border-slate-800 text-[11px] font-mono">
+                <div>Manual Address: <span className="text-cyan-300 select-all">{joinUrlWithRoom}</span></div>
+                {networkInfo?.candidateUrls && networkInfo.candidateUrls.length > 1 && (
+                  <div className="flex items-center gap-1.5 flex-wrap pt-1">
+                    <span>Alternative LAN Addresses:</span>
+                    {networkInfo.candidateUrls.map(url => (
+                      <button
+                        key={url}
+                        onClick={() => setSelectedBaseUrl(url)}
+                        className={`px-2 py-0.5 rounded text-[10px] cursor-pointer ${
+                          selectedBaseUrl === url
+                            ? 'bg-cyan-500 text-slate-950 font-bold'
+                            : 'bg-slate-900 text-slate-300 border border-slate-700'
+                        }`}
+                      >
+                        {url}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <div className="text-slate-500">
+                  Ensure all devices are on the exact same Wi-Fi and router AP isolation is turned off.
+                </div>
+              </div>
+            </details>
           )}
-
-          <div className="flex flex-wrap items-center justify-center md:justify-start gap-3 pt-1">
-            <div className="px-3.5 py-1.5 rounded-xl bg-slate-950 border border-slate-700 font-mono text-sm text-slate-300">
-              ROOM CODE: <span className="text-amber-400 font-bold text-base tracking-widest">{roomCode}</span>
-            </div>
-            <div className="px-3.5 py-1.5 rounded-xl bg-slate-950 border border-slate-700 font-mono text-sm text-slate-300 flex items-center gap-1.5">
-              <Users className="w-4 h-4 text-cyan-400" />
-              <span>{connectedPlayers.length}/{MAX_PLAYERS_CAPACITY} Connected</span>
-            </div>
-          </div>
         </div>
 
-        {/* QR Code Container */}
-        {qrDataUrl && (
-          <div className="bg-white p-2.5 rounded-2xl shadow-xl flex flex-col items-center shrink-0">
-            <img src={qrDataUrl} alt="Scan to join Bet & BRAWL" className="w-28 h-28 md:w-32 md:h-32 rounded-lg" />
-            <span className="text-[10px] font-mono font-bold text-slate-900 mt-1 uppercase">Scan to Join</span>
-          </div>
-        )}
+        {/* QR Code Container with Safe LAN fallback */}
+        <div className="shrink-0 flex flex-col items-center">
+          {qrDataUrl ? (
+            <div className="bg-white p-2.5 rounded-2xl shadow-xl flex flex-col items-center">
+              <img src={qrDataUrl} alt="Scan to join Bet & BRAWL" className="w-28 h-28 md:w-32 md:h-32 rounded-lg" />
+              <span className="text-[10px] font-mono font-bold text-slate-900 mt-1 uppercase">Scan to Join</span>
+            </div>
+          ) : (
+            <div className="w-28 h-28 md:w-32 md:h-32 rounded-2xl bg-slate-950 border border-slate-800 flex flex-col items-center justify-center p-3 text-center shadow-inner">
+              <Wifi className="w-5 h-5 text-cyan-400 animate-pulse mb-1.5" />
+              <span className="text-[11px] font-mono text-slate-400 font-bold leading-tight">Finding your local game…</span>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Tournament Format Card */}
@@ -162,20 +186,18 @@ export const LobbyScreen: React.FC<Props> = ({
             <span>TOURNAMENT FORMAT</span>
           </div>
           <div className="text-base font-black text-white font-display">
-            {connectedPlayers.length >= 3
-              ? `${connectedPlayers.length} Qualifiers → Top Two → Championship Final`
-              : 'Qualifiers (Circular Graph) → Top Two → Championship Final'}
+            Qualifiers → Top Two Advance → Championship Series
           </div>
           <div className="text-xs text-slate-400">
-            Every brawler fights in 2 qualifier brawls. Win = 3 Brawl Pts, Tie = 1 Pt. Top 2 fighters advance to the Championship Final!
+            Every brawler fights in 2 qualifiers. Win = 3 Brawl Pts, Tie = 1 Pt. Top 2 advance to a First to 2 Wins Championship Series!
           </div>
         </div>
 
         <div className="shrink-0 flex items-center gap-2">
           <div className="px-3.5 py-2 rounded-xl bg-slate-950 border border-cyan-500/40 text-center font-mono shadow-inner">
-            <span className="text-[10px] text-slate-400 uppercase block font-bold">Total Brawls</span>
-            <span className="text-base font-black text-amber-400">
-              {connectedPlayers.length >= 3 ? `${connectedPlayers.length + 1} Rounds` : 'N + 1'}
+            <span className="text-[10px] text-slate-400 uppercase block font-bold">Structure</span>
+            <span className="text-sm font-black text-amber-400">
+              {connectedPlayers.length >= 3 ? `${connectedPlayers.length} Qualifiers + Finals` : 'Qualifiers + Finals'}
             </span>
           </div>
         </div>

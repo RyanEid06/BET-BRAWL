@@ -55,7 +55,7 @@ This permits incoming connections on port 3000 from mobile phones connected to t
 
 Bet & BRAWL features a structured tournament architecture:
 
-**QUALIFIERS → TOP TWO SEEDS → CHAMPIONSHIP FINAL**
+**QUALIFIERS → TOP TWO SEEDS → CHAMPIONSHIP SERIES (FIRST TO 2 DECISIVE WINS)**
 
 1. **Qualifier Scheduling:**
    - The server freezes the connected session roster of N players (3–9 players).
@@ -66,13 +66,14 @@ Bet & BRAWL features a structured tournament architecture:
    - **Win:** 3 Brawl Points
    - **Tie:** 1 Brawl Point each
    - **Loss:** 0 Brawl Points
-3. **Championship Qualification:**
-   - Ranked primarily by Brawl Points earned in qualifiers.
-   - Head-to-head qualifier outcomes serve as primary tiebreaker, followed by coin bankroll.
-   - Top 2 ranked fighters advance to the Championship Final!
-4. **Championship Final:**
-   - High-stakes title brawl with a +500 coin victory bounty.
-   - The victor is crowned **Tournament Champion** on the podium.
+3. **Championship Qualification (5-Tier Tiebreaker):**
+   - Ranked by: (1) Brawl Points DESC, (2) Qualifier Wins DESC, (3) Decisive head-to-head match result between tied players, (4) Bankroll / coins DESC, (5) Deterministic session roster seed order.
+   - Top 2 ranked fighters advance to the Championship Series!
+4. **Championship Series (First to 2 Decisive Wins):**
+   - Locked top two finalists compete in a best-of series requiring **2 decisive wins** to claim the crown.
+   - A tied game never crowns a champion; the series continues with additional mini-games until a finalist secures 2 decisive victories.
+   - Spectator betting remains active for every championship brawl (+500 coin victory bounty).
+   - The victor is crowned **Tournament Champion** on the podium, with 2nd Place Runner-Up and 3rd Place Bronze awarded to the top non-finalist.
 
 ---
 
@@ -104,7 +105,7 @@ npm run verify
 ```
 This executes:
 1. `npm run typecheck` (`tsc --noEmit`): 0 TypeScript errors.
-2. `npm test` (`tsx --test ...`): 45 comprehensive tests covering:
+2. `npm test` (`tsx --test ...`): 49 comprehensive tests covering:
    - **Production Server Integration:** Real WebSocket multi-client lifecycles exercising `createBrawlServer`, 3-player and 6-player tournament scheduling, token privacy, spectator wagering, fighter action processing, payout synchronization, and room closure.
    - **Tournament & Brawl Points Fairness:** Circular qualifier graph generation, N qualifiers for N players, head-to-head tiebreak resolution, top 2 finalist promotion, and championship crowning.
    - **Old-Socket Reconnect Race Protection:** Verified that a socket closing after reconnect replacement cannot disconnect the seat.

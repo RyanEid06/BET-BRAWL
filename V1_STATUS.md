@@ -1,31 +1,42 @@
 # BET & BRAWL — V1 Status Tracker
 
-Last Updated: Final Hardening & Acceptance Verification Pass
+Last Updated: Final Hardening & Championship Series Acceptance Pass
 
 ## 1. Summary of Completed Hardening Pass
-- **Actual Production Server Integration Testing:** Refactored `server.ts` into a testable `createBrawlServer` factory. Completely eliminated the duplicate fake test server in `src/engine/multiplayer.test.ts`. Real multi-client integration tests now run against the exact same production WebSocket and Express handlers used by `npm start`.
+- **Championship Series (First to 2 Decisive Wins):** Replaced the single championship bout with a proper Championship Series between the locked top two qualifier finalists. The championship is first to 2 decisive victories. Championship games that end in a tie or VOID extend the series without granting series wins to either brawler, strictly preventing ties from crowning a champion. Finalists remain locked and non-finalists never fight in the championship series. Qualifier Brawl Points remain invariant during all championship games.
+- **Authoritative 5-Tier Qualifier Tiebreaker:** Rankings after circular qualifiers use an exact, deterministic 5-tier tiebreaker:
+  1. Qualifier Brawl Points DESC (Win = 3, Tie = 1, Loss = 0)
+  2. Qualifier Wins DESC
+  3. Head-to-head match result, ONLY when tied players actually fought in a completed qualifier and produced a decisive winner
+  4. Bankroll / coins DESC
+  5. Stable server-generated session seed/order (frozen roster order)
+- **Authoritative Final Standings & Podium:**
+  - 1st Place: Champion (winner of Championship Series)
+  - 2nd Place: Runner-up (loser of Championship Series)
+  - 3rd Place: Third Place (highest-ranked non-finalist from qualifiers)
+  - 4th+ Place: Remaining non-finalists in qualifier ranking order
+- **Spectator Bet Protection on Disconnect & Void:** In `computeRoundPayouts`, when a round is resolved via `DISCONNECT_FORFEIT`, the surviving fighter receives the bounty, while all spectator bets are 100% refunded (0 net profit or loss). In `VOID` rounds, all spectator bets are similarly refunded.
+- **Mini-Game Variety in Championship Series:** Mini-game selection for the championship series rotates across games and strictly prevents immediate back-to-back repetitions.
+- **Entry Screen Clutter Removed:** Entry screen contains zero raw IP/port or technical jargon, providing clean player alias and avatar selection with "3–9 players · Same Wi-Fi · No internet needed".
+- **Lobby Screen & QR Quality:** Removed raw localhost URLs from the main join invitation. QR codes are generated only for valid non-loopback reachable LAN IP addresses with graceful "Finding your local game…" fallback when network detection is running.
+- **User-Friendly Error & Reconnect State:** Technical socket error strings replaced with clean, approachable messages ("Connection lost — reconnecting…", "Couldn’t connect to the game.").
+- **Actual Production Server Integration Testing:** Refactored `server.ts` into a testable `createBrawlServer` factory. Real multi-client integration tests run against the exact same production WebSocket and Express handlers used by `npm start`.
 - **Authoritative Deadlines Hardening:** Fixed betting validation to strictly reject bets when `serverNow >= round.bettingEndsAt` regardless of display counter state. Fixed gameplay action handler to reject actions when `now >= round.gameEndsAt`, and removed the +1000ms gameplay extension from timeout timers.
 - **Quick Draw Early-Tap Exploit Fixed:** Replaced `drawAt - 40` allowance with strict `nowMs < drawAt` false-start foul. Pre-tap attempts can never yield a valid reaction. Added 5 boundary test cases (`-100ms`, `-40ms`, `-1ms`, `drawAt`, `+1ms`).
-- **Old-Socket Reconnect Race Fixed:** The socket close handler now verifies `room.clientSockets.get(boundToken) === ws` before disconnecting a seat. Stale close events fired after a new socket binds can no longer disconnect the seat or delete socket mapping.
+- **Old-Socket Reconnect Race Fixed:** The socket close handler verifies `room.clientSockets.get(boundToken) === ws` before disconnecting a seat. Stale close events fired after a new socket binds can no longer disconnect the seat or delete socket mapping.
 - **Connection Grace Timers Separated:** Split timers into `roundTimers` and `connectionTimers`. Mini-game resolution calls `clearRoundTimers()` only. Host reconnect grace and fighter reconnect grace timers now properly survive round resolution.
 - **Disconnected Lobby Seat Lifecycle:** Disconnected non-host seats in the lobby are reserved for a 60-second grace window, after which stale players are automatically removed from the room to free capacity for new players. Host `KICK_PLAYER` action also supported in lobby.
 - **Podium Room Creation Safety:** Removed the exception in `CREATE_ROOM` during `FINAL_PODIUM`. An unauthenticated client cannot replace or destroy an active room in ANY phase.
 - **Fixed Room Debug Mode:** Debug mode is now a fixed property on the room (`room.debugMode`), chosen at creation time. `START_GAME` cannot bypass minimum player count or readiness via payload spoofing.
 - **Cryptographic Session Tokens:** Replaced `Math.random()` token generation with Node.js crypto (`randomUUID` / `randomBytes`). Private session tokens remain strictly confidential and are never broadcast in `ROOM_STATE`.
 - **Runtime Payload Sanity Validation:** Added explicit runtime checks on the WebSocket boundary for all FighterActions (validating `guess === 'HIGHER' || 'LOWER'`, non-negative integer indices, finite valid coordinates, and correct action types).
-- **QR / Localhost Race Fixed:** `LobbyScreen` detects loopback origins (`localhost`, `127.0.0.1`, `0.0.0.0`) and replaces them with preferred LAN IP when `networkInfo` loads.
 - **Speed Math Penalty UI Fixed:** Real-time countdown derives remaining penalty using `serverTimeOffset` and automatically re-enables answer buttons at penalty expiry even without incoming server packets.
 - **Millisecond Stop Clock Leak Fixed:** Strictly blinded out the timer display into `??.???` for ALL clients (both fighters and spectators) once 3.000s is reached, eliminating same-room clock cheating.
 - **Secret Bets Kept Secret:** Secret bets array remains empty in all public broadcasts during betting and gameplay, revealed only at `PAYOUT_RECAP`.
 - **Locked-Bet Wording Fixed:** Total Return and Net Profit are explicitly separated in the locked wager card.
-- **Higher/Lower Trivia Quality:** Shuffled selection of 4 trivia questions using Fisher-Yates, curated stable scientific/astronomic/physical/historical facts, and added instant answer feedback.
-- **Authentic Equirectangular World Map:** Bundled genuine equirectangular coastlines in Blind Pinpoint aligned with `x = lon + 180` and `y = 90 - lat` (Natural Earth Public Domain standard).
-- **Synchronized 3-2-1 Countdown:** Integrated `SynchronizedCountdown` deriving 3.. 2.. 1.. BRAWL! from authoritative `gameStartsAt` and `serverTimeOffset`.
 - **Room Limit Updated to 3–9 Players:** Updated `MIN_PLAYERS_TO_START = 3` and `MAX_PLAYERS_CAPACITY = 9`. Production rooms strictly enforce a minimum of 3 connected ready players, rejecting attempts to start with fewer.
-- **Tournament Format (Qualifiers → Top Two → Championship Final):** Completely replaced obsolete manual 8/10 round selection with a fair circular tournament graph (`P0 vs P1`, `P1 vs P2`, ..., `P(n-1) vs P0`). Every player participates in exactly 2 qualifier brawls facing 2 different opponents.
-- **Authoritative Brawl Points System:** Qualifier victories award 3 Brawl Points, ties award 1 Brawl Point each, and defeats award 0. Standings are ranked primarily by Brawl Points, with head-to-head qualifier outcomes as primary tiebreaker, followed by coin bankroll.
-- **Championship Final Title Bout:** The top 2 ranked seeds from qualifiers advance to the Championship Final with a +500 coin match pot. The winner is crowned Tournament Champion on the podium with specialized awards and celebration.
-- **Package Reproducibility:** Fixed `package.json` devDependencies and generated `package-lock.json`. Clean installs via `npm ci` verified.
+- **Tournament Format (Qualifiers → Top Two → Championship Series):** Fair circular tournament graph (`P0 vs P1`, `P1 vs P2`, ..., `P(n-1) vs P0`). Every player participates in exactly 2 qualifier brawls facing 2 different opponents. Top two advance to First-to-2 Championship Series.
+- **Package Reproducibility:** Verified `package-lock.json` and reproducible `npm ci` installs.
 
 ---
 
@@ -33,7 +44,7 @@ Last Updated: Final Hardening & Acceptance Verification Pass
 
 ### AUTOMATED VERIFIED (PASSING IN THIS ENVIRONMENT)
 - [x] `npm run typecheck`: **PASSING** (0 TypeScript errors)
-- [x] `npm test`: **PASSING** (45/45 automated tests passing)
+- [x] `npm test`: **PASSING** (49/49 automated tests passing across 5 test suites)
 - [x] `npm run build`: **PASSING** (Clean Vite static production bundle in `dist/`)
 - [x] `npm run verify`: **PASSING** (typecheck + test + build pipeline)
 - [x] Genuine Production Server WebSocket Integration Tests: **PASSING** (Multi-client integration suites exercising `createBrawlServer` across 3-player and 6-player tournaments)
@@ -57,22 +68,22 @@ Last Updated: Final Hardening & Acceptance Verification Pass
   ```
 - `npm test`:
   ```
-  # tests 45
+  # tests 49
   # suites 0
-  # pass 45
+  # pass 49
   # fail 0
   (exit code 0)
   ```
 - `npm run build`:
   ```
-  ✓ built in 760ms
-  dist/index.html                   0.96 kB
-  dist/assets/index-*.css          59.41 kB
-  dist/assets/index-*.js          587.00 kB
+  ✓ built in 741ms
+  dist/index.html                   0.96 kB │ gzip:   0.43 kB
+  dist/assets/index-CXWPl50f.css   61.04 kB │ gzip:   9.65 kB
+  dist/assets/index-CWgH3WOj.js   596.40 kB │ gzip: 169.82 kB
   (exit code 0)
   ```
 - `npm run verify`:
   ```
-  typecheck -> test (45/45 pass) -> build (clean dist)
+  typecheck -> test (49/49 pass) -> build (clean dist)
   (exit code 0)
   ```

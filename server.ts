@@ -25,6 +25,8 @@ import type {
   PublicRoomState,
   TournamentSchedule,
   TournamentMatch,
+  RoundResolutionReason,
+  TournamentStage,
 } from './src/engine/types.ts';
 import { toPublicPlayer } from './src/engine/types.ts';
 import {
@@ -110,6 +112,8 @@ export interface ServerRoom {
     winnerName: string;
     totalPotWon: number;
     isChampionship?: boolean;
+    championshipGameNumber?: number;
+    resolutionReason?: RoundResolutionReason;
   }>;
   awards: Award[];
   lastPairing?: [string, string];
@@ -276,24 +280,44 @@ export function createBrawlServer(options: CreateServerOptions = {}) {
     const playerList = Array.from(activeRoom.players.values());
     let explicitFighters: [string, string] | undefined = undefined;
     let isChampionship = false;
+    let stage: TournamentStage = 'QUALIFIERS';
+    let qualifierIndex: number | undefined = undefined;
+    let qualifierTotal: number | undefined = undefined;
+    let championshipGameNumber: number | undefined = undefined;
 
-    if (activeRoom.tournamentSchedule) {
-      if (roundNum <= activeRoom.tournamentSchedule.qualifierCount) {
+    const sched = activeRoom.tournamentSchedule;
+    if (sched) {
+      if (sched.qualifiersCompleted < sched.qualifierCount) {
         // Qualifier match from pre-computed schedule
-        const match = activeRoom.tournamentSchedule.matches[roundNum - 1];
+        const match = sched.matches[sched.qualifiersCompleted];
         explicitFighters = match.fighterIds;
         isChampionship = false;
-      } else if (roundNum === activeRoom.tournamentSchedule.totalRounds) {
-        // Championship Final!
-        const completedQualifiers = activeRoom.tournamentSchedule.matches.filter(m => !m.isChampionship);
-        const ranked = computeTournamentRankings(playerList, completedQualifiers);
-        const finalists: [string, string] = [ranked[0].id, ranked[1].id];
-        activeRoom.tournamentSchedule.finalists = finalists;
-        activeRoom.tournamentSchedule.matches[roundNum - 1].fighterIds = finalists;
-        explicitFighters = finalists;
+        stage = 'QUALIFIERS';
+        qualifierIndex = sched.qualifiersCompleted + 1;
+        qualifierTotal = sched.qualifierCount;
+      } else {
+        // Championship Series (First to 2 Decisive Wins)
         isChampionship = true;
+        stage = 'CHAMPIONSHIP';
+        sched.stage = 'CHAMPIONSHIP';
+
+        // Select and lock top-two finalists if not already locked
+        if (!sched.finalists || sched.finalists.length !== 2) {
+          const completedQualifiers = sched.matches.filter(m => !m.isChampionship && m.completed);
+          const ranked = computeTournamentRankings(playerList, completedQualifiers, sched.stableRosterOrder);
+          const finalists: [string, string] = [ranked[0].id, ranked[1].id];
+          sched.finalists = finalists;
+          sched.championshipWins = { [finalists[0]]: 0, [finalists[1]]: 0 };
+          sched.championshipGamesPlayed = 0;
+          sched.thirdPlaceId = ranked[2]?.id || null;
+        }
+
+        explicitFighters = sched.finalists;
+        championshipGameNumber = sched.championshipGamesPlayed + 1;
       }
     }
+
+    const lastMiniGameId = activeRoom.currentRound?.miniGame.id;
 
     const { round, internalGame } = initAuthoritativeRound(
       roundNum,
@@ -301,7 +325,12 @@ export function createBrawlServer(options: CreateServerOptions = {}) {
       playerList,
       activeRoom.lastPairing,
       explicitFighters,
-      isChampionship
+      isChampionship,
+      stage,
+      qualifierIndex,
+      qualifierTotal,
+      championshipGameNumber,
+      lastMiniGameId
     );
 
     const now = Date.now();
@@ -560,15 +589,23 @@ export function createBrawlServer(options: CreateServerOptions = {}) {
     }, durationMs);
   }
 
-  function resolveCurrentGame(winnerId: string | null, isTie: boolean) {
-    if (!activeRoom || !activeRoom.currentRound || activeRoom.phase !== 'MINIGAME_ACTIVE') return;
+  function resolveCurrentGame(
+    winnerId: string | null,
+    isTie: boolean,
+    resolutionReason: RoundResolutionReason = isTie ? 'TIE' : (winnerId ? 'PLAYED' : 'VOID')
+  ) {
+    const activeBrawlPhases: GamePhase[] = ['FIGHTER_REVEAL', 'BETTING_WINDOW', 'MINIGAME_COUNTDOWN', 'MINIGAME_ACTIVE'];
+    if (!activeRoom || !activeRoom.currentRound || !activeBrawlPhases.includes(activeRoom.phase)) return;
 
-    // CRITICAL: Clear ONLY round timers! Connection/reconnect grace timers MUST survive game resolution!
+    // CRITICAL: Clear round timers and active fighter grace timers so this round cannot double-resolve!
     clearRoundTimers(activeRoom.roundTimers);
+    activeRoom.connectionTimers.fighterGraceTimers.forEach(clearTimeout);
+    activeRoom.connectionTimers.fighterGraceTimers.clear();
 
     const round = activeRoom.currentRound;
     round.winnerId = winnerId;
     round.tieResult = isTie;
+    round.resolutionReason = resolutionReason;
 
     const playerList = Array.from(activeRoom.players.values());
     const { payouts, updatedPlayers } = computeRoundPayouts(
@@ -577,7 +614,8 @@ export function createBrawlServer(options: CreateServerOptions = {}) {
       round.fighterIds,
       round.matchPot,
       round.bets,
-      playerList
+      playerList,
+      resolutionReason
     );
 
     round.payouts = payouts;
@@ -587,45 +625,75 @@ export function createBrawlServer(options: CreateServerOptions = {}) {
 
     // Update Tournament Schedule and Brawl Points
     if (activeRoom.tournamentSchedule) {
-      const matchIndex = round.roundNumber - 1;
-      const match = activeRoom.tournamentSchedule.matches[matchIndex];
-      if (match) {
-        match.completed = true;
-        match.winnerId = winnerId;
-        match.tieResult = isTie;
-      }
-
+      const sched = activeRoom.tournamentSchedule;
       const [f1Id, f2Id] = round.fighterIds;
       const f1 = Array.from(activeRoom.players.values()).find(p => p.id === f1Id);
       const f2 = Array.from(activeRoom.players.values()).find(p => p.id === f2Id);
 
       if (!round.isChampionship) {
         // QUALIFIER BRAWL:
-        // Win = 3 Brawl Points, Tie = 1 Brawl Point each, Loss = 0 Brawl Points
-        if (f1) f1.qualifierMatchesPlayed += 1;
-        if (f2) f2.qualifierMatchesPlayed += 1;
-
-        if (isTie) {
-          if (f1) { f1.qualifierPoints += 1; f1.qualifierTies += 1; }
-          if (f2) { f2.qualifierPoints += 1; f2.qualifierTies += 1; }
-        } else if (winnerId) {
-          const winnerFighter = f1?.id === winnerId ? f1 : f2;
-          const loserFighter = f1?.id === winnerId ? f2 : f1;
-          if (winnerFighter) {
-            winnerFighter.qualifierPoints += 3;
-            winnerFighter.qualifierWins += 1;
-          }
-          if (loserFighter) {
-            loserFighter.qualifierLosses += 1;
-          }
+        sched.qualifiersCompleted += 1;
+        const matchIndex = sched.matches.findIndex(m => !m.completed && !m.isChampionship);
+        if (matchIndex !== -1) {
+          sched.matches[matchIndex].completed = true;
+          sched.matches[matchIndex].winnerId = winnerId;
+          sched.matches[matchIndex].tieResult = isTie;
+          sched.matches[matchIndex].resolutionReason = resolutionReason;
         }
 
-        // Recompute current tournament rankings after qualifier match
-        const completedQualifiers = activeRoom.tournamentSchedule.matches.filter(m => !m.isChampionship && m.completed);
-        computeTournamentRankings(Array.from(activeRoom.players.values()), completedQualifiers);
+        // Win = 3 Brawl Points, Tie = 1 Brawl Point each, Loss = 0 Brawl Points
+        if (resolutionReason === 'PLAYED' || resolutionReason === 'DISCONNECT_FORFEIT') {
+          if (f1) f1.qualifierMatchesPlayed += 1;
+          if (f2) f2.qualifierMatchesPlayed += 1;
+
+          if (winnerId) {
+            const winnerFighter = f1?.id === winnerId ? f1 : f2;
+            const loserFighter = f1?.id === winnerId ? f2 : f1;
+            if (winnerFighter) {
+              winnerFighter.qualifierPoints += 3;
+              winnerFighter.qualifierWins += 1;
+            }
+            if (loserFighter) {
+              loserFighter.qualifierLosses += 1;
+            }
+          }
+        } else if (isTie) {
+          if (f1) { f1.qualifierMatchesPlayed += 1; f1.qualifierPoints += 1; f1.qualifierTies += 1; }
+          if (f2) { f2.qualifierMatchesPlayed += 1; f2.qualifierPoints += 1; f2.qualifierTies += 1; }
+        }
+
+        // Recompute current tournament rankings after qualifier match using pure 5-layer tiebreaker
+        const completedQualifiers = sched.matches.filter(m => !m.isChampionship && m.completed);
+        computeTournamentRankings(Array.from(activeRoom.players.values()), completedQualifiers, sched.stableRosterOrder);
       } else {
-        // CHAMPIONSHIP FINAL:
-        activeRoom.tournamentSchedule.championId = isTie ? null : winnerId;
+        // CHAMPIONSHIP SERIES (First to 2 Decisive Wins):
+        sched.championshipGamesPlayed += 1;
+
+        const champMatch: TournamentMatch = {
+          matchIndex: sched.matches.length,
+          roundNumber: round.roundNumber,
+          fighterIds: round.fighterIds,
+          isChampionship: true,
+          championshipGameNumber: round.championshipGameNumber,
+          completed: true,
+          winnerId,
+          tieResult: isTie,
+          resolutionReason,
+        };
+        sched.matches.push(champMatch);
+
+        // Ties or VOID games do NOT award series wins and tournament NEVER crowns champion from tied game
+        if (!isTie && resolutionReason !== 'VOID' && winnerId) {
+          sched.championshipWins[winnerId] = (sched.championshipWins[winnerId] || 0) + 1;
+
+          // Check if finalist reached 2 decisive wins!
+          if (sched.championshipWins[winnerId] >= 2) {
+            sched.championId = winnerId;
+            const loserId = round.fighterIds[0] === winnerId ? round.fighterIds[1] : round.fighterIds[0];
+            sched.runnerUpId = loserId;
+            sched.stage = 'COMPLETE';
+          }
+        }
       }
     }
 
@@ -633,9 +701,11 @@ export function createBrawlServer(options: CreateServerOptions = {}) {
     activeRoom.roundHistory.push({
       roundNumber: round.roundNumber,
       miniGameName: round.miniGame.name,
-      winnerName: isTie ? 'TIE' : winningPlayer?.name || 'Unknown',
+      winnerName: isTie ? 'TIE' : (resolutionReason === 'DISCONNECT_FORFEIT' ? `${winningPlayer?.name || 'Winner'} (Forfeit)` : winningPlayer?.name || 'Unknown'),
       totalPotWon: round.matchPot,
       isChampionship: !!round.isChampionship,
+      championshipGameNumber: round.championshipGameNumber,
+      resolutionReason,
     });
 
     activeRoom.phase = 'PAYOUT_RECAP';
@@ -906,9 +976,11 @@ export function createBrawlServer(options: CreateServerOptions = {}) {
             const pA = connectedPlayers[0];
             const pB = connectedPlayers[1] || connectedPlayers[0];
             schedule = {
+              stage: 'QUALIFIERS',
               totalPlayers: connectedPlayers.length,
               qualifierCount: 1,
-              totalRounds: 2,
+              qualifiersCompleted: 0,
+              totalRounds: 3,
               matches: [
                 {
                   matchIndex: 0,
@@ -918,15 +990,13 @@ export function createBrawlServer(options: CreateServerOptions = {}) {
                   completed: false,
                   winnerId: null,
                 },
-                {
-                  matchIndex: 1,
-                  roundNumber: 2,
-                  fighterIds: [pA.id, pB.id],
-                  isChampionship: true,
-                  completed: false,
-                  winnerId: null,
-                },
               ],
+              championshipWins: {},
+              championshipGamesPlayed: 0,
+              championId: null,
+              runnerUpId: null,
+              thirdPlaceId: null,
+              stableRosterOrder: [pA.id, pB.id],
             };
           } else {
             schedule = generateTournamentSchedule(connectedPlayers);
@@ -1045,9 +1115,10 @@ export function createBrawlServer(options: CreateServerOptions = {}) {
         if (msg.type === 'NEXT_ROUND') {
           if (!player.isHost || !activeRoom.currentRound || activeRoom.phase !== 'PAYOUT_RECAP') return;
 
-          if (activeRoom.currentRound.roundNumber >= activeRoom.totalRounds) {
+          const sched = activeRoom.tournamentSchedule;
+          if (sched && sched.stage === 'COMPLETE') {
             activeRoom.phase = 'FINAL_PODIUM';
-            const champId = activeRoom.tournamentSchedule?.championId;
+            const champId = sched.championId;
             activeRoom.awards = computeSessionAwards(Array.from(activeRoom.players.values()), champId);
             broadcastRoomState();
           } else {
@@ -1190,17 +1261,37 @@ export function createBrawlServer(options: CreateServerOptions = {}) {
         activeRoom.connectionTimers.staleSeatTimers.set(boundSessionToken, staleTimer);
       }
 
-      // 2. Active gameplay fighter disconnect handling: 5-second grace window
-      if (activeRoom.phase === 'MINIGAME_ACTIVE' && activeRoom.currentRound) {
+      // 2. Active brawl fighter disconnect handling across entire active brawl lifecycle:
+      // FIGHTER_REVEAL, BETTING_WINDOW, MINIGAME_COUNTDOWN, MINIGAME_ACTIVE
+      const activeBrawlPhases: GamePhase[] = ['FIGHTER_REVEAL', 'BETTING_WINDOW', 'MINIGAME_COUNTDOWN', 'MINIGAME_ACTIVE'];
+      if (activeBrawlPhases.includes(activeRoom.phase) && activeRoom.currentRound) {
         const [f1, f2] = activeRoom.currentRound.fighterIds;
         if (p.id === f1 || p.id === f2) {
           const otherFighterId = p.id === f1 ? f2 : f1;
           const token = boundSessionToken;
+          const currentRoundNum = activeRoom.currentRound.roundNumber;
+
+          // Clear any existing grace timer for this fighter
+          if (activeRoom.connectionTimers.fighterGraceTimers.has(p.id)) {
+            clearTimeout(activeRoom.connectionTimers.fighterGraceTimers.get(p.id));
+          }
+
           const graceTimer = setTimeout(() => {
-            if (!activeRoom || activeRoom.phase !== 'MINIGAME_ACTIVE') return;
+            if (!activeRoom || !activeRoom.currentRound || activeRoom.currentRound.roundNumber !== currentRoundNum) return;
+            if (!activeBrawlPhases.includes(activeRoom.phase)) return;
+
             const stillDisconnected = activeRoom.players.get(token)?.connected === false;
             if (stillDisconnected) {
-              resolveCurrentGame(otherFighterId, false);
+              const otherPlayer = Array.from(activeRoom.players.values()).find(pl => pl.id === otherFighterId);
+              const isOtherConnected = otherPlayer && otherPlayer.connected;
+
+              if (isOtherConnected) {
+                // Connected opponent wins by disconnect forfeit; spectator bets are refunded
+                resolveCurrentGame(otherFighterId, false, 'DISCONNECT_FORFEIT');
+              } else {
+                // Both fighters disconnected; VOID round, no fake winner, spectator bets refunded
+                resolveCurrentGame(null, false, 'VOID');
+              }
             }
           }, timing.fighterGraceMs);
           activeRoom.connectionTimers.fighterGraceTimers.set(p.id, graceTimer);
