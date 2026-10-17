@@ -29,13 +29,26 @@ export const PayoutRecapModal: React.FC<Props> = ({
   tournamentSchedule,
 }) => {
   const winner = players.find(p => p.id === round.winnerId);
-  // Sort tournament leaderboard by Brawl Points DESC, then bankroll DESC
+  // Authoritative sort: server-provided tournamentRank is the single source of truth
   const sortedLeaderboard = [...players].sort((a, b) => {
+    if (a.tournamentRank !== undefined && b.tournamentRank !== undefined) {
+      return a.tournamentRank - b.tournamentRank;
+    }
     if (b.qualifierPoints !== a.qualifierPoints) {
       return b.qualifierPoints - a.qualifierPoints;
     }
+    if (b.qualifierWins !== a.qualifierWins) {
+      return b.qualifierWins - a.qualifierWins;
+    }
     return b.coins - a.coins;
   });
+
+  const finalist1 = tournamentSchedule?.finalists
+    ? (players.find(p => p.id === tournamentSchedule.finalists![0]) || sortedLeaderboard[0])
+    : sortedLeaderboard[0];
+  const finalist2 = tournamentSchedule?.finalists
+    ? (players.find(p => p.id === tournamentSchedule.finalists![1]) || sortedLeaderboard[1])
+    : sortedLeaderboard[1];
 
   // Find current player's personal outcome for this round
   const myPayout = myPlayer ? round.payouts.find(p => p.playerId === myPlayer.id) : null;
@@ -117,7 +130,7 @@ export const PayoutRecapModal: React.FC<Props> = ({
             ★ QUALIFIERS COMPLETE · TOP TWO ADVANCE ★
           </div>
           <p className="text-xs text-white font-display">
-            Top 2 Seeds <span className="font-black text-amber-300">{sortedLeaderboard[0]?.name}</span> &amp; <span className="font-black text-amber-300">{sortedLeaderboard[1]?.name}</span> advance to the Championship Series!
+            Top 2 Seeds <span className="font-black text-amber-300">{finalist1?.name}</span> &amp; <span className="font-black text-amber-300">{finalist2?.name}</span> advance to the Championship Series!
           </p>
         </div>
       )}
@@ -206,10 +219,12 @@ export const PayoutRecapModal: React.FC<Props> = ({
               }`}
             >
               <div className="flex items-center gap-2">
-                <span className="font-bold text-slate-500 w-4">{rank + 1}.</span>
+                <span className="font-bold text-slate-500 w-4">{p.tournamentRank ?? (rank + 1)}.</span>
                 <span>{p.avatar}</span>
                 <span className="font-bold text-white font-sans">{p.name}</span>
-                {rank < 2 && (
+                {(tournamentSchedule?.finalists
+                  ? tournamentSchedule.finalists.includes(p.id)
+                  : (p.tournamentRank !== undefined ? p.tournamentRank <= 2 : rank < 2)) && (
                   <span className="text-[9px] font-mono px-1 py-0.2 bg-emerald-950 text-emerald-400 border border-emerald-700/60 rounded font-bold">
                     TOP 2
                   </span>

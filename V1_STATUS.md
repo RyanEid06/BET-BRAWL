@@ -36,7 +36,9 @@ Last Updated: Final Hardening & Championship Series Acceptance Pass
 - **Locked-Bet Wording Fixed:** Total Return and Net Profit are explicitly separated in the locked wager card.
 - **Room Limit Updated to 3–9 Players:** Updated `MIN_PLAYERS_TO_START = 3` and `MAX_PLAYERS_CAPACITY = 9`. Production rooms strictly enforce a minimum of 3 connected ready players, rejecting attempts to start with fewer.
 - **Tournament Format (Qualifiers → Top Two → Championship Series):** Fair circular tournament graph (`P0 vs P1`, `P1 vs P2`, ..., `P(n-1) vs P0`). Every player participates in exactly 2 qualifier brawls facing 2 different opponents. Top two advance to First-to-2 Championship Series.
-- **Package Reproducibility:** Verified `package-lock.json` and reproducible `npm ci` installs.
+- **Full 3-Player Tournament Lifecycle Integration Test:** Completed the genuine end-to-end multi-client WebSocket test driving the real production server through 3 circular qualifiers, 5-tier ranking resolution, locked finalists, a 2–1 Championship Series with an intervening tie that extends the series without granting series wins, qualifier points invariance across all championship brawls, and final podium crowning.
+- **Authoritative Ranking Single Source of Truth in Recap Modal:** `PayoutRecapModal.tsx` now uses the server-provided `tournamentRank` as the single authoritative source of truth for ordering standings and identifying TOP 2 finalists, ensuring client standings never diverge from server advancement decisions even when spectator bankrolls differ.
+- **Obsolete Screenshots and Artifacts Cleaned:** Removed stale development screenshots containing outdated UI labels ("Circular Graph", "Local Wi-Fi Server 127.0.0.1:3000", "Championship Final", "N + 1") and removed redundant `bun.lock` file.
 
 ---
 
@@ -44,10 +46,11 @@ Last Updated: Final Hardening & Championship Series Acceptance Pass
 
 ### AUTOMATED VERIFIED (PASSING IN THIS ENVIRONMENT)
 - [x] `npm run typecheck`: **PASSING** (0 TypeScript errors)
-- [x] `npm test`: **PASSING** (49/49 automated tests passing across 5 test suites)
+- [x] `npm test`: **PASSING** (52/52 automated tests passing across 5 test suites)
+- [x] `npm run lint`: **PASSING** (`tsc --noEmit` clean)
 - [x] `npm run build`: **PASSING** (Clean Vite static production bundle in `dist/`)
-- [x] `npm run verify`: **PASSING** (typecheck + test + build pipeline)
-- [x] Genuine Production Server WebSocket Integration Tests: **PASSING** (Multi-client integration suites exercising `createBrawlServer` across 3-player and 6-player tournaments)
+- [x] `npm run verify`: **PASSING** (typecheck + test [52/52 pass] + build pipeline)
+- [x] Genuine Production Server WebSocket Integration Tests: **PASSING** (Multi-client integration suites exercising `createBrawlServer` across full 3-player and 6-player tournaments)
 - [x] Production Server Standalone Launch (`npm start` / `server.ts`): **PASSING** (HTTP 200 on index, `/api/network-info` JSON payload verified, production `dist/` served directly)
 - [x] Reproducible dependency locking: `package-lock.json` present and tested with `npm ci`
 
@@ -68,22 +71,22 @@ Last Updated: Final Hardening & Championship Series Acceptance Pass
   ```
 - `npm test`:
   ```
-  # tests 49
+  # tests 52
   # suites 0
-  # pass 49
+  # pass 52
   # fail 0
-  (exit code 0)
+  (exit code 0, duration_ms: ~13000ms)
   ```
 - `npm run build`:
   ```
-  ✓ built in 741ms
   dist/index.html                   0.96 kB │ gzip:   0.43 kB
   dist/assets/index-CXWPl50f.css   61.04 kB │ gzip:   9.65 kB
-  dist/assets/index-CWgH3WOj.js   596.40 kB │ gzip: 169.82 kB
+  dist/assets/index-BJwv8r-7.js   597.18 kB │ gzip: 170.08 kB
+  ✓ built in 689ms
   (exit code 0)
   ```
 - `npm run verify`:
   ```
-  typecheck -> test (49/49 pass) -> build (clean dist)
+  typecheck -> test (52/52 pass) -> build (clean dist)
   (exit code 0)
   ```

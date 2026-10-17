@@ -211,6 +211,37 @@ test('computeTournamentRankings: 3-way cyclical tie (A beats B, B beats C, C bea
   assert.equal(rankedBankroll[0].id, pB.id, 'pB has higher bankroll so pB wins 3-way tie');
 });
 
+test('computeTournamentRankings: authoritative tournamentRank strictly prioritizes points and wins over bankroll for top-two qualification', () => {
+  const players = createMockRoster(3);
+  const [p1, p2, p3] = players;
+  p1.qualifierPoints = 6;
+  p1.qualifierWins = 2;
+  p1.coins = 500;
+
+  p2.qualifierPoints = 3;
+  p2.qualifierWins = 1;
+  p2.coins = 800;
+
+  p3.qualifierPoints = 1;
+  p3.qualifierWins = 0;
+  p3.coins = 2500; // Rich spectator who accumulated coins
+
+  const matches: TournamentMatch[] = [
+    { matchIndex: 0, roundNumber: 1, fighterIds: [p1.id, p2.id], isChampionship: false, completed: true, winnerId: p1.id },
+    { matchIndex: 1, roundNumber: 2, fighterIds: [p2.id, p3.id], isChampionship: false, completed: true, winnerId: p2.id },
+    { matchIndex: 2, roundNumber: 3, fighterIds: [p3.id, p1.id], isChampionship: false, completed: true, winnerId: p1.id },
+  ];
+
+  const ranked = computeTournamentRankings([p3, p2, p1], matches);
+  assert.equal(ranked[0].id, p1.id, 'Rank 1 must be P1 despite lower coins');
+  assert.equal(ranked[1].id, p2.id, 'Rank 2 must be P2 despite lower coins than P3');
+  assert.equal(ranked[2].id, p3.id, 'Rank 3 must be P3 despite having highest bankroll');
+
+  assert.equal(ranked[0].tournamentRank, 1);
+  assert.equal(ranked[1].tournamentRank, 2);
+  assert.equal(ranked[2].tournamentRank, 3);
+});
+
 test('getFinalTournamentStandings ranks Champion, Runner-up, Third Place, and remaining qualifiers', () => {
   const players = createMockRoster(4);
   const [p1, p2, p3, p4] = players;

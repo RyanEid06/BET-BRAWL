@@ -197,7 +197,7 @@ export const LobbyScreen: React.FC<Props> = ({
           <div className="px-3.5 py-2 rounded-xl bg-slate-950 border border-cyan-500/40 text-center font-mono shadow-inner">
             <span className="text-[10px] text-slate-400 uppercase block font-bold">Structure</span>
             <span className="text-sm font-black text-amber-400">
-              {connectedPlayers.length >= 3 ? `${connectedPlayers.length} Qualifiers + Finals` : 'Qualifiers + Finals'}
+              {connectedPlayers.length >= 3 ? `${connectedPlayers.length} Qualifiers + Series` : 'Qualifiers + Series'}
             </span>
           </div>
         </div>

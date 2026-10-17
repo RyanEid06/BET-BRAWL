@@ -226,10 +226,11 @@ test('Higher or Lower: secret answer data (isHigher, challengerStat) is absent f
   const { internal, publicConfig } = initMiniGameServerState('higher_lower', ['f1', 'f2'], gameStartsAt);
 
   assert.ok(publicConfig.cards, 'publicConfig must have cards');
-  assert.equal(publicConfig.cards.length, 4, 'Must have 4 cards');
+  const cards = publicConfig.cards as Array<{ baseItem: string; baseStat: string; challengerItem: string }>;
+  assert.equal(cards.length, 4, 'Must have 4 cards');
 
   // Verify that EVERY card in publicConfig lacks secret fields before submission
-  for (const card of publicConfig.cards) {
+  for (const card of cards) {
     assert.ok(card.baseItem, 'Must have public baseItem');
     assert.ok(card.baseStat, 'Must have public baseStat');
     assert.ok(card.challengerItem, 'Must have public challengerItem');

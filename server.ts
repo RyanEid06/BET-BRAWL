@@ -65,6 +65,7 @@ export interface ServerTimingConfig {
   fighterGraceMs: number;
   hostGraceMs: number;
   staleSeatGraceMs: number;
+  gameDurationMs?: number;
 }
 
 export const DEFAULT_TIMING: ServerTimingConfig = {
@@ -613,7 +614,7 @@ export function createBrawlServer(options: CreateServerOptions = {}) {
     });
 
     // Authoritative game duration timeout (no +1000ms gameplay extension!)
-    const durationMs = round.miniGame.durationSeconds * 1000;
+    const durationMs = timing.gameDurationMs ?? (round.miniGame.durationSeconds * 1000);
     room.roundTimers.gameTimeoutTimer = setTimeout(() => {
       if (!activeRoom || activeRoom.roomId !== currentRoomId || activeRoom.phase !== 'MINIGAME_ACTIVE') return;
       const timeoutResult = resolveGameTimeout(internal, round.fighterScores);
@@ -1005,7 +1006,7 @@ export function createBrawlServer(options: CreateServerOptions = {}) {
           }
 
           // Authoritative Tournament Schedule Generation:
-          // Freeze session roster, shuffle once, generate N circular qualifiers + 1 Championship Final
+          // Freeze session roster, shuffle once, generate N circular qualifiers + Championship Series (First to 2 Decisive Wins)
           let schedule: TournamentSchedule;
           if (connectedPlayers.length < 3 && activeRoom.debugMode) {
             const pA = connectedPlayers[0];
@@ -1048,6 +1049,9 @@ export function createBrawlServer(options: CreateServerOptions = {}) {
             p.qualifierMatchesPlayed = 0;
             p.tournamentRank = undefined;
           }
+
+          // Initialize authoritative initial tournament rankings based on frozen roster seed
+          computeTournamentRankings(Array.from(activeRoom.players.values()), [], schedule.stableRosterOrder);
 
           startRound(1);
           return;

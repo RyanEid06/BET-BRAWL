@@ -454,12 +454,16 @@ test('Production Server: rejects starting game with fewer than 3 connected playe
   }
 });
 
-test('Production Server: 3-player Tournament Lifecycle (3 Qualifiers -> Top Two Final -> Podium)', async () => {
+test('Production Server: full 3-player Tournament Lifecycle (3 Qualifiers -> Championship Series [2-1 with tie] -> Podium)', async () => {
   const server = createBrawlServer({
     timingConfig: {
-      revealDurationMs: 100,
+      revealDurationMs: 60,
       bettingDurationSeconds: 1,
-      countdownDurationMs: 100,
+      countdownDurationMs: 60,
+      gameDurationMs: 150,
+      fighterGraceMs: 300,
+      hostGraceMs: 500,
+      staleSeatGraceMs: 300,
     },
   });
   const { port } = await server.listen(0, '127.0.0.1');
@@ -467,22 +471,33 @@ test('Production Server: 3-player Tournament Lifecycle (3 Qualifiers -> Top Two 
   const clients: Array<Awaited<ReturnType<typeof createTestWsClient>>> = [];
 
   try {
+    // 1. Connect Host and 2 additional players
     const host = await createTestWsClient(wsUrl);
     clients.push(host);
-    host.ws.send(JSON.stringify({ type: 'CREATE_ROOM', payload: { playerName: 'Host' } }));
+    host.ws.send(JSON.stringify({ type: 'CREATE_ROOM', payload: { playerName: 'Ace (Host)', avatar: '⚡' } }));
     const hostJoin = await host.waitForType('JOIN_SUCCESS');
     const roomCode = hostJoin.payload.roomCode;
+    const p1Id = hostJoin.payload.player.id;
 
     const p2 = await createTestWsClient(wsUrl);
     clients.push(p2);
-    p2.ws.send(JSON.stringify({ type: 'JOIN_ROOM', payload: { roomCode, playerName: 'Player2' } }));
-    await p2.waitForType('JOIN_SUCCESS');
+    p2.ws.send(JSON.stringify({ type: 'JOIN_ROOM', payload: { roomCode, playerName: 'Blaze', avatar: '🔥' } }));
+    const p2Join = await p2.waitForType('JOIN_SUCCESS');
+    const p2Id = p2Join.payload.player.id;
 
     const p3 = await createTestWsClient(wsUrl);
     clients.push(p3);
-    p3.ws.send(JSON.stringify({ type: 'JOIN_ROOM', payload: { roomCode, playerName: 'Player3' } }));
-    await p3.waitForType('JOIN_SUCCESS');
+    p3.ws.send(JSON.stringify({ type: 'JOIN_ROOM', payload: { roomCode, playerName: 'Cipher', avatar: '🔮' } }));
+    const p3Join = await p3.waitForType('JOIN_SUCCESS');
+    const p3Id = p3Join.payload.player.id;
 
+    const clientMap: Record<string, Awaited<ReturnType<typeof createTestWsClient>>> = {
+      [p1Id]: host,
+      [p2Id]: p2,
+      [p3Id]: p3,
+    };
+
+    // 2. Both non-host players toggle ready
     p2.ws.send(JSON.stringify({ type: 'TOGGLE_READY' }));
     p3.ws.send(JSON.stringify({ type: 'TOGGLE_READY' }));
 
@@ -491,21 +506,284 @@ test('Production Server: 3-player Tournament Lifecycle (3 Qualifiers -> Top Two 
       return pl.length === 3 && pl.every(p => p.isReady || p.isHost);
     });
 
-    // Host starts tournament
+    // 3. Host starts tournament
     host.ws.send(JSON.stringify({ type: 'START_GAME' }));
 
-    // Tournament schedule check: exactly 3 qualifiers + championship series (first to 2 decisive wins)
-    const stateR1 = await host.waitForRoomState(s => s.phase === 'FIGHTER_REVEAL' && s.currentRound?.roundNumber === 1);
-    assert.equal(stateR1.payload.currentRound?.isChampionship, false, 'Round 1 must be a Qualifier');
-    assert.equal(stateR1.payload.currentRound?.stage, 'QUALIFIERS');
-    assert.equal(stateR1.payload.currentRound?.qualifierIndex, 1);
-    assert.equal(stateR1.payload.currentRound?.qualifierTotal, 3);
+    const r1State = await host.waitForRoomState(s => s.phase === 'FIGHTER_REVEAL' && s.currentRound?.roundNumber === 1, 5000);
+    assert.equal(r1State.payload.currentRound?.isChampionship, false);
+    assert.equal(r1State.payload.currentRound?.stage, 'QUALIFIERS');
 
     const activeRoom = server.getActiveRoom()!;
     assert.ok(activeRoom.tournamentSchedule);
     assert.equal(activeRoom.tournamentSchedule.stage, 'QUALIFIERS');
     assert.equal(activeRoom.tournamentSchedule.qualifierCount, 3);
     assert.equal(activeRoom.tournamentSchedule.matches.length, 3);
+
+    // Initial tournamentRank should be assigned immediately to all 3 players
+    for (const player of activeRoom.players.values()) {
+      assert.ok(player.tournamentRank !== undefined && player.tournamentRank >= 1 && player.tournamentRank <= 3);
+    }
+
+    // Helper: Drive active mini-game round to a desired outcome using real WebSocket messages
+    async function playRoundToDesiredOutcome(roundNumber: number, targetWinnerId: string | 'TIE') {
+      const room = server.getActiveRoom()!;
+      const round = room.currentRound!;
+      const internal = room.internalGameState!;
+      const [f1Id, f2Id] = round.fighterIds;
+      const f1Client = clientMap[f1Id];
+      const f2Client = clientMap[f2Id];
+      const miniGameId = round.miniGame.id;
+
+      if (targetWinnerId === 'TIE') {
+        if (miniGameId === 'millisecond_stop') {
+          // Synchronous STOP from both fighters yields elapsed time delta < 0.005s -> instant TIE
+          f1Client.ws.send(JSON.stringify({ type: 'FIGHTER_ACTION', payload: { type: 'STOP' } }));
+          f2Client.ws.send(JSON.stringify({ type: 'FIGHTER_ACTION', payload: { type: 'STOP' } }));
+        } else if (miniGameId === 'blind_pinpoint') {
+          // Both send exact same coordinates -> distance delta is 0 < 10km -> instant TIE
+          f1Client.ws.send(JSON.stringify({ type: 'FIGHTER_ACTION', payload: { type: 'PIN', normX: 0.5, normY: 0.5 } }));
+          f2Client.ws.send(JSON.stringify({ type: 'FIGHTER_ACTION', payload: { type: 'PIN', normX: 0.5, normY: 0.5 } }));
+        } else {
+          // For rapid_red_green, speed_math, higher_lower: neither taps/answers -> timeout fires (150ms) -> score1 === score2 (0 === 0) -> TIE
+        }
+      } else {
+        const winnerClient = clientMap[targetWinnerId];
+        const loserId = targetWinnerId === f1Id ? f2Id : f1Id;
+        const loserClient = clientMap[loserId];
+
+        if (miniGameId === 'speed_math') {
+          const answers = internal.speedMath?.correctAnswers || [0, 0, 0];
+          winnerClient.ws.send(JSON.stringify({ type: 'FIGHTER_ACTION', payload: { type: 'ANSWER', questionIndex: 0, answer: answers[0] } }));
+          winnerClient.ws.send(JSON.stringify({ type: 'FIGHTER_ACTION', payload: { type: 'ANSWER', questionIndex: 1, answer: answers[1] } }));
+          winnerClient.ws.send(JSON.stringify({ type: 'FIGHTER_ACTION', payload: { type: 'ANSWER', questionIndex: 2, answer: answers[2] } }));
+        } else if (miniGameId === 'higher_lower') {
+          const cards = internal.higherLower?.cards || [];
+          for (let i = 0; i < 3 && i < cards.length; i++) {
+            const guess = cards[i].isHigher ? 'HIGHER' : 'LOWER';
+            winnerClient.ws.send(JSON.stringify({ type: 'FIGHTER_ACTION', payload: { type: 'GUESS', questionIndex: i, guess } }));
+          }
+        } else if (miniGameId === 'blind_pinpoint') {
+          const target = internal.blindPinpoint?.targetCity;
+          const normX = target ? (target.lon + 180) / 360 : 0.5;
+          const normY = target ? (90 - target.lat) / 180 : 0.5;
+          winnerClient.ws.send(JSON.stringify({ type: 'FIGHTER_ACTION', payload: { type: 'PIN', normX, normY } }));
+          loserClient.ws.send(JSON.stringify({ type: 'FIGHTER_ACTION', payload: { type: 'PIN', normX: 0, normY: 0 } }));
+        } else if (miniGameId === 'quick_draw') {
+          // Loser taps early -> false start foul -> winner wins immediately
+          loserClient.ws.send(JSON.stringify({ type: 'FIGHTER_ACTION', payload: { type: 'DRAW_TAP' } }));
+        } else if (miniGameId === 'millisecond_stop') {
+          // Winner stops, loser does not stop -> timeout fires (150ms) -> has1 && !has2 -> winner wins
+          winnerClient.ws.send(JSON.stringify({ type: 'FIGHTER_ACTION', payload: { type: 'STOP' } }));
+        } else if (miniGameId === 'rapid_red_green') {
+          // Winner taps once on initial green (+1 score), loser does not tap -> timeout fires -> winner score > loser score -> winner wins
+          winnerClient.ws.send(JSON.stringify({ type: 'FIGHTER_ACTION', payload: { type: 'TAP' } }));
+        }
+      }
+
+      const recapMsg = await host.waitForRoomState(
+        s => s.phase === 'PAYOUT_RECAP' && s.currentRound?.roundNumber === roundNumber,
+        6000
+      );
+      return recapMsg.payload;
+    }
+
+    // Helper: Returns who should win in qualifiers so P1 finishes 6 pts (2W), P2 finishes 3 pts (1W), P3 finishes 0 pts (0W)
+    function pickQualifierWinner(fighters: [string, string]): string {
+      if (fighters.includes(p1Id)) return p1Id;
+      if (fighters.includes(p2Id)) return p2Id;
+      return p3Id;
+    }
+
+    // -------------------------------------------------------------
+    // PHASE A: QUALIFIERS (3 Matches)
+    // -------------------------------------------------------------
+    const playedMiniGames: string[] = [];
+
+    for (let q = 1; q <= 3; q++) {
+      await host.waitForRoomState(s => s.phase === 'BETTING_WINDOW' && s.currentRound?.roundNumber === q, 5000);
+
+      // Verify a spectator can place a valid secret wager
+      const curRound = activeRoom.currentRound!;
+      const spectatorId = [p1Id, p2Id, p3Id].find(id => !curRound.fighterIds.includes(id))!;
+      const specClient = clientMap[spectatorId];
+      specClient.ws.send(JSON.stringify({
+        type: 'PLACE_BET',
+        payload: { fighterId: curRound.fighterIds[0], amount: 50 },
+      }));
+      await specClient.waitForType('BET_ACCEPTED');
+
+      // Wait until mini-game becomes active
+      const activeState = await host.waitForRoomState(s => s.phase === 'MINIGAME_ACTIVE' && s.currentRound?.roundNumber === q, 5000);
+
+      // Verify secret bets array is scrubbed from public broadcast during gameplay
+      assert.deepEqual(activeState.payload.currentRound?.bets, [], 'Secret bets must not leak during active game in public broadcast');
+
+      playedMiniGames.push(activeRoom.currentRound!.miniGame.id);
+
+      const targetWinner = pickQualifierWinner(curRound.fighterIds);
+      const recap = await playRoundToDesiredOutcome(q, targetWinner);
+
+      assert.equal(recap.phase, 'PAYOUT_RECAP');
+      assert.equal(recap.currentRound?.winnerId, targetWinner);
+      assert.ok(recap.currentRound?.payouts.length! >= 1);
+
+      // Host advances to next round
+      host.ws.send(JSON.stringify({ type: 'NEXT_ROUND' }));
+    }
+
+    // -------------------------------------------------------------
+    // VERIFY FINAL QUALIFIER RANKINGS & FINALIST LOCKING
+    // -------------------------------------------------------------
+    const p1Obj = Array.from(activeRoom.players.values()).find(p => p.id === p1Id)!;
+    const p2Obj = Array.from(activeRoom.players.values()).find(p => p.id === p2Id)!;
+    const p3Obj = Array.from(activeRoom.players.values()).find(p => p.id === p3Id)!;
+
+    assert.equal(p1Obj.qualifierPoints, 6, 'P1 must have 6 Brawl Points (2 wins)');
+    assert.equal(p1Obj.qualifierWins, 2);
+    assert.equal(p2Obj.qualifierPoints, 3, 'P2 must have 3 Brawl Points (1 win)');
+    assert.equal(p2Obj.qualifierWins, 1);
+    assert.equal(p3Obj.qualifierPoints, 0, 'P3 must have 0 Brawl Points (0 wins)');
+    assert.equal(p3Obj.qualifierWins, 0);
+
+    // Snapshot qualifier Brawl Points before Championship Series begins
+    const qualifierPointsSnapshot = {
+      [p1Id]: p1Obj.qualifierPoints,
+      [p2Id]: p2Obj.qualifierPoints,
+      [p3Id]: p3Obj.qualifierPoints,
+    };
+
+    // -------------------------------------------------------------
+    // PHASE B: CHAMPIONSHIP SERIES (First to 2 Decisive Wins)
+    // -------------------------------------------------------------
+
+    // Helper to assert qualifier points invariant remains untouched
+    function assertQualifierPointsInvariant(stepDescription: string) {
+      for (const p of activeRoom.players.values()) {
+        assert.equal(
+          p.qualifierPoints,
+          qualifierPointsSnapshot[p.id],
+          `Qualifier Brawl Points for ${p.name} must remain invariant during Championship: ${stepDescription}`
+        );
+      }
+    }
+
+    // --- Championship Game 1: P1 Wins (Score 1-0) ---
+    const g1Reveal = await host.waitForRoomState(
+      s => s.phase === 'FIGHTER_REVEAL' && s.currentRound?.isChampionship === true && s.currentRound?.championshipGameNumber === 1,
+      5000
+    );
+    assert.equal(g1Reveal.payload.currentRound?.stage, 'CHAMPIONSHIP');
+    assert.deepEqual(activeRoom.tournamentSchedule?.finalists, [p1Id, p2Id], 'Top 2 qualifier seeds must be locked finalists');
+    assert.equal(activeRoom.tournamentSchedule?.thirdPlaceId, p3Id, '3rd place must be highest-ranked non-finalist');
+    assert.ok(!g1Reveal.payload.currentRound?.fighterIds.includes(p3Id), 'Non-finalist P3 must never be a Championship fighter');
+
+    const g1Active = await host.waitForRoomState(s => s.phase === 'MINIGAME_ACTIVE' && s.currentRound?.championshipGameNumber === 1, 5000);
+    // Verify no immediate repeated mini-game rule
+    const lastGameBeforeG1 = playedMiniGames[playedMiniGames.length - 1];
+    assert.notEqual(g1Active.payload.currentRound?.miniGame.id, lastGameBeforeG1, 'Championship Game 1 must not repeat previous mini-game');
+    playedMiniGames.push(g1Active.payload.currentRound!.miniGame.id);
+
+    const g1Recap = await playRoundToDesiredOutcome(4, p1Id);
+    assert.equal(g1Recap.currentRound?.winnerId, p1Id);
+    assert.equal(activeRoom.tournamentSchedule?.championshipWins[p1Id], 1, 'P1 must have 1 Championship win');
+    assert.equal(activeRoom.tournamentSchedule?.championshipWins[p2Id], 0, 'P2 must have 0 Championship wins');
+    assert.equal(activeRoom.tournamentSchedule?.championId, null, 'Champion must not be crowned after 1 win');
+    assertQualifierPointsInvariant('after Championship Game 1');
+
+    host.ws.send(JSON.stringify({ type: 'NEXT_ROUND' }));
+
+    // --- Championship Game 2: TIE Result (Score stays 1-0, Series Extends!) ---
+    const g2Reveal = await host.waitForRoomState(
+      s => s.phase === 'FIGHTER_REVEAL' && s.currentRound?.championshipGameNumber === 2,
+      5000
+    );
+    assert.deepEqual(g2Reveal.payload.currentRound?.fighterIds.sort(), [p1Id, p2Id].sort(), 'Finalists must remain locked');
+    assert.ok(!g2Reveal.payload.currentRound?.fighterIds.includes(p3Id));
+
+    const g2Active = await host.waitForRoomState(s => s.phase === 'MINIGAME_ACTIVE' && s.currentRound?.championshipGameNumber === 2, 5000);
+    const lastGameBeforeG2 = playedMiniGames[playedMiniGames.length - 1];
+    assert.notEqual(g2Active.payload.currentRound?.miniGame.id, lastGameBeforeG2, 'Championship Game 2 must not repeat Game 1 mini-game');
+    playedMiniGames.push(g2Active.payload.currentRound!.miniGame.id);
+
+    const g2Recap = await playRoundToDesiredOutcome(5, 'TIE');
+    assert.equal(g2Recap.currentRound?.tieResult, true, 'Game 2 must resolve as a tie');
+    assert.equal(activeRoom.tournamentSchedule?.championshipWins[p1Id], 1, 'Tied game gives 0 wins: P1 score must remain 1');
+    assert.equal(activeRoom.tournamentSchedule?.championshipWins[p2Id], 0, 'Tied game gives 0 wins: P2 score must remain 0');
+    assert.equal(activeRoom.tournamentSchedule?.championId, null, 'Tied game never crowns a champion; series extends');
+    assertQualifierPointsInvariant('after Championship Game 2 (Tie)');
+
+    host.ws.send(JSON.stringify({ type: 'NEXT_ROUND' }));
+
+    // --- Championship Game 3: P2 Wins (Score 1-1, Series Equalized) ---
+    const g3Reveal = await host.waitForRoomState(
+      s => s.phase === 'FIGHTER_REVEAL' && s.currentRound?.championshipGameNumber === 3,
+      5000
+    );
+    assert.deepEqual(g3Reveal.payload.currentRound?.fighterIds.sort(), [p1Id, p2Id].sort(), 'Finalists must remain locked');
+    assert.ok(!g3Reveal.payload.currentRound?.fighterIds.includes(p3Id));
+
+    const g3Active = await host.waitForRoomState(s => s.phase === 'MINIGAME_ACTIVE' && s.currentRound?.championshipGameNumber === 3, 5000);
+    const lastGameBeforeG3 = playedMiniGames[playedMiniGames.length - 1];
+    assert.notEqual(g3Active.payload.currentRound?.miniGame.id, lastGameBeforeG3, 'Championship Game 3 must not repeat Game 2 mini-game');
+    playedMiniGames.push(g3Active.payload.currentRound!.miniGame.id);
+
+    const g3Recap = await playRoundToDesiredOutcome(6, p2Id);
+    assert.equal(g3Recap.currentRound?.winnerId, p2Id);
+    assert.equal(activeRoom.tournamentSchedule?.championshipWins[p1Id], 1);
+    assert.equal(activeRoom.tournamentSchedule?.championshipWins[p2Id], 1, 'Score is now 1-1');
+    assert.equal(activeRoom.tournamentSchedule?.championId, null, 'Champion must not be crowned at 1-1');
+    assertQualifierPointsInvariant('after Championship Game 3 (1-1)');
+
+    host.ws.send(JSON.stringify({ type: 'NEXT_ROUND' }));
+
+    // --- Championship Game 4: P1 Wins (Score 2-1, Decisive Championship Clinch!) ---
+    const g4Reveal = await host.waitForRoomState(
+      s => s.phase === 'FIGHTER_REVEAL' && s.currentRound?.championshipGameNumber === 4,
+      5000
+    );
+    assert.deepEqual(g4Reveal.payload.currentRound?.fighterIds.sort(), [p1Id, p2Id].sort(), 'Finalists must remain locked');
+    assert.ok(!g4Reveal.payload.currentRound?.fighterIds.includes(p3Id));
+
+    const g4Active = await host.waitForRoomState(s => s.phase === 'MINIGAME_ACTIVE' && s.currentRound?.championshipGameNumber === 4, 5000);
+    const lastGameBeforeG4 = playedMiniGames[playedMiniGames.length - 1];
+    assert.notEqual(g4Active.payload.currentRound?.miniGame.id, lastGameBeforeG4, 'Championship Game 4 must not repeat Game 3 mini-game');
+
+    const g4Recap = await playRoundToDesiredOutcome(7, p1Id);
+    assert.equal(g4Recap.currentRound?.winnerId, p1Id);
+    assert.equal(activeRoom.tournamentSchedule?.championshipWins[p1Id], 2, 'P1 reaches 2 decisive wins');
+    assert.equal(activeRoom.tournamentSchedule?.championshipWins[p2Id], 1);
+    assert.equal(activeRoom.tournamentSchedule?.championId, p1Id, 'P1 is crowned Champion');
+    assert.equal(activeRoom.tournamentSchedule?.runnerUpId, p2Id, 'P2 is Runner-Up');
+    assert.equal(activeRoom.tournamentSchedule?.thirdPlaceId, p3Id, 'P3 is 3rd Place');
+    assert.equal(activeRoom.tournamentSchedule?.stage, 'COMPLETE', 'Tournament stage is COMPLETE');
+    assertQualifierPointsInvariant('after Championship Game 4 (2-1 Final)');
+
+    // -------------------------------------------------------------
+    // PHASE C: PODIUM & SAFETY CHECKS
+    // -------------------------------------------------------------
+    host.ws.send(JSON.stringify({ type: 'NEXT_ROUND' }));
+
+    // All 3 connected clients must receive FINAL_PODIUM broadcast
+    const [p1Podium, p2Podium, p3Podium] = await Promise.all([
+      host.waitForRoomState(s => s.phase === 'FINAL_PODIUM', 5000),
+      p2.waitForRoomState(s => s.phase === 'FINAL_PODIUM', 5000),
+      p3.waitForRoomState(s => s.phase === 'FINAL_PODIUM', 5000),
+    ]);
+
+    assert.equal(p1Podium.payload.phase, 'FINAL_PODIUM');
+    assert.equal(p2Podium.payload.phase, 'FINAL_PODIUM');
+    assert.equal(p3Podium.payload.phase, 'FINAL_PODIUM');
+
+    // Standings check on public state
+    const sched = p1Podium.payload.tournamentSchedule!;
+    assert.equal(sched.championId, p1Id);
+    assert.equal(sched.runnerUpId, p2Id);
+    assert.equal(sched.thirdPlaceId, p3Id);
+
+    // Safety: Host sending NEXT_ROUND after complete tournament is strictly ignored
+    host.ws.send(JSON.stringify({ type: 'NEXT_ROUND' }));
+    await new Promise(r => setTimeout(r, 100));
+    assert.equal(activeRoom.phase, 'FINAL_PODIUM', 'Tournament cannot accidentally advance out of FINAL_PODIUM');
   } finally {
     for (const c of clients) c.close();
     await server.close();
