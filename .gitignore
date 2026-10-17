@@ -1,9 +1,31 @@
+# Node & Frontend
 node_modules/
-build/
 dist/
 coverage/
-.DS_Store
 *.log
 .env*
 !.env.example
 .aistudio/
+
+# Android & Gradle
+.gradle/
+build/
+app/build/
+local.properties
+*.iml
+.idea/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Build outputs & signing
+*.apk
+*.aab
+*.ap_
+*.dex
+*.keystore
+!debug.keystore
+
+# System files
+.DS_Store
+Thumbs.db

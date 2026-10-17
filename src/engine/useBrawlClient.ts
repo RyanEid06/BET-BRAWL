@@ -87,9 +87,37 @@ export function useBrawlClient() {
   roomCodeRef.current = state.roomCode;
   const sessionTokenRef = useRef<string | null>(null);
   const timeOffsetSamplesRef = useRef<number[]>([]);
+  const targetWsEndpointRef = useRef<string | null>(null);
 
-  // Load network info on mount
+  // Load network info on mount (checks native Android bridge first, then /api/network-info)
   useEffect(() => {
+    // 1. Check for native Android bridge injected network info
+    const androidBridge = (window as unknown as { BetBrawlAndroid?: { getNetworkInfoJson?: () => string } }).BetBrawlAndroid;
+    if (androidBridge && typeof androidBridge.getNetworkInfoJson === 'function') {
+      try {
+        const nativeInfo = JSON.parse(androidBridge.getNetworkInfoJson());
+        if (nativeInfo && nativeInfo.localIp) {
+          const fullUrl = `http://${nativeInfo.localIp}:${nativeInfo.port || 8080}`;
+          setState(prev => ({
+            ...prev,
+            networkInfo: {
+              localIp: nativeInfo.localIp,
+              port: nativeInfo.port || 8080,
+              roomCode: nativeInfo.roomCode || '',
+              fullJoinUrl: fullUrl,
+              hasActiveRoom: nativeInfo.hasActiveRoom || false,
+              playerCount: nativeInfo.playerCount || 0,
+              candidateUrls: nativeInfo.candidateUrls || [fullUrl],
+            },
+          }));
+          return;
+        }
+      } catch {
+        // Fall back to HTTP fetch
+      }
+    }
+
+    // 2. Browser / Node server fetch
     fetch('/api/network-info')
       .then(res => res.json())
       .then(info => {
@@ -108,18 +136,22 @@ export function useBrawlClient() {
         }));
       })
       .catch(() => {
-        // Fallback to window.location
-        const port = window.location.port ? parseInt(window.location.port, 10) : 3000;
+        // Fallback to window.location or local Android host
+        const isFile = typeof window !== 'undefined' && window.location.protocol === 'file:';
+        const defaultHost = isFile ? '127.0.0.1' : (window.location.hostname || '127.0.0.1');
+        const defaultPort = isFile ? 8080 : (window.location.port ? parseInt(window.location.port, 10) : 3000);
+        const origin = isFile ? `http://${defaultHost}:${defaultPort}` : window.location.origin;
+
         setState(prev => ({
           ...prev,
           networkInfo: {
-            localIp: window.location.hostname || '127.0.0.1',
-            port,
+            localIp: defaultHost,
+            port: defaultPort,
             roomCode: '',
-            fullJoinUrl: window.location.origin,
+            fullJoinUrl: origin,
             hasActiveRoom: false,
             playerCount: 0,
-            candidateUrls: [window.location.origin],
+            candidateUrls: [origin],
           },
         }));
       });
@@ -131,11 +163,70 @@ export function useBrawlClient() {
     }
   }, []);
 
+  // Compute WebSocket URL cleanly across Android WebView, local host, LAN guest, or browser
+  const resolveWsUrl = useCallback((customHost?: string, customPort?: number): string => {
+    // 1. Explicit parameter
+    if (customHost) {
+      const port = customPort || 8080;
+      return `ws://${customHost}:${port}/ws`;
+    }
+
+    // 2. URL search params e.g. ?host=192.168.1.5&port=8080
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const queryHost = params.get('host');
+      const queryPort = params.get('port');
+      if (queryHost) {
+        return `ws://${queryHost}:${queryPort || 8080}/ws`;
+      }
+    }
+
+    // 3. Android window config
+    const globalConfig = (window as unknown as { BETBRAWL_CONFIG?: { wsUrl?: string; hostIp?: string; wsPort?: number } }).BETBRAWL_CONFIG;
+    if (globalConfig?.wsUrl) {
+      return globalConfig.wsUrl;
+    }
+    if (globalConfig?.hostIp) {
+      return `ws://${globalConfig.hostIp}:${globalConfig.wsPort || 8080}/ws`;
+    }
+
+    // 4. Stored target endpoint ref
+    if (targetWsEndpointRef.current) {
+      return targetWsEndpointRef.current;
+    }
+
+    // 5. Browser window.location fallback (if not file://)
+    if (typeof window !== 'undefined' && window.location.protocol !== 'file:' && window.location.host) {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      return `${protocol}//${window.location.host}/ws`;
+    }
+
+    // 6. Default local Android server
+    return 'ws://127.0.0.1:8080/ws';
+  }, []);
+
   // Connect WebSocket with immediate callback if already open
-  const connectWs = useCallback((onConnected?: () => void) => {
-    // If socket is already OPEN, invoke the callback immediately!
+  const connectWs = useCallback((targetUrlOrHost?: string | (() => void), onConnected?: () => void) => {
+    let callback = onConnected;
+    let targetUrl: string | undefined;
+
+    if (typeof targetUrlOrHost === 'function') {
+      callback = targetUrlOrHost;
+    } else if (typeof targetUrlOrHost === 'string') {
+      if (targetUrlOrHost.startsWith('ws://') || targetUrlOrHost.startsWith('wss://')) {
+        targetUrl = targetUrlOrHost;
+      } else {
+        targetUrl = resolveWsUrl(targetUrlOrHost);
+      }
+      targetWsEndpointRef.current = targetUrl;
+    }
+
+    const wsUrl = targetUrl || resolveWsUrl();
+    targetWsEndpointRef.current = wsUrl;
+
+    // If socket is already OPEN to the same target, invoke the callback immediately!
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      if (onConnected) onConnected();
+      if (callback) callback();
       return;
     }
 
@@ -144,7 +235,7 @@ export function useBrawlClient() {
       const checkInterval = setInterval(() => {
         if (wsRef.current?.readyState === WebSocket.OPEN) {
           clearInterval(checkInterval);
-          if (onConnected) onConnected();
+          if (callback) callback();
         } else if (!wsRef.current || wsRef.current.readyState === WebSocket.CLOSED) {
           clearInterval(checkInterval);
         }
@@ -154,15 +245,12 @@ export function useBrawlClient() {
 
     setState(prev => ({ ...prev, status: 'CONNECTING', errorMessage: null }));
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws`;
-
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 
     ws.onopen = () => {
       setState(prev => ({ ...prev, status: 'CONNECTED', errorMessage: null }));
-      if (onConnected) onConnected();
+      if (callback) callback();
 
       // Start ping heartbeat with timestamps for server-time synchronization
       if (heartbeatIntervalRef.current) clearInterval(heartbeatIntervalRef.current);
@@ -341,7 +429,14 @@ export function useBrawlClient() {
     localStorage.setItem(PLAYER_AVATAR_KEY, avatar);
     setState(prev => ({ ...prev, errorMessage: null }));
 
-    connectWs(() => {
+    // Notify Android native shell to start Host Foreground Service if running in Android
+    const androidBridge = (window as unknown as { BetBrawlAndroid?: { startHosting?: (name: string, av: string) => void } }).BetBrawlAndroid;
+    if (androidBridge && typeof androidBridge.startHosting === 'function') {
+      androidBridge.startHosting(playerName, avatar);
+    }
+
+    // Connect to local WebSocket authority
+    connectWs('127.0.0.1', () => {
       send({
         type: 'CREATE_ROOM',
         payload: { playerName, avatar, debugMode: state.isDebug },
@@ -349,14 +444,24 @@ export function useBrawlClient() {
     });
   }, [connectWs, send, state.isDebug]);
 
-  const joinGame = useCallback((roomCode: string, playerName: string, avatar: string) => {
+  const joinGame = useCallback((roomCode: string, playerName: string, avatar: string, targetHost?: string) => {
     const cleanCode = roomCode.trim().toUpperCase();
     localStorage.setItem(PLAYER_NAME_KEY, playerName);
     localStorage.setItem(PLAYER_AVATAR_KEY, avatar);
     const savedToken = localStorage.getItem(SESSION_TOKEN_KEY) || undefined;
     setState(prev => ({ ...prev, errorMessage: null }));
 
-    connectWs(() => {
+    // Check if target host was provided or is in discovered rooms
+    let hostToConnect = targetHost;
+    if (!hostToConnect && typeof window !== 'undefined') {
+      const globalConfig = (window as unknown as { BETBRAWL_CONFIG?: { hostIp?: string; discoveredHosts?: Array<{ ip: string; roomCode?: string }> } }).BETBRAWL_CONFIG;
+      if (globalConfig?.discoveredHosts) {
+        const match = globalConfig.discoveredHosts.find(d => d.roomCode === cleanCode);
+        if (match) hostToConnect = match.ip;
+      }
+    }
+
+    connectWs(hostToConnect, () => {
       send({
         type: 'JOIN_ROOM',
         payload: { roomCode: cleanCode, playerName, avatar, sessionToken: savedToken },

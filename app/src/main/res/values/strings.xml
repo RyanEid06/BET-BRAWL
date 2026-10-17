@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">BET &amp; BRAWL</string>
+    <string name="host_service_channel_name">BET &amp; BRAWL Game Host</string>
+    <string name="host_service_channel_desc">Active authoritative local Wi-Fi game server session</string>
+    <string name="host_service_title">BET &amp; BRAWL Host Active</string>
+    <string name="host_service_text">Running authoritative game server on local Wi-Fi</string>
+</resources>
