@@ -88,16 +88,91 @@ export function useBrawlClient() {
   const sessionTokenRef = useRef<string | null>(null);
   const timeOffsetSamplesRef = useRef<number[]>([]);
   const targetWsEndpointRef = useRef<string | null>(null);
+  const discoveredRoomsRef = useRef<Map<string, { hostIp: string; port: number; lastSeen: number }>>(new Map());
 
   // Load network info on mount (checks native Android bridge first, then /api/network-info)
   useEffect(() => {
-    // 1. Check for native Android bridge injected network info
-    const androidBridge = (window as unknown as { BetBrawlAndroid?: { getNetworkInfoJson?: () => string } }).BetBrawlAndroid;
+    // 1. Check for native Android bridge injected network info & discovered rooms
+    const androidBridge = (window as unknown as { BetBrawlAndroid?: { getNetworkInfoJson?: () => string; getDiscoveredHostsJson?: () => string } }).BetBrawlAndroid;
+    if (androidBridge && typeof androidBridge.getDiscoveredHostsJson === 'function') {
+      try {
+        const list = JSON.parse(androidBridge.getDiscoveredHostsJson());
+        list.forEach((item: { ip?: string; host?: string; port?: number; roomCode?: string }) => {
+          const code = (item.roomCode || '').trim().toUpperCase();
+          const ip = item.host || item.ip;
+          if (code && ip) {
+            discoveredRoomsRef.current.set(code, { hostIp: ip, port: item.port || 8080, lastSeen: Date.now() });
+          }
+        });
+      } catch {}
+    }
+
+    // Register live window.onHostDiscovered callback from native shell
+    (window as unknown as { onHostDiscovered?: (data: unknown, port?: number, roomCode?: string) => void }).onHostDiscovered = (data: unknown, port?: number, roomCode?: string) => {
+      let ip = '';
+      let p = 8080;
+      let code = '';
+      if (typeof data === 'object' && data !== null) {
+        const obj = data as Record<string, unknown>;
+        ip = (obj.host || obj.ip || '') as string;
+        p = typeof obj.port === 'number' ? obj.port : 8080;
+        code = (obj.roomCode || '') as string;
+      } else if (typeof data === 'string') {
+        if (data.startsWith('{')) {
+          try {
+            const parsed = JSON.parse(data);
+            ip = parsed.host || parsed.ip || '';
+            p = typeof parsed.port === 'number' ? parsed.port : 8080;
+            code = parsed.roomCode || '';
+          } catch {
+            ip = data;
+            p = port || 8080;
+            code = roomCode || '';
+          }
+        } else {
+          ip = data;
+          p = port || 8080;
+          code = roomCode || '';
+        }
+      }
+      const cleanCode = code.trim().toUpperCase();
+      if (cleanCode && ip) {
+        discoveredRoomsRef.current.set(cleanCode, { hostIp: ip, port: p, lastSeen: Date.now() });
+        setState(prev => {
+          if (!prev.networkInfo?.hasActiveRoom || prev.networkInfo.roomCode === cleanCode) {
+            return {
+              ...prev,
+              networkInfo: {
+                localIp: ip,
+                port: p,
+                roomCode: cleanCode,
+                fullJoinUrl: `brawl://join?host=${ip}&port=${p}&room=${cleanCode}`,
+                hasActiveRoom: true,
+                playerCount: prev.networkInfo?.playerCount || 1,
+                candidateUrls: [`brawl://join?host=${ip}&port=${p}&room=${cleanCode}`],
+              },
+            };
+          }
+          return prev;
+        });
+      }
+    };
+
+    // Stale discovered rooms cleanup interval (15s TTL)
+    const pruneInterval = setInterval(() => {
+      const now = Date.now();
+      for (const [code, info] of discoveredRoomsRef.current.entries()) {
+        if (now - info.lastSeen > 15000) {
+          discoveredRoomsRef.current.delete(code);
+        }
+      }
+    }, 5000);
+
     if (androidBridge && typeof androidBridge.getNetworkInfoJson === 'function') {
       try {
         const nativeInfo = JSON.parse(androidBridge.getNetworkInfoJson());
         if (nativeInfo && nativeInfo.localIp) {
-          const fullUrl = `http://${nativeInfo.localIp}:${nativeInfo.port || 8080}`;
+          const fullUrl = `brawl://join?host=${nativeInfo.localIp}&port=${nativeInfo.port || 8080}&room=${nativeInfo.roomCode || ''}`;
           setState(prev => ({
             ...prev,
             networkInfo: {
@@ -110,7 +185,7 @@ export function useBrawlClient() {
               candidateUrls: nativeInfo.candidateUrls || [fullUrl],
             },
           }));
-          return;
+          return () => clearInterval(pruneInterval);
         }
       } catch {
         // Fall back to HTTP fetch
@@ -427,21 +502,78 @@ export function useBrawlClient() {
   const hostGame = useCallback((playerName: string, avatar: string) => {
     localStorage.setItem(PLAYER_NAME_KEY, playerName);
     localStorage.setItem(PLAYER_AVATAR_KEY, avatar);
-    setState(prev => ({ ...prev, errorMessage: null }));
+    setState(prev => ({ ...prev, status: 'CONNECTING', errorMessage: null }));
 
-    // Notify Android native shell to start Host Foreground Service if running in Android
-    const androidBridge = (window as unknown as { BetBrawlAndroid?: { startHosting?: (name: string, av: string) => void } }).BetBrawlAndroid;
-    if (androidBridge && typeof androidBridge.startHosting === 'function') {
-      androidBridge.startHosting(playerName, avatar);
-    }
+    const isAndroid = typeof window !== 'undefined' && (
+      window.location.protocol === 'file:' ||
+      !!(window as unknown as { BetBrawlAndroid?: unknown }).BetBrawlAndroid
+    );
 
-    // Connect to local WebSocket authority
-    connectWs('127.0.0.1', () => {
-      send({
-        type: 'CREATE_ROOM',
-        payload: { playerName, avatar, debugMode: state.isDebug },
+    if (isAndroid) {
+      // Notify Android native shell to start Host Foreground Service
+      const androidBridge = (window as unknown as { BetBrawlAndroid?: { startHosting?: (name: string, av: string) => void } }).BetBrawlAndroid;
+      if (androidBridge && typeof androidBridge.startHosting === 'function') {
+        androidBridge.startHosting(playerName, avatar);
+      }
+
+      // Bounded retry loop waiting for local WebSocket server to accept connections
+      let attempts = 0;
+      const maxAttempts = 15;
+      let activeWs: WebSocket | null = null;
+      let isOpened = false;
+
+      const attemptConnect = () => {
+        if (isOpened) return;
+        attempts++;
+        try {
+          activeWs = new WebSocket('ws://127.0.0.1:8080/ws');
+          activeWs.onopen = () => {
+            isOpened = true;
+            wsRef.current = activeWs;
+            connectWs('ws://127.0.0.1:8080/ws', () => {
+              send({
+                type: 'CREATE_ROOM',
+                payload: { playerName, avatar, debugMode: state.isDebug },
+              });
+            });
+          };
+          activeWs.onerror = () => {
+            try { activeWs?.close(); } catch {}
+            if (!isOpened) {
+              if (attempts < maxAttempts) {
+                setTimeout(attemptConnect, 200);
+              } else {
+                setState(prev => ({
+                  ...prev,
+                  status: 'ERROR',
+                  errorMessage: 'Failed to start local host service. Please try again.',
+                }));
+              }
+            }
+          };
+        } catch {
+          if (attempts < maxAttempts) {
+            setTimeout(attemptConnect, 200);
+          } else {
+            setState(prev => ({
+              ...prev,
+              status: 'ERROR',
+              errorMessage: 'Failed to start local host service. Please try again.',
+            }));
+          }
+        }
+      };
+
+      setTimeout(attemptConnect, 150);
+    } else {
+      // Normal browser flow
+      connectWs(undefined, () => {
+        send({
+          type: 'CREATE_ROOM',
+          payload: { playerName, avatar, debugMode: state.isDebug },
+        });
       });
-    });
+    }
   }, [connectWs, send, state.isDebug]);
 
   const joinGame = useCallback((roomCode: string, playerName: string, avatar: string, targetHost?: string) => {
@@ -453,12 +585,34 @@ export function useBrawlClient() {
 
     // Check if target host was provided or is in discovered rooms
     let hostToConnect = targetHost;
+    if (!hostToConnect) {
+      const discovered = discoveredRoomsRef.current.get(cleanCode);
+      if (discovered && (Date.now() - discovered.lastSeen < 30000)) {
+        hostToConnect = discovered.hostIp;
+      }
+    }
+
     if (!hostToConnect && typeof window !== 'undefined') {
       const globalConfig = (window as unknown as { BETBRAWL_CONFIG?: { hostIp?: string; discoveredHosts?: Array<{ ip: string; roomCode?: string }> } }).BETBRAWL_CONFIG;
       if (globalConfig?.discoveredHosts) {
         const match = globalConfig.discoveredHosts.find(d => d.roomCode === cleanCode);
         if (match) hostToConnect = match.ip;
       }
+    }
+
+    const isAndroid = typeof window !== 'undefined' && (
+      window.location.protocol === 'file:' ||
+      !!(window as unknown as { BetBrawlAndroid?: unknown }).BetBrawlAndroid
+    );
+
+    // On Android guest, NEVER default to 127.0.0.1 if room code is unknown!
+    if (isAndroid && !hostToConnect) {
+      setState(prev => ({
+        ...prev,
+        status: 'IDLE',
+        errorMessage: "Can't find that room on this Wi-Fi. Make sure you're on the same Wi-Fi or scan the host's QR code.",
+      }));
+      return;
     }
 
     connectWs(hostToConnect, () => {
@@ -476,9 +630,8 @@ export function useBrawlClient() {
   const startGame = useCallback(() => {
     send({
       type: 'START_GAME',
-      payload: { debug: state.isDebug },
     });
-  }, [send, state.isDebug]);
+  }, [send]);
 
   const placeBet = useCallback((fighterId: string, amount: number) => {
     setState(prev => ({ ...prev, lastRejectedBetReason: null }));

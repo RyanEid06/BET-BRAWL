@@ -43,7 +43,11 @@ class BrawlWebInterface(
         val hasActiveRoom = server != null && roomCode.isNotEmpty()
         val playerCount = server?.players?.size ?: 0
         val port = server?.serverPort ?: 8080
-        val fullUrl = "http://$localIp:$port"
+        val fullUrl = if (roomCode.isNotEmpty()) {
+            "brawl://join?host=$localIp&port=$port&room=$roomCode"
+        } else {
+            "brawl://join?host=$localIp&port=$port"
+        }
 
         val json = JSONObject().apply {
             put("localIp", localIp)
@@ -66,6 +70,7 @@ class BrawlWebInterface(
         for (host in lanDiscovery.discoveredRooms.values) {
             array.put(JSONObject().apply {
                 put("ip", host.ip)
+                put("host", host.ip)
                 put("port", host.port)
                 put("roomCode", host.roomCode)
             })

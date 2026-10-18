@@ -1,13 +1,11 @@
 package com.betbrawl.app.server
 
-import com.betbrawl.app.server.engine.GameActionResult
 import com.betbrawl.app.server.engine.GameEngine
 import com.betbrawl.app.server.engine.InternalGameState
 import com.betbrawl.app.server.engine.OddsEngine
 import com.betbrawl.app.server.engine.RoomEngine
 import com.betbrawl.app.server.model.*
 import com.google.gson.Gson
-import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.*
 import org.java_websocket.WebSocket
 import org.java_websocket.handshake.ClientHandshake
@@ -16,82 +14,172 @@ import java.net.InetSocketAddress
 import java.util.concurrent.ConcurrentHashMap
 
 class BrawlWebSocketServer(
-    val hostAddress: String = "0.0.0.0",
+    host: String = "0.0.0.0",
     val serverPort: Int = 8080,
     private val onRoomStateChanged: ((PublicRoomState) -> Unit)? = null
-) : WebSocketServer(InetSocketAddress(hostAddress, serverPort)) {
+) : WebSocketServer(InetSocketAddress(host, serverPort)) {
 
     private val gson = Gson()
-    private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
-    // Active room state
-    var roomId: String = "room_main"
+    // Round countdown & game loop jobs
+    private var revealTimerJob: Job? = null
+    private var bettingTimerJob: Job? = null
+    private var countdownTimerJob: Job? = null
+    private var minigameTimerJob: Job? = null
+
+    // Grace timers
+    private val fighterGraceTimers = ConcurrentHashMap<String, Job>()
+    private var hostGraceTimerJob: Job? = null
+    private val staleSeatTimers = ConcurrentHashMap<String, Job>()
+
+    var roomId: String = ""
+        private set
     var roomCode: String = ""
+        private set
     var hostToken: String = ""
+        private set
     var phase: GamePhase = GamePhase.ENTRY
+        private set
     var debugMode: Boolean = false
+        private set
+
     val players = ConcurrentHashMap<String, Player>() // sessionToken -> Player
     val clientSockets = ConcurrentHashMap<String, WebSocket>() // sessionToken -> WebSocket
-    val socketToToken = ConcurrentHashMap<WebSocket, String>()
+    val socketToToken = ConcurrentHashMap<WebSocket, String>() // WebSocket -> sessionToken
 
     var totalRounds: Int = 4
+        private set
     var currentRound: RoundState? = null
+        private set
     var internalGameState: InternalGameState? = null
+        private set
     var tournamentSchedule: TournamentSchedule? = null
+        private set
     val roundHistory = mutableListOf<RoundHistoryItem>()
     val awards = mutableListOf<Award>()
 
-    private var phaseJob: Job? = null
-    private var bettingIntervalJob: Job? = null
-    private var gameTimeoutJob: Job? = null
-
-    init {
-        isReuseAddr = true
-    }
-
     override fun onStart() {
-        println("[BrawlServer] Authoritative WebSocket server started on $hostAddress:$serverPort")
+        println("[BrawlServer] WebSocket server started on port $serverPort")
     }
 
-    override fun onOpen(conn: WebSocket?, handshake: ClientHandshake?) {
-        // Connection opened, wait for CREATE_ROOM or JOIN_ROOM
+    override fun onOpen(conn: WebSocket, handshake: ClientHandshake) {
+        // Connected socket
     }
 
-    override fun onClose(conn: WebSocket?, code: Int, reason: String?, remote: Boolean) {
-        if (conn == null) return
-        val token = socketToToken.remove(conn)
-        if (token != null) {
-            clientSockets.remove(token)
-            val player = players[token]
-            if (player != null) {
-                player.connected = false
-                broadcastRoomState()
+    override fun onClose(conn: WebSocket, code: Int, reason: String, remote: Boolean) {
+        val token = socketToToken.remove(conn) ?: return
+
+        // STALE SOCKET PROTECTION:
+        // If this closing socket is NOT the currently registered socket for token, ignore it!
+        if (clientSockets[token] != conn) {
+            return
+        }
+        clientSockets.remove(token)
+
+        val player = players[token] ?: return
+        player.connected = false
+
+        // 1. Lobby seat grace (60s)
+        if (phase == GamePhase.LOBBY && !player.isHost) {
+            staleSeatTimers[token]?.cancel()
+            val tokenToClean = token
+            staleSeatTimers[token] = scope.launch {
+                delay(60000L)
+                if (players[tokenToClean]?.connected == false && phase == GamePhase.LOBBY) {
+                    players.remove(tokenToClean)
+                    clientSockets.remove(tokenToClean)
+                    staleSeatTimers.remove(tokenToClean)
+                    broadcastRoomState()
+                }
             }
         }
+
+        // 2. Active brawl fighter disconnect grace (5s)
+        val activeBrawlPhases = listOf(
+            GamePhase.FIGHTER_REVEAL,
+            GamePhase.BETTING_WINDOW,
+            GamePhase.MINIGAME_COUNTDOWN,
+            GamePhase.MINIGAME_ACTIVE
+        )
+        val round = currentRound
+        if (phase in activeBrawlPhases && round != null) {
+            val (f1, f2) = round.fighterIds
+            if (player.id == f1 || player.id == f2) {
+                val otherFighterId = if (player.id == f1) f2 else f1
+                val roundNum = round.roundNumber
+
+                fighterGraceTimers[player.id]?.cancel()
+                fighterGraceTimers[player.id] = scope.launch {
+                    delay(5000L)
+                    val curr = currentRound
+                    if (curr != null && curr.roundNumber == roundNum && phase in activeBrawlPhases) {
+                        if (players[token]?.connected == false) {
+                            val otherPlayer = players.values.find { it.id == otherFighterId }
+                            if (otherPlayer != null && otherPlayer.connected) {
+                                resolveCurrentGame(otherFighterId, false, RoundResolutionReason.DISCONNECT_FORFEIT)
+                            } else {
+                                resolveCurrentGame(null, false, RoundResolutionReason.VOID)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. Host disconnect grace (60s)
+        if (player.isHost) {
+            hostGraceTimerJob?.cancel()
+            val hostTok = token
+            hostGraceTimerJob = scope.launch {
+                delay(60000L)
+                if (players[hostTok]?.connected == false) {
+                    clearAllTimers()
+                    val closeMsg = gson.toJson(mapOf(
+                        "type" to "ROOM_CLOSED",
+                        "timestamp" to System.currentTimeMillis(),
+                        "payload" to mapOf("reason" to "Host disconnected and did not return.")
+                    ))
+                    for (sock in clientSockets.values) {
+                        if (sock.isOpen) {
+                            try { sock.send(closeMsg); sock.close() } catch (e: Exception) {}
+                        }
+                    }
+                    resetRoom()
+                }
+            }
+        }
+
+        broadcastRoomState()
     }
 
-    override fun onError(conn: WebSocket?, ex: Exception?) {
-        System.err.println("[BrawlServer] WebSocket error: ${ex?.message}")
+    override fun onError(conn: WebSocket?, ex: Exception) {
+        ex.printStackTrace()
     }
 
-    override fun onMessage(conn: WebSocket?, message: String?) {
-        if (conn == null || message == null) return
+    override fun onMessage(conn: WebSocket, message: String) {
+        // Enforce 64 KiB message size limit
+        if (message.length > 65536) {
+            return
+        }
+
         try {
-            val mapType = object : TypeToken<Map<String, Any?>>() {}.type
-            val msgMap: Map<String, Any?> = gson.fromJson(message, mapType)
-            val type = msgMap["type"] as? String ?: return
-            val payload = msgMap["payload"] as? Map<String, Any?>
+            val rawMsg = gson.fromJson(message, Map::class.java) ?: return
+            val type = rawMsg["type"] as? String ?: return
+            @Suppress("UNCHECKED_CAST")
+            val payload = rawMsg["payload"] as? Map<String, Any?>
 
             when (type) {
                 "CREATE_ROOM" -> handleCreateRoom(conn, payload)
                 "JOIN_ROOM" -> handleJoinRoom(conn, payload)
                 "TOGGLE_READY" -> handleToggleReady(conn)
-                "START_GAME" -> handleStartGame(conn, payload)
+                "START_GAME" -> handleStartGame(conn)
                 "PLACE_BET" -> handlePlaceBet(conn, payload)
                 "FIGHTER_ACTION" -> handleFighterAction(conn, payload)
                 "NEXT_ROUND" -> handleNextRound(conn)
                 "RESTART_GAME" -> handleRestartGame(conn)
                 "CLOSE_ROOM" -> handleCloseRoom(conn)
+                "KICK_PLAYER" -> handleKickPlayer(conn, payload)
                 "DEBUG_ADD_BOT" -> handleDebugAddBot(conn)
                 "PING" -> handlePing(conn, payload)
             }
@@ -101,11 +189,28 @@ class BrawlWebSocketServer(
     }
 
     private fun handleCreateRoom(conn: WebSocket, payload: Map<String, Any?>?) {
-        val playerName = RoomEngine.sanitizePlayerName(payload?.get("playerName") as? String, isHost = true)
-        val avatar = RoomEngine.sanitizePlayerAvatar(payload?.get("avatar") as? String)
-        debugMode = (payload?.get("debugMode") as? Boolean) ?: false
+        val callerToken = socketToToken[conn]
+        // ACTIVE ROOM PROTECTION: An unauthenticated / non-host client cannot destroy an active room!
+        if (roomCode.isNotEmpty() && players.isNotEmpty()) {
+            if (callerToken == null || callerToken != hostToken) {
+                sendToSocket(conn, "JOIN_ERROR", mapOf(
+                    "code" to "ROOM_ALREADY_ACTIVE",
+                    "message" to "A game room ($roomCode) is already running on this server. Join with the code."
+                ))
+                return
+            }
+        }
 
+        clearAllTimers()
+        clearConnectionTimers()
+
+        val rawName = payload?.get("playerName") as? String
+        val rawAvatar = payload?.get("avatar") as? String
+        val rawDebug = payload?.get("debugMode") as? Boolean ?: false
+
+        debugMode = rawDebug
         roomCode = RoomEngine.generateRoomCode()
+        roomId = "room_${System.currentTimeMillis()}"
         players.clear()
         clientSockets.clear()
         socketToToken.clear()
@@ -115,13 +220,12 @@ class BrawlWebSocketServer(
         currentRound = null
         phase = GamePhase.LOBBY
 
-        val hostPlayer = RoomEngine.createFreshPlayer(playerName, avatar, isHost = true)
+        val hostPlayer = RoomEngine.createFreshPlayer(rawName ?: "Host", rawAvatar ?: "⚡", isHost = true)
         hostToken = hostPlayer.sessionToken
         players[hostToken] = hostPlayer
         clientSockets[hostToken] = conn
         socketToToken[conn] = hostToken
 
-        // Send JOIN_SUCCESS to host
         sendToSocket(conn, "JOIN_SUCCESS", mapOf(
             "player" to hostPlayer.toPublicPlayer(),
             "sessionToken" to hostPlayer.sessionToken,
@@ -143,67 +247,131 @@ class BrawlWebSocketServer(
             return
         }
 
-        // Check for session recovery
-        var player = if (!requestedToken.isNullOrEmpty()) players[requestedToken] else null
+        // 1. Session Recovery / Reconnect
+        if (!requestedToken.isNullOrEmpty() && players.containsKey(requestedToken)) {
+            val existing = players[requestedToken]!!
+            val oldSocket = clientSockets[requestedToken]
 
-        if (player != null) {
-            // Reconnecting existing player
-            player.connected = true
-            socketToToken[conn] = player.sessionToken
-            clientSockets[player.sessionToken] = conn
-        } else {
-            // New player joining
-            if (players.size >= RoomEngine.MAX_PLAYERS_CAPACITY) {
-                sendToSocket(conn, "JOIN_ERROR", mapOf("code" to "ROOM_FULL", "message" to "Room is full (max 9 players)."))
-                return
+            // Bind new socket FIRST
+            clientSockets[requestedToken] = conn
+            socketToToken[conn] = requestedToken
+            existing.connected = true
+
+            // Close old socket safely if different
+            if (oldSocket != null && oldSocket != conn && oldSocket.isOpen) {
+                try {
+                    oldSocket.close(1000, "Replaced by new connection")
+                } catch (e: Exception) {}
             }
-            val name = RoomEngine.sanitizePlayerName(rawName, isHost = false)
-            val avatar = RoomEngine.sanitizePlayerAvatar(rawAvatar)
-            player = RoomEngine.createFreshPlayer(name, avatar, isHost = false)
-            players[player.sessionToken] = player
-            clientSockets[player.sessionToken] = conn
-            socketToToken[conn] = player.sessionToken
+
+            // Cancel connection grace timers for this player
+            fighterGraceTimers.remove(existing.id)?.cancel()
+            staleSeatTimers.remove(requestedToken)?.cancel()
+            if (existing.isHost) {
+                hostGraceTimerJob?.cancel()
+                hostGraceTimerJob = null
+            }
+
+            sendToSocket(conn, "JOIN_SUCCESS", mapOf(
+                "player" to existing.toPublicPlayer(),
+                "sessionToken" to existing.sessionToken,
+                "roomCode" to roomCode,
+                "isHost" to existing.isHost
+            ))
+            broadcastRoomState()
+            return
         }
 
+        // 2. New player join (LOBBY ONLY)
+        if (phase != GamePhase.LOBBY) {
+            sendToSocket(conn, "JOIN_ERROR", mapOf("code" to "GAME_IN_PROGRESS", "message" to "Match already in progress."))
+            return
+        }
+
+        if (players.size >= RoomEngine.MAX_PLAYERS_CAPACITY) {
+            sendToSocket(conn, "JOIN_ERROR", mapOf("code" to "ROOM_FULL", "message" to "Room is full (max 9 players)."))
+            return
+        }
+
+        val name = RoomEngine.sanitizePlayerName(rawName, isHost = false)
+        val avatar = RoomEngine.sanitizePlayerAvatar(rawAvatar)
+        val newPlayer = RoomEngine.createFreshPlayer(name, avatar, isHost = false)
+        players[newPlayer.sessionToken] = newPlayer
+        clientSockets[newPlayer.sessionToken] = conn
+        socketToToken[conn] = newPlayer.sessionToken
+
         sendToSocket(conn, "JOIN_SUCCESS", mapOf(
-            "player" to player.toPublicPlayer(),
-            "sessionToken" to player.sessionToken,
+            "player" to newPlayer.toPublicPlayer(),
+            "sessionToken" to newPlayer.sessionToken,
             "roomCode" to roomCode,
-            "isHost" to player.isHost
+            "isHost" to false
         ))
 
         broadcastRoomState()
     }
 
     private fun handleToggleReady(conn: WebSocket) {
+        if (phase != GamePhase.LOBBY) return
         val token = socketToToken[conn] ?: return
         val player = players[token] ?: return
         player.isReady = !player.isReady
         broadcastRoomState()
     }
 
-    private fun handleStartGame(conn: WebSocket, payload: Map<String, Any?>?) {
+    private fun handleStartGame(conn: WebSocket) {
+        if (phase != GamePhase.LOBBY) return
         val token = socketToToken[conn] ?: return
         val player = players[token] ?: return
         if (!player.isHost) return
 
-        val isDebug = (payload?.get("debug") as? Boolean) ?: debugMode
-        val connectedCount = players.values.count { it.connected }
+        val connectedPlayers = players.values.filter { it.connected }
 
-        if (!isDebug && connectedCount < RoomEngine.MIN_PLAYERS_TO_START) {
+        // Authoritative debugMode only — do NOT allow client payload bypass!
+        if (connectedPlayers.size < RoomEngine.MIN_PLAYERS_TO_START && !debugMode) {
+            sendToSocket(conn, "JOIN_ERROR", mapOf(
+                "code" to "NOT_ENOUGH_PLAYERS",
+                "message" to "Need at least ${RoomEngine.MIN_PLAYERS_TO_START} connected players to start (currently ${connectedPlayers.size})."
+            ))
             return
         }
 
-        val allReady = players.values.filter { it.connected }.all { it.isReady || it.isHost }
-        if (!isDebug && !allReady) {
+        val allReady = connectedPlayers.all { it.isReady || it.isHost }
+        if (!allReady && !debugMode) {
+            sendToSocket(conn, "JOIN_ERROR", mapOf(
+                "code" to "NOT_ALL_READY",
+                "message" to "All connected players must be READY before starting."
+            ))
             return
         }
 
-        val schedule = RoomEngine.generateTournamentSchedule(players.values.toList())
+        val schedule = RoomEngine.generateTournamentSchedule(connectedPlayers)
         tournamentSchedule = schedule
         totalRounds = schedule.matches.size
 
         transitionToNextTournamentMatch()
+    }
+
+    private fun handleKickPlayer(conn: WebSocket, payload: Map<String, Any?>?) {
+        if (phase != GamePhase.LOBBY) return
+        val token = socketToToken[conn] ?: return
+        val player = players[token] ?: return
+        if (!player.isHost) return
+
+        val targetPlayerId = payload?.get("playerId") as? String ?: return
+        val target = players.values.find { it.id == targetPlayerId }
+        if (target != null && !target.isHost) {
+            val targetToken = target.sessionToken
+            val targetSock = clientSockets[targetToken]
+            if (targetSock != null && targetSock.isOpen) {
+                sendToSocket(targetSock, "ROOM_CLOSED", mapOf("reason" to "You were removed from the room by the host."))
+                try { targetSock.close() } catch (e: Exception) {}
+            }
+            clientSockets.remove(targetToken)
+            socketToToken.remove(targetSock)
+            players.remove(targetToken)
+            staleSeatTimers.remove(targetToken)?.cancel()
+            broadcastRoomState()
+        }
     }
 
     fun transitionToNextTournamentMatch() {
@@ -236,53 +404,57 @@ class BrawlWebSocketServer(
                     championshipGameNumber = 1
                 )
                 schedule.matches.add(champMatch)
+                totalRounds = schedule.matches.size
                 initMatchRound(champMatch, isChampionship = true)
             }
         } else if (schedule.stage == TournamentStage.CHAMPIONSHIP) {
-            // Check if someone reached 2 decisive wins
-            val winsA = schedule.championshipWins.getOrDefault(schedule.finalists!![0], 0)
-            val winsB = schedule.championshipWins.getOrDefault(schedule.finalists!![1], 0)
+            val (f1, f2) = schedule.finalists!!
+            val w1 = schedule.championshipWins.getOrDefault(f1, 0)
+            val w2 = schedule.championshipWins.getOrDefault(f2, 0)
 
-            if (winsA >= 2 || winsB >= 2) {
-                // Championship Series Complete!
+            if (w1 >= 2 || w2 >= 2) {
+                // Championship Decided!
                 schedule.stage = TournamentStage.COMPLETE
-                val champId = if (winsA >= 2) schedule.finalists!![0] else schedule.finalists!![1]
-                val runnerUpId = if (winsA >= 2) schedule.finalists!![1] else schedule.finalists!![0]
-                schedule.championId = champId
-                schedule.runnerUpId = runnerUpId
+                schedule.championId = if (w1 >= 2) f1 else f2
+                schedule.runnerUpId = if (w1 >= 2) f2 else f1
 
-                transitionToFinalPodium()
+                phase = GamePhase.FINAL_PODIUM
+                awards.clear()
+                awards.addAll(RoomEngine.computeSessionAwards(players.values.toList(), schedule.championId))
+                broadcastRoomState()
             } else {
-                // Continue Championship series (First to 2 wins)
+                // Series continues!
                 schedule.championshipGamesPlayed += 1
-                val nextChampGame = schedule.championshipGamesPlayed
-                val champMatch = TournamentMatch(
+                val nextChampMatch = TournamentMatch(
                     matchIndex = schedule.matches.size,
                     roundNumber = schedule.matches.size + 1,
                     fighterIds = schedule.finalists!!,
                     isChampionship = true,
-                    championshipGameNumber = nextChampGame
+                    championshipGameNumber = schedule.championshipGamesPlayed
                 )
-                schedule.matches.add(champMatch)
-                initMatchRound(champMatch, isChampionship = true)
+                schedule.matches.add(nextChampMatch)
+                totalRounds = schedule.matches.size
+                initMatchRound(nextChampMatch, isChampionship = true)
             }
         }
     }
 
     private fun initMatchRound(match: TournamentMatch, isChampionship: Boolean) {
-        val f1 = players.values.find { it.id == match.fighterIds[0] }!!
-        val f2 = players.values.find { it.id == match.fighterIds[1] }!!
-
+        val schedule = tournamentSchedule!!
         val miniGameId = RoomEngine.selectMiniGame(
-            match.matchIndex,
-            currentRound?.miniGame?.id,
-            isChampionship,
-            match.championshipGameNumber ?: 1
+            roundIndex = match.roundNumber - 1,
+            lastMiniGameId = currentRound?.miniGame?.id,
+            isChampionship = isChampionship,
+            championshipGameNumber = match.championshipGameNumber ?: 1
         )
         val miniGame = MiniGamesCatalog.MINI_GAMES[miniGameId]!!
-        val odds = OddsEngine.calculateDynamicOdds(f1, f2)
-        val matchPot = if (isChampionship) 500 else 250
 
+        val (f1, f2) = match.fighterIds
+        val fighterA = players.values.find { it.id == f1 } ?: RoomEngine.createFreshPlayer("Fighter A", "⚡")
+        val fighterB = players.values.find { it.id == f2 } ?: RoomEngine.createFreshPlayer("Fighter B", "🦊")
+        val initialOdds = OddsEngine.calculateDynamicOdds(fighterA, fighterB, roundHistory)
+
+        val matchPot = if (isChampionship) 500 else 250
         val now = System.currentTimeMillis()
         val revealEndsAt = now + 4500L
         val bettingEndsAt = revealEndsAt + 15000L
@@ -295,14 +467,14 @@ class BrawlWebSocketServer(
         val round = RoundState(
             roundNumber = match.roundNumber,
             maxRounds = totalRounds,
-            stage = tournamentSchedule?.stage ?: TournamentStage.QUALIFIERS,
+            stage = schedule.stage,
             qualifierIndex = if (!isChampionship) match.matchIndex + 1 else null,
-            qualifierTotal = if (!isChampionship) tournamentSchedule?.qualifierCount else null,
+            qualifierTotal = if (!isChampionship) schedule.qualifierCount else null,
             championshipGameNumber = match.championshipGameNumber,
             miniGame = miniGame,
             fighterIds = match.fighterIds,
             matchPot = matchPot,
-            odds = odds,
+            odds = initialOdds,
             bettingTimeRemaining = 15,
             gameTimeRemaining = miniGame.durationSeconds,
             isChampionship = isChampionship,
@@ -310,101 +482,129 @@ class BrawlWebSocketServer(
             bettingEndsAt = bettingEndsAt,
             gameStartsAt = gameStartsAt,
             gameEndsAt = gameEndsAt,
-            gameConfig = publicConfig
+            gameConfig = publicConfig,
+            gameState = emptyMap()
         )
+        round.fighterScores[f1] = 0
+        round.fighterScores[f2] = 0
         currentRound = round
+
+        // Phase 1: FIGHTER_REVEAL
         phase = GamePhase.FIGHTER_REVEAL
         broadcastRoomState()
 
-        // Schedule transition to BETTING_WINDOW
-        phaseJob = scope.launch {
+        revealTimerJob = scope.launch {
             delay(4500L)
-            transitionToBettingWindow()
+            startBettingWindow()
         }
     }
 
-    private fun transitionToBettingWindow() {
-        val round = currentRound ?: return
+    private fun startBettingWindow() {
         phase = GamePhase.BETTING_WINDOW
-        round.bettingTimeRemaining = 15
+        val round = currentRound ?: return
         broadcastRoomState()
 
-        // 1-second countdown interval
-        bettingIntervalJob = scope.launch {
-            for (sec in 14 downTo 0) {
+        bettingTimerJob = scope.launch {
+            var remaining = 15
+            while (remaining > 0 && isActive) {
                 delay(1000L)
-                round.bettingTimeRemaining = sec
+                remaining--
+                round.bettingTimeRemaining = remaining
                 broadcastRoomState()
             }
-            transitionToCountdown()
+            startMiniGameCountdown()
         }
     }
 
-    private fun transitionToCountdown() {
-        bettingIntervalJob?.cancel()
+    private fun startMiniGameCountdown() {
         phase = GamePhase.MINIGAME_COUNTDOWN
         broadcastRoomState()
 
-        phaseJob = scope.launch {
+        countdownTimerJob = scope.launch {
             delay(3500L)
-            transitionToMiniGameActive()
+            startActiveMiniGame()
         }
     }
 
-    private fun transitionToMiniGameActive() {
-        val round = currentRound ?: return
-        val internal = internalGameState ?: return
+    private fun startActiveMiniGame() {
         phase = GamePhase.MINIGAME_ACTIVE
+        val round = currentRound ?: return
         broadcastRoomState()
 
-        // Game timeout handler
-        val durMs = round.miniGame.durationSeconds * 1000L
-        gameTimeoutJob = scope.launch {
-            delay(durMs)
-            val (timeoutWinner, isTie) = GameEngine.resolveGameTimeout(internal, round.fighterScores)
-            resolveRoundOutcome(timeoutWinner, isTie)
+        minigameTimerJob = scope.launch {
+            var remaining = round.miniGame.durationSeconds
+            while (remaining > 0 && isActive) {
+                delay(1000L)
+                remaining--
+                round.gameTimeRemaining = remaining
+                broadcastRoomState()
+            }
+
+            // Timeout expiration
+            val internal = internalGameState
+            if (internal != null && phase == GamePhase.MINIGAME_ACTIVE) {
+                val (winnerId, isTie, patch) = GameEngine.resolveGameTimeout(internal, round.fighterScores)
+                if (patch != null) {
+                    round.gameState = (round.gameState ?: emptyMap()) + patch
+                }
+                resolveCurrentGame(winnerId, isTie, if (isTie) RoundResolutionReason.TIE else RoundResolutionReason.PLAYED)
+            }
         }
     }
 
     private fun handlePlaceBet(conn: WebSocket, payload: Map<String, Any?>?) {
         val token = socketToToken[conn] ?: return
-        val player = players[token] ?: return
+        val bettor = players[token] ?: return
         val fighterId = payload?.get("fighterId") as? String ?: return
-        val amount = (payload["amount"] as? Number)?.toInt() ?: return
-        val round = currentRound
+        val rawAmount = payload?.get("amount")
+        if (rawAmount !is Number) {
+            sendToSocket(conn, "BET_REJECTED", mapOf("reason" to "Amount must be a whole number."))
+            return
+        }
+        val amount = rawAmount.toInt()
 
-        val error = OddsEngine.validateBetPlacement(player, fighterId, amount, round, phase)
-        if (error != null) {
-            sendToSocket(conn, "BET_REJECTED", mapOf("reason" to error))
+        val err = OddsEngine.validateBetPlacement(
+            bettor = bettor,
+            fighterId = fighterId,
+            amount = amount,
+            round = currentRound,
+            currentPhase = phase,
+            serverNowMs = System.currentTimeMillis()
+        )
+        if (err != null) {
+            sendToSocket(conn, "BET_REJECTED", mapOf("reason" to err))
             return
         }
 
-        player.coins -= amount
-        player.totalBetsPlaced += 1
-        if (amount > player.highestSingleBet) {
-            player.highestSingleBet = amount
+        val round = currentRound!!
+        val oddsVal = round.odds[fighterId]?.decimalOdds ?: 2.0
+        val potentialReturn = kotlin.math.floor(amount * oddsVal).toInt()
+
+        bettor.coins -= amount
+        bettor.totalBetsPlaced += 1
+        if (amount > bettor.highestSingleBet) {
+            bettor.highestSingleBet = amount
         }
 
-        val oddsAtBet = round!!.odds[fighterId]?.decimalOdds ?: 2.0
-        val potentialReturn = (amount * oddsAtBet).toInt()
         val bet = SecretBet(
-            bettorId = player.id,
+            bettorId = bettor.id,
             fighterId = fighterId,
             amount = amount,
-            oddsAtBet = oddsAtBet,
+            oddsAtBet = oddsVal,
             timestamp = System.currentTimeMillis(),
             potentialReturn = potentialReturn
         )
         round.bets.add(bet)
 
-        // Recalculate dynamic odds with live pool
-        val fA = players.values.find { it.id == round.fighterIds[0] }!!
-        val fB = players.values.find { it.id == round.fighterIds[1] }!!
-        round.odds = OddsEngine.calculateDynamicOdds(fA, fB, round.bets)
+        // Recalculate dynamic odds with new pool
+        val (f1, f2) = round.fighterIds
+        val fighterA = players.values.find { it.id == f1 } ?: RoomEngine.createFreshPlayer("A", "⚡")
+        val fighterB = players.values.find { it.id == f2 } ?: RoomEngine.createFreshPlayer("B", "🦊")
+        round.odds = OddsEngine.calculateDynamicOdds(fighterA, fighterB, roundHistory, round.bets)
 
         sendToSocket(conn, "BET_ACCEPTED", mapOf(
             "bet" to bet,
-            "myBankroll" to player.coins
+            "myBankroll" to bettor.coins
         ))
 
         broadcastRoomState()
@@ -416,49 +616,58 @@ class BrawlWebSocketServer(
         val round = currentRound ?: return
         val internal = internalGameState ?: return
 
-        if (phase != GamePhase.MINIGAME_ACTIVE) return
-        if (player.id !in round.fighterIds) return
-        if (payload == null) return
+        // Authoritative phase and deadline boundaries
+        val now = System.currentTimeMillis()
+        if (phase != GamePhase.MINIGAME_ACTIVE || now >= round.gameEndsAt) {
+            return
+        }
+        if (player.id !in round.fighterIds) {
+            return
+        }
 
-        val result: GameActionResult = GameEngine.processFighterAction(
-            internal,
-            player.id,
-            payload,
-            round.fighterScores,
-            System.currentTimeMillis()
+        val result = GameEngine.processFighterAction(
+            internal = internal,
+            fighterScores = round.fighterScores,
+            fighterId = player.id,
+            action = payload ?: emptyMap(),
+            nowMs = now
         )
 
+        if (result.scoreUpdate != null) {
+            round.fighterScores.putAll(result.scoreUpdate)
+        }
+        if (result.gameStatePatch != null) {
+            round.gameState = (round.gameState ?: emptyMap()) + result.gameStatePatch
+        }
         if (result.actionFeedback != null) {
             sendToSocket(conn, "ACTION_RESULT", result.actionFeedback)
         }
 
+        broadcastRoomState()
+
         if (result.resolved) {
-            gameTimeoutJob?.cancel()
-            resolveRoundOutcome(result.winnerId, result.isTie)
-        } else {
-            broadcastRoomState()
+            resolveCurrentGame(result.winnerId, result.isTie, if (result.isTie) RoundResolutionReason.TIE else RoundResolutionReason.PLAYED)
         }
     }
 
-    fun resolveRoundOutcome(winnerId: String?, isTie: Boolean) {
+    private fun resolveCurrentGame(winnerId: String?, isTie: Boolean, reason: RoundResolutionReason) {
+        clearAllTimers()
         val round = currentRound ?: return
         val schedule = tournamentSchedule ?: return
-        clearAllTimers()
 
         round.winnerId = winnerId
         round.tieResult = isTie
-        round.resolutionReason = if (isTie) RoundResolutionReason.TIE else RoundResolutionReason.PLAYED
+        round.resolutionReason = reason
 
         val currentMatch = schedule.matches.firstOrNull { it.roundNumber == round.roundNumber }
         if (currentMatch != null) {
             currentMatch.completed = true
             currentMatch.winnerId = winnerId
             currentMatch.tieResult = isTie
-            currentMatch.resolutionReason = round.resolutionReason
+            currentMatch.resolutionReason = reason
         }
 
-        // Update match and win stats
-        val [f1Id, f2Id] = round.fighterIds.let { Pair(it[0], it[1]) }
+        val (f1Id, f2Id) = round.fighterIds.let { Pair(it[0], it[1]) }
         val f1 = players.values.find { it.id == f1Id }
         val f2 = players.values.find { it.id == f2Id }
 
@@ -466,55 +675,48 @@ class BrawlWebSocketServer(
         f2?.matchesPlayed = (f2?.matchesPlayed ?: 0) + 1
 
         if (round.isChampionship) {
-            // Championship decisive win check
-            if (!isTie && winnerId != null) {
+            if (!isTie && winnerId != null && reason != RoundResolutionReason.VOID) {
                 schedule.championshipWins[winnerId] = schedule.championshipWins.getOrDefault(winnerId, 0) + 1
                 val winPlayer = players.values.find { it.id == winnerId }
                 winPlayer?.matchesWon = (winPlayer?.matchesWon ?: 0) + 1
             }
         } else {
-            // Qualifier stats and brawl points
             schedule.qualifiersCompleted += 1
-            f1?.qualifierMatchesPlayed = (f1?.qualifierMatchesPlayed ?: 0) + 1
-            f2?.qualifierMatchesPlayed = (f2?.qualifierMatchesPlayed ?: 0) + 1
-
             if (isTie) {
-                f1?.qualifierTies = (f1?.qualifierTies ?: 0) + 1
-                f2?.qualifierTies = (f2?.qualifierTies ?: 0) + 1
                 f1?.qualifierPoints = (f1?.qualifierPoints ?: 0) + 1
                 f2?.qualifierPoints = (f2?.qualifierPoints ?: 0) + 1
+                f1?.qualifierTies = (f1?.qualifierTies ?: 0) + 1
+                f2?.qualifierTies = (f2?.qualifierTies ?: 0) + 1
             } else if (winnerId != null) {
-                val loserId = if (winnerId == f1Id) f2Id else f1Id
-                val winP = players.values.find { it.id == winnerId }
-                val loseP = players.values.find { it.id == loserId }
-
-                winP?.matchesWon = (winP?.matchesWon ?: 0) + 1
-                winP?.qualifierWins = (winP?.qualifierWins ?: 0) + 1
-                winP?.qualifierPoints = (winP?.qualifierPoints ?: 0) + 3
-
-                loseP?.qualifierLosses = (loseP?.qualifierLosses ?: 0) + 1
+                val winPlayer = players.values.find { it.id == winnerId }
+                val loserPlayer = players.values.find { it.id == if (winnerId == f1Id) f2Id else f1Id }
+                winPlayer?.qualifierPoints = (winPlayer?.qualifierPoints ?: 0) + 3
+                winPlayer?.qualifierWins = (winPlayer?.qualifierWins ?: 0) + 1
+                winPlayer?.matchesWon = (winPlayer?.matchesWon ?: 0) + 1
+                loserPlayer?.qualifierLosses = (loserPlayer?.qualifierLosses ?: 0) + 1
             }
         }
 
-        // Compute authoritative payouts
-        round.payouts = OddsEngine.computeRoundPayouts(
-            round,
-            players.values.toList(),
-            winnerId,
-            isTie,
-            round.resolutionReason
+        // Payouts
+        val payouts = OddsEngine.computeRoundPayouts(
+            round = round,
+            players = players.values.toList(),
+            winnerId = winnerId,
+            tieResult = isTie,
+            resolutionReason = reason
         )
+        round.payouts = payouts
 
-        // Record round history
+        val winnerName = if (isTie) "TIE / SPLIT" else (players.values.find { it.id == winnerId }?.name ?: "No Winner")
         roundHistory.add(
             RoundHistoryItem(
                 roundNumber = round.roundNumber,
                 miniGameName = round.miniGame.name,
-                winnerName = if (isTie) "TIE" else (players.values.find { it.id == winnerId }?.name ?: "Unknown"),
+                winnerName = winnerName,
                 totalPotWon = round.matchPot,
                 isChampionship = round.isChampionship,
                 championshipGameNumber = round.championshipGameNumber,
-                resolutionReason = round.resolutionReason
+                resolutionReason = reason
             )
         )
 
@@ -523,27 +725,16 @@ class BrawlWebSocketServer(
     }
 
     private fun handleNextRound(conn: WebSocket) {
+        if (phase != GamePhase.PAYOUT_RECAP) return
         val token = socketToToken[conn] ?: return
         val player = players[token] ?: return
         if (!player.isHost) return
-        if (phase != GamePhase.PAYOUT_RECAP) return
 
         transitionToNextTournamentMatch()
     }
 
-    private fun transitionToFinalPodium() {
-        val schedule = tournamentSchedule ?: return
-        clearAllTimers()
-        phase = GamePhase.FINAL_PODIUM
-
-        // Calculate genuine session awards
-        awards.clear()
-        awards.addAll(RoomEngine.computeSessionAwards(players.values.toList(), roundHistory, schedule.championId))
-
-        broadcastRoomState()
-    }
-
     private fun handleRestartGame(conn: WebSocket) {
+        if (phase != GamePhase.FINAL_PODIUM) return
         val token = socketToToken[conn] ?: return
         val player = players[token] ?: return
         if (!player.isHost) return
@@ -555,9 +746,7 @@ class BrawlWebSocketServer(
         currentRound = null
         phase = GamePhase.LOBBY
 
-        // Reset all player session counters
         for (p in players.values) {
-            p.isReady = false
             p.coins = 1000
             p.matchesWon = 0
             p.matchesPlayed = 0
@@ -573,6 +762,7 @@ class BrawlWebSocketServer(
             p.qualifierLosses = 0
             p.qualifierMatchesPlayed = 0
             p.tournamentRank = null
+            p.isReady = false
         }
 
         broadcastRoomState()
@@ -584,22 +774,31 @@ class BrawlWebSocketServer(
         if (!player.isHost) return
 
         clearAllTimers()
+        clearConnectionTimers()
+
+        val closeMsg = gson.toJson(mapOf(
+            "type" to "ROOM_CLOSED",
+            "timestamp" to System.currentTimeMillis(),
+            "payload" to mapOf("reason" to "The host closed the room.")
+        ))
+
         for (ws in clientSockets.values) {
-            sendToSocket(ws, "ROOM_CLOSED", mapOf("reason" to "The host closed the room."))
-            ws.close()
+            if (ws.isOpen) {
+                try { ws.send(closeMsg); ws.close() } catch (e: Exception) {}
+            }
         }
-        players.clear()
-        clientSockets.clear()
-        socketToToken.clear()
-        phase = GamePhase.ENTRY
+        resetRoom()
     }
 
     private fun handleDebugAddBot(conn: WebSocket) {
-        if (!debugMode && players.size >= RoomEngine.MIN_PLAYERS_TO_START) return
+        if (phase != GamePhase.LOBBY) return
+        val token = socketToToken[conn] ?: return
+        val player = players[token] ?: return
+        if (!player.isHost || !debugMode) return
+        if (players.size >= RoomEngine.MAX_PLAYERS_CAPACITY) return
+
         val botNum = players.size + 1
-        val botName = "Bot $botNum"
-        val botAvatar = listOf("🤖", "🦾", "👾", "🎯").random()
-        val bot = RoomEngine.createFreshPlayer(botName, botAvatar, isHost = false).apply {
+        val bot = RoomEngine.createFreshPlayer("Bot $botNum", listOf("🤖", "🦾", "👾", "🎯").random(), isHost = false).apply {
             isBot = true
             isReady = true
         }
@@ -615,34 +814,89 @@ class BrawlWebSocketServer(
         ))
     }
 
+    private fun resetRoom() {
+        players.clear()
+        clientSockets.clear()
+        socketToToken.clear()
+        roundHistory.clear()
+        awards.clear()
+        tournamentSchedule = null
+        currentRound = null
+        roomCode = ""
+        roomId = ""
+        phase = GamePhase.ENTRY
+    }
+
     fun broadcastRoomState() {
         val publicPlayers = players.values.map { it.toPublicPlayer() }
-        val roomState = PublicRoomState(
+
+        // MASK SECRET BETS: Before PAYOUT_RECAP and FINAL_PODIUM, bets MUST be empty!
+        val scrubbedRound = currentRound?.copy()
+        if (scrubbedRound != null) {
+            if (phase != GamePhase.PAYOUT_RECAP && phase != GamePhase.FINAL_PODIUM) {
+                scrubbedRound.bets.clear()
+            }
+        }
+
+        val baseRoomState = PublicRoomState(
             roomId = roomId,
             roomCode = roomCode,
             phase = phase,
             players = publicPlayers,
             totalRounds = totalRounds,
-            currentRound = currentRound,
+            currentRound = scrubbedRound,
             tournamentSchedule = tournamentSchedule,
             roundHistory = roundHistory,
             awards = awards,
             debugMode = debugMode
         )
 
-        val json = gson.toJson(mapOf(
-            "type" to "ROOM_STATE",
-            "timestamp" to System.currentTimeMillis(),
-            "payload" to roomState
-        ))
+        // Send tailored state per client socket
+        for ((token, ws) in clientSockets) {
+            if (!ws.isOpen) continue
+            val player = players[token]
 
-        for (ws in clientSockets.values) {
-            if (ws.isOpen) {
-                ws.send(json)
+            var clientRound = scrubbedRound
+            // Per-client Higher/Lower answer security during MINIGAME_ACTIVE
+            if (scrubbedRound != null && scrubbedRound.miniGame.id == "higher_lower" && phase == GamePhase.MINIGAME_ACTIVE) {
+                val origState = scrubbedRound.gameState ?: emptyMap()
+                @Suppress("UNCHECKED_CAST")
+                val stepIndices = origState["stepIndex"] as? Map<String, Number> ?: emptyMap()
+                @Suppress("UNCHECKED_CAST")
+                val origReveals = origState["reveals"] as? Map<String, Map<String, Any>> ?: emptyMap()
+
+                val playerId = player?.id.orEmpty()
+                val myStep = stepIndices[playerId]?.toInt() ?: 0
+
+                val scrubbedReveals = mutableMapOf<String, MutableMap<String, Any>>()
+                for ((fId, fReveals) in origReveals) {
+                    val sanitizedFighterReveals = mutableMapOf<String, Any>()
+                    for ((qIdxStr, revealObj) in fReveals) {
+                        val qIdx = qIdxStr.toIntOrNull() ?: 0
+                        // Only show opponent reveals for questions this viewer has already passed
+                        if (fId == playerId || qIdx < myStep) {
+                            sanitizedFighterReveals[qIdxStr] = revealObj
+                        }
+                    }
+                    scrubbedReveals[fId] = sanitizedFighterReveals
+                }
+
+                val sanitizedGameState = origState + mapOf("reveals" to scrubbedReveals)
+                clientRound = scrubbedRound.copy(gameState = sanitizedGameState)
             }
+
+            val clientState = baseRoomState.copy(currentRound = clientRound)
+            val json = gson.toJson(mapOf(
+                "type" to "ROOM_STATE",
+                "timestamp" to System.currentTimeMillis(),
+                "payload" to clientState
+            ))
+            try {
+                ws.send(json)
+            } catch (e: Exception) {}
         }
 
-        onRoomStateChanged?.invoke(roomState)
+        onRoomStateChanged?.invoke(baseRoomState)
     }
 
     private fun sendToSocket(conn: WebSocket, type: String, payload: Any) {
@@ -652,25 +906,38 @@ class BrawlWebSocketServer(
             "timestamp" to System.currentTimeMillis(),
             "payload" to payload
         ))
-        conn.send(json)
-    }
-
-    private fun clearAllTimers() {
-        phaseJob?.cancel()
-        phaseJob = null
-        bettingIntervalJob?.cancel()
-        bettingIntervalJob = null
-        gameTimeoutJob?.cancel()
-        gameTimeoutJob = null
+        try {
+            conn.send(json)
+        } catch (e: Exception) {}
     }
 
     fun stopServer() {
         clearAllTimers()
-        scope.cancel()
+        clearConnectionTimers()
         try {
             stop(1000)
         } catch (e: Exception) {
             e.printStackTrace()
         }
+    }
+
+    private fun clearAllTimers() {
+        revealTimerJob?.cancel()
+        revealTimerJob = null
+        bettingTimerJob?.cancel()
+        bettingTimerJob = null
+        countdownTimerJob?.cancel()
+        countdownTimerJob = null
+        minigameTimerJob?.cancel()
+        minigameTimerJob = null
+    }
+
+    private fun clearConnectionTimers() {
+        for (job in fighterGraceTimers.values) job.cancel()
+        fighterGraceTimers.clear()
+        hostGraceTimerJob?.cancel()
+        hostGraceTimerJob = null
+        for (job in staleSeatTimers.values) job.cancel()
+        staleSeatTimers.clear()
     }
 }

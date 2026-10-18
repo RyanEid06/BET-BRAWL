@@ -189,7 +189,7 @@ data class RoundState(
     var tieResult: Boolean = false,
     var resolutionReason: RoundResolutionReason = RoundResolutionReason.PLAYED,
     var isChampionship: Boolean = false,
-    val fighterScores: MutableMap<String, Int> = mutableMapOf(),
+    val fighterScores: MutableMap<String, Number> = mutableMapOf(),
     var payouts: List<RoundPayoutItem> = emptyList(),
     var revealEndsAt: Long = 0L,
     var bettingEndsAt: Long = 0L,

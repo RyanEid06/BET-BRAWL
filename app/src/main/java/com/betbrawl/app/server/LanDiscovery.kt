@@ -9,6 +9,7 @@ import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
 import java.net.NetworkInterface
+import java.util.concurrent.ConcurrentHashMap
 
 class LanDiscovery(private val context: Context) {
 
@@ -16,15 +17,17 @@ class LanDiscovery(private val context: Context) {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var udpBroadcastJob: Job? = null
     private var udpListenJob: Job? = null
+    private var ttlPruneJob: Job? = null
     private var registrationListener: NsdManager.RegistrationListener? = null
+    private var discoveryListener: NsdManager.DiscoveryListener? = null
 
-    val discoveredRooms = mutableMapOf<String, DiscoveredHost>()
+    val discoveredRooms = ConcurrentHashMap<String, DiscoveredHost>()
 
     data class DiscoveredHost(
         val ip: String,
         val port: Int,
         val roomCode: String,
-        val timestamp: Long = System.currentTimeMillis()
+        var timestamp: Long = System.currentTimeMillis()
     )
 
     fun registerService(port: Int, roomCode: String) {
@@ -37,8 +40,8 @@ class LanDiscovery(private val context: Context) {
             }
 
             registrationListener = object : NsdManager.RegistrationListener {
-                override fun onServiceRegistered(NsdServiceInfo: NsdServiceInfo) {
-                    println("[LanDiscovery] mDNS Service registered: ${NsdServiceInfo.serviceName}")
+                override fun onServiceRegistered(serviceInfo: NsdServiceInfo) {
+                    println("[LanDiscovery] mDNS Service registered: ${serviceInfo.serviceName}")
                 }
                 override fun onRegistrationFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
                     System.err.println("[LanDiscovery] mDNS registration failed: $errorCode")
@@ -85,6 +88,10 @@ class LanDiscovery(private val context: Context) {
     }
 
     fun startListening(onRoomDiscovered: ((DiscoveredHost) -> Unit)? = null) {
+        // 1. Android NSD Discovery
+        startNsdDiscovery(onRoomDiscovered)
+
+        // 2. UDP Beacon Listener fallback
         udpListenJob?.cancel()
         udpListenJob = scope.launch {
             val socket = try {
@@ -104,9 +111,9 @@ class LanDiscovery(private val context: Context) {
                     if (json.optString("app") == "BET_BRAWL") {
                         val ip = json.optString("ip").ifEmpty { packet.address.hostAddress }
                         val port = json.optInt("port", 8080)
-                        val roomCode = json.optString("roomCode")
-                        if (ip != null && roomCode.isNotEmpty()) {
-                            val host = DiscoveredHost(ip, port, roomCode)
+                        val roomCode = json.optString("roomCode").trim().uppercase()
+                        if (ip != null && isPrivateIPv4(ip) && roomCode.isNotEmpty()) {
+                            val host = DiscoveredHost(ip, port, roomCode, System.currentTimeMillis())
                             discoveredRooms[roomCode] = host
                             onRoomDiscovered?.invoke(host)
                         }
@@ -117,6 +124,74 @@ class LanDiscovery(private val context: Context) {
             }
             socket.close()
         }
+
+        // 3. Stale room TTL pruning (15s TTL)
+        ttlPruneJob?.cancel()
+        ttlPruneJob = scope.launch {
+            while (isActive) {
+                delay(5000L)
+                val now = System.currentTimeMillis()
+                val stale = discoveredRooms.entries.filter { now - it.value.timestamp > ROOM_TTL_MS }
+                for (entry in stale) {
+                    discoveredRooms.remove(entry.key)
+                }
+            }
+        }
+    }
+
+    private fun startNsdDiscovery(onRoomDiscovered: ((DiscoveredHost) -> Unit)?) {
+        try {
+            discoveryListener = object : NsdManager.DiscoveryListener {
+                override fun onDiscoveryStarted(regType: String) {}
+
+                override fun onServiceFound(service: NsdServiceInfo) {
+                    if (service.serviceType.contains("_brawl")) {
+                        try {
+                            nsdManager?.resolveService(service, object : NsdManager.ResolveListener {
+                                override fun onResolveFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {}
+
+                                override fun onServiceResolved(serviceInfo: NsdServiceInfo) {
+                                    val hostAddress = serviceInfo.host?.hostAddress
+                                    val port = serviceInfo.port
+                                    val name = serviceInfo.serviceName
+                                    val roomCode = if (name.startsWith("BetBrawl_")) {
+                                        name.substringAfter("BetBrawl_").trim().uppercase()
+                                    } else {
+                                        name.trim().uppercase()
+                                    }
+
+                                    if (hostAddress != null && isPrivateIPv4(hostAddress) && roomCode.isNotEmpty()) {
+                                        val host = DiscoveredHost(hostAddress, port, roomCode, System.currentTimeMillis())
+                                        discoveredRooms[roomCode] = host
+                                        onRoomDiscovered?.invoke(host)
+                                    }
+                                }
+                            })
+                        } catch (e: Exception) {
+                            // Resolve error
+                        }
+                    }
+                }
+
+                override fun onServiceLost(service: NsdServiceInfo) {
+                    val name = service.serviceName
+                    val roomCode = if (name.startsWith("BetBrawl_")) {
+                        name.substringAfter("BetBrawl_").trim().uppercase()
+                    } else {
+                        name.trim().uppercase()
+                    }
+                    discoveredRooms.remove(roomCode)
+                }
+
+                override fun onDiscoveryStopped(serviceType: String) {}
+                override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) {}
+                override fun onStopDiscoveryFailed(serviceType: String, errorCode: Int) {}
+            }
+
+            nsdManager?.discoverServices("_brawl._tcp.", NsdManager.PROTOCOL_DNS_SD, discoveryListener)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
     fun stop() {
@@ -124,6 +199,8 @@ class LanDiscovery(private val context: Context) {
         udpBroadcastJob = null
         udpListenJob?.cancel()
         udpListenJob = null
+        ttlPruneJob?.cancel()
+        ttlPruneJob = null
 
         try {
             registrationListener?.let { nsdManager?.unregisterService(it) }
@@ -131,11 +208,38 @@ class LanDiscovery(private val context: Context) {
             // Ignore
         }
         registrationListener = null
+
+        try {
+            discoveryListener?.let { nsdManager?.stopServiceDiscovery(it) }
+        } catch (e: Exception) {
+            // Ignore
+        }
+        discoveryListener = null
         scope.cancel()
     }
 
     companion object {
         const val UDP_BEACON_PORT = 8888
+        const val ROOM_TTL_MS = 15000L
+
+        fun isPrivateIPv4(ip: String): Boolean {
+            val parts = ip.split('.').mapNotNull { it.toIntOrNull() }
+            if (parts.size != 4) return false
+            val (p0, p1, p2, p3) = parts
+            if (p0 !in 0..255 || p1 !in 0..255 || p2 !in 0..255 || p3 !in 0..255) return false
+
+            // Reject loopback (127.0.0.0/8) and link-local (169.254.0.0/16)
+            if (p0 == 127 || (p0 == 169 && p1 == 254)) return false
+
+            // 10.0.0.0/8
+            if (p0 == 10) return true
+            // 172.16.0.0/12 (172.16.x.x - 172.31.x.x)
+            if (p0 == 172 && p1 in 16..31) return true
+            // 192.168.0.0/16
+            if (p0 == 192 && p1 == 168) return true
+
+            return false
+        }
 
         fun getLocalIpAddress(): String {
             try {
@@ -149,8 +253,8 @@ class LanDiscovery(private val context: Context) {
                         val address = addresses.nextElement()
                         if (!address.isLoopbackAddress && address.hostAddress?.indexOf(':') == -1) {
                             val ip = address.hostAddress ?: ""
-                            // Prefer RFC1918 private LAN addresses
-                            if (ip.startsWith("192.168.") || ip.startsWith("10.") || ip.startsWith("172.")) {
+                            // Strictly validate private RFC1918 IPv4
+                            if (isPrivateIPv4(ip)) {
                                 return ip
                             }
                         }

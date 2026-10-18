@@ -260,55 +260,130 @@ object RoomEngine {
 
     fun computeSessionAwards(
         players: List<Player>,
-        roundHistory: List<RoundHistoryItem>,
-        championId: String?
+        championId: String? = null
     ): List<Award> {
         val awards = mutableListOf<Award>()
 
-        val champion = championId?.let { id -> players.find { it.id == id } }
-        if (champion != null) {
+        // 1. Tournament Champion
+        if (championId != null) {
+            val champ = players.find { it.id == championId }
+            if (champ != null) {
+                awards.add(
+                    Award(
+                        id = "tournament_champion",
+                        title = "Tournament Champion",
+                        icon = "🏆",
+                        badgeColor = "#eab308",
+                        recipientId = champ.id,
+                        recipientName = champ.name,
+                        description = "Crowned Bet & BRAWL Tournament Champion in the Final!",
+                        metric = "Champion (${champ.qualifierPoints} Brawl Pts)"
+                    )
+                )
+            }
+        }
+
+        // 2. Brawl King (most matches won in the ring)
+        val mostWins = players.maxByOrNull { it.matchesWon }
+        if (mostWins != null && mostWins.matchesWon > 0) {
             awards.add(
                 Award(
-                    id = "award_champion",
-                    title = "Undisputed Champion",
+                    id = "brawl_king",
+                    title = "Brawl King",
                     icon = "👑",
-                    badgeColor = "amber",
-                    recipientId = champion.id,
-                    recipientName = champion.name,
-                    description = "Claimed 1st place in the Grand Championship Series",
-                    metric = "${champion.coins} Coins"
+                    badgeColor = "#eab308",
+                    recipientId = mostWins.id,
+                    recipientName = mostWins.name,
+                    description = "Dominated the arena with the most brawl victories.",
+                    metric = "${mostWins.matchesWon} Brawl Wins"
                 )
             )
         }
 
-        val sharp = players.maxByOrNull { it.totalCoinsWonInBets }
-        if (sharp != null && sharp.totalCoinsWonInBets > 0) {
+        // 3. High Roller (largest single winning payout)
+        val largestPayout = players.maxByOrNull { it.highestSinglePayout }
+        if (largestPayout != null && largestPayout.highestSinglePayout > 0) {
             awards.add(
                 Award(
-                    id = "award_sharp",
-                    title = "High Roller Sharp",
+                    id = "high_roller",
+                    title = "High Roller",
+                    icon = "💎",
+                    badgeColor = "#06b6d4",
+                    recipientId = largestPayout.id,
+                    recipientName = largestPayout.name,
+                    description = "Cashed in the largest single winning payout.",
+                    metric = "+${largestPayout.highestSinglePayout} coin payout"
+                )
+            )
+        }
+
+        // 4. Wealth Champion (highest total coin bankroll)
+        val highRollerCoins = players.maxByOrNull { it.coins }
+        if (highRollerCoins != null && highRollerCoins.coins > 1000) {
+            awards.add(
+                Award(
+                    id = "wealth_champion",
+                    title = "Money Bags",
                     icon = "💰",
-                    badgeColor = "emerald",
-                    recipientId = sharp.id,
-                    recipientName = sharp.name,
-                    description = "Earned the most profit from spectator bets",
-                    metric = "+${sharp.totalCoinsWonInBets} Coins Won"
+                    badgeColor = "#10b981",
+                    recipientId = highRollerCoins.id,
+                    recipientName = highRollerCoins.name,
+                    description = "Amassed the largest coin fortune of the session.",
+                    metric = "${highRollerCoins.coins} Coins"
                 )
             )
         }
 
-        val fighter = players.maxByOrNull { it.matchesWon }
-        if (fighter != null && fighter.matchesWon > 0 && fighter.id != champion?.id) {
+        // 5. Biggest Risk Taker
+        val riskTaker = players.maxByOrNull { it.highestSingleBet }
+        if (riskTaker != null && riskTaker.highestSingleBet > 0) {
             awards.add(
                 Award(
-                    id = "award_brawler",
-                    title = "Combat Master",
-                    icon = "🥊",
-                    badgeColor = "rose",
-                    recipientId = fighter.id,
-                    recipientName = fighter.name,
-                    description = "Won the most 1v1 mini-game battles",
-                    metric = "${fighter.matchesWon} Victories"
+                    id = "risk_taker",
+                    title = "Biggest Risk Taker",
+                    icon = "🔥",
+                    badgeColor = "#ef4444",
+                    recipientId = riskTaker.id,
+                    recipientName = riskTaker.name,
+                    description = "Placed the single largest wager of the session.",
+                    metric = "Peak Bet: ${riskTaker.highestSingleBet} coins"
+                )
+            )
+        }
+
+        // 6. The Oracle (highest betting win rate, min 2 bets placed)
+        val oracle = players
+            .filter { it.totalBetsPlaced >= 2 }
+            .maxByOrNull { it.totalBetsWon.toDouble() / it.totalBetsPlaced }
+        if (oracle != null) {
+            val accuracy = kotlin.math.round((oracle.totalBetsWon.toDouble() / oracle.totalBetsPlaced) * 100).toInt()
+            awards.add(
+                Award(
+                    id = "the_oracle",
+                    title = "The Oracle",
+                    icon = "🔮",
+                    badgeColor = "#8b5cf6",
+                    recipientId = oracle.id,
+                    recipientName = oracle.name,
+                    description = "Highest betting accuracy of the night.",
+                    metric = "$accuracy% Bet Accuracy (${oracle.totalBetsWon}/${oracle.totalBetsPlaced})"
+                )
+            )
+        }
+
+        // 7. Unluckiest Bettor
+        val unluckiest = players.maxByOrNull { it.totalCoinsLostInBets }
+        if (unluckiest != null && unluckiest.totalCoinsLostInBets > 0) {
+            awards.add(
+                Award(
+                    id = "unlucky_bettor",
+                    title = "Unluckiest Bettor",
+                    icon = "📉",
+                    badgeColor = "#f97316",
+                    recipientId = unluckiest.id,
+                    recipientName = unluckiest.name,
+                    description = "Defied the odds in the worst possible way.",
+                    metric = "Lost ${unluckiest.totalCoinsLostInBets} coins in bets"
                 )
             )
         }

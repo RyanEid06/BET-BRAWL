@@ -2,6 +2,7 @@ package com.betbrawl.app
 
 import android.annotation.SuppressLint
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.view.View
@@ -15,11 +16,19 @@ import androidx.appcompat.app.AppCompatActivity
 import com.betbrawl.app.server.LanDiscovery
 import com.betbrawl.app.webview.BrawlWebInterface
 import com.betbrawl.app.webview.BrawlWebViewClient
+import org.json.JSONObject
+import java.net.URLEncoder
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var webView: WebView
     private lateinit var lanDiscovery: LanDiscovery
+
+    data class ValidatedDeepLink(
+        val roomCode: String,
+        val host: String,
+        val port: Int
+    )
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -36,8 +45,13 @@ class MainActivity : AppCompatActivity() {
         lanDiscovery = LanDiscovery(this)
         lanDiscovery.startListening { discoveredHost ->
             runOnUiThread {
-                val js = "if (window.onHostDiscovered) { window.onHostDiscovered('${discoveredHost.ip}', ${discoveredHost.port}, '${discoveredHost.roomCode}'); }"
-                webView.evaluateJavascript(js, null)
+                val payload = JSONObject().apply {
+                    put("ip", discoveredHost.ip)
+                    put("host", discoveredHost.ip)
+                    put("port", discoveredHost.port)
+                    put("roomCode", discoveredHost.roomCode)
+                }
+                webView.evaluateJavascript("if (typeof window.onHostDiscovered === 'function') { window.onHostDiscovered(${payload}); }", null)
             }
         }
 
@@ -45,8 +59,7 @@ class MainActivity : AppCompatActivity() {
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                val js = "if (window.onAndroidBackPressed && window.onAndroidBackPressed()) { /* handled */ } else if (window.history.length > 1) { window.history.back(); } else { finish(); }"
-                webView.evaluateJavascript(js) { result ->
+                webView.evaluateJavascript("typeof window.onAndroidBackPressed === 'function' ? window.onAndroidBackPressed() : false") { result ->
                     if (result != "true") {
                         isEnabled = false
                         onBackPressedDispatcher.onBackPressed()
@@ -55,29 +68,53 @@ class MainActivity : AppCompatActivity() {
             }
         })
 
-        // Check for deep link intent on launch
-        handleIntent(intent)
-
         if (savedInstanceState == null) {
-            webView.loadUrl("file:///android_asset/web/index.html")
+            // Cold launch: Parse validated deep link and append as safe query parameters to initial URL
+            val coldLink = parseValidatedDeepLink(intent)
+            val initialUrl = if (coldLink != null) {
+                val encodedRoom = URLEncoder.encode(coldLink.roomCode, "UTF-8")
+                val encodedHost = URLEncoder.encode(coldLink.host, "UTF-8")
+                "file:///android_asset/web/index.html?room=$encodedRoom&host=$encodedHost&port=${coldLink.port}"
+            } else {
+                "file:///android_asset/web/index.html"
+            }
+            webView.loadUrl(initialUrl)
         }
     }
 
     override fun onNewIntent(intent: Intent?) {
         super.onNewIntent(intent)
         setIntent(intent)
-        handleIntent(intent)
+        // Warm launch: dispatch safely via JSON
+        val warmLink = parseValidatedDeepLink(intent)
+        if (warmLink != null) {
+            val payload = JSONObject().apply {
+                put("room", warmLink.roomCode)
+                put("host", warmLink.host)
+                put("port", warmLink.port)
+            }
+            webView.evaluateJavascript("if (typeof window.onDeepLinkJoin === 'function') { window.onDeepLinkJoin(${payload}); }", null)
+        }
     }
 
-    private fun handleIntent(intent: Intent?) {
-        val uri = intent?.data ?: return
-        if (uri.scheme == "brawl" && uri.host == "join") {
-            val room = uri.getQueryParameter("room").orEmpty()
-            val host = uri.getQueryParameter("host").orEmpty()
-            val port = uri.getQueryParameter("port")?.toIntOrNull() ?: 8080
-            val js = "if (window.onDeepLinkJoin) { window.onDeepLinkJoin('$room', '$host', $port); }"
-            webView.evaluateJavascript(js, null)
-        }
+    private fun parseValidatedDeepLink(intent: Intent?): ValidatedDeepLink? {
+        val uri: Uri = intent?.data ?: return null
+        if (uri.scheme != "brawl" || uri.host != "join") return null
+
+        val rawRoom = uri.getQueryParameter("room").orEmpty().trim().uppercase()
+        val rawHost = uri.getQueryParameter("host").orEmpty().trim()
+        val rawPort = uri.getQueryParameter("port")?.toIntOrNull() ?: 8080
+
+        // Strict validation: room must be alphanumeric (3..12 chars)
+        if (!rawRoom.matches(Regex("^[A-Z0-9]{3,12}$"))) return null
+
+        // Host must be a valid private IPv4 or loopback
+        if (rawHost != "127.0.0.1" && !LanDiscovery.isPrivateIPv4(rawHost)) return null
+
+        // Port must be in valid unprivileged TCP range
+        if (rawPort !in 1024..65535) return null
+
+        return ValidatedDeepLink(rawRoom, rawHost, rawPort)
     }
 
     @SuppressLint("SetJavaScriptEnabled")

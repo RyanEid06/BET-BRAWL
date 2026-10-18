@@ -107,7 +107,7 @@ object OddsEngine {
         if (round == null) {
             return "No active round"
         }
-        if (serverNowMs > round.bettingEndsAt) {
+        if (serverNowMs >= round.bettingEndsAt) {
             return "Authoritative betting deadline has passed"
         }
         if (round.bettingTimeRemaining <= 0) {
@@ -142,7 +142,7 @@ object OddsEngine {
         resolutionReason: RoundResolutionReason = RoundResolutionReason.PLAYED
     ): List<RoundPayoutItem> {
         val payouts = mutableListOf<RoundPayoutItem>()
-        val [f1Id, f2Id] = round.fighterIds.let { Pair(it[0], it[1]) }
+        val (f1Id, f2Id) = round.fighterIds.let { Pair(it[0], it[1]) }
         val fighterA = players.find { it.id == f1Id }
         val fighterB = players.find { it.id == f2Id }
 
@@ -278,7 +278,7 @@ object OddsEngine {
         for (bet in round.bets) {
             val bettor = players.find { it.id == bet.bettorId } ?: continue
             if (bet.fighterId == winnerId) {
-                val totalReturn = (bet.amount * bet.oddsAtBet).roundToInt()
+                val totalReturn = kotlin.math.floor(bet.amount * bet.oddsAtBet).toInt()
                 val netProfit = totalReturn - bet.amount
                 bettor.coins += totalReturn
                 bettor.totalBetsWon += 1
