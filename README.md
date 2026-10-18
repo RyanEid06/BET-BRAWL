@@ -71,7 +71,7 @@ BET & BRAWL has transitioned from a laptop-hosted web prototype into a **standal
 The migration was performed on `main` while maintaining immutable reference points:
 - **Preserved Web V1 Branch:** `v1-web-final`
 - **Permanent Preserved Web Tag:** `v1.0.0-web-final`
-- The golden Node test suite (`52 tests`) remains active and verified.
+- The golden Node test suite (`58 tests`) remains active and verified.
 
 ---
 

@@ -6,7 +6,7 @@
  */
 
 import crypto from 'crypto';
-import type { Player, PublicPlayer, RoundState, Award, MiniGameId, TournamentMatch, TournamentSchedule, TournamentStage } from './types.ts';
+import type { Player, PublicPlayer, RoundState, Award, MiniGameId, TournamentMatch, TournamentSchedule, TournamentStage, RoundResolutionReason } from './types.ts';
 import { calculateDynamicOdds } from './odds.ts';
 import { MINI_GAMES } from './miniGamesCatalog.ts';
 import { initMiniGameServerState, InternalGameState } from './gameEngine.ts';
@@ -614,4 +614,58 @@ export function computeSessionAwards(players: Player[], championId?: string | nu
   }
 
   return awards;
+}
+
+/**
+ * Authoritative tournament qualifier match resolution handler.
+ * Advances qualifiersCompleted for all resolved qualifiers (including VOID).
+ * On VOID: increments qualifiersCompleted, but preserves fighter stats (points, wins, ties, losses, matches played).
+ * On PLAYED / DISCONNECT_FORFEIT / TIE: updates fighter points, wins, ties, losses, and matches played.
+ */
+export function applyQualifierMatchResolution(
+  sched: TournamentSchedule,
+  players: Player[],
+  fighterIds: [string, string],
+  winnerId: string | null,
+  isTie: boolean,
+  resolutionReason: RoundResolutionReason
+): void {
+  sched.qualifiersCompleted += 1;
+  const matchIndex = sched.matches.findIndex(m => !m.completed && !m.isChampionship);
+  if (matchIndex !== -1) {
+    sched.matches[matchIndex].completed = true;
+    sched.matches[matchIndex].winnerId = winnerId;
+    sched.matches[matchIndex].tieResult = isTie;
+    sched.matches[matchIndex].resolutionReason = resolutionReason;
+  }
+
+  const [f1Id, f2Id] = fighterIds;
+  const f1 = players.find(p => p.id === f1Id);
+  const f2 = players.find(p => p.id === f2Id);
+
+  // Win = 3 Brawl Points, Tie = 1 Brawl Point each, Loss = 0 Brawl Points
+  // On VOID: fighter stats (points, wins, ties, losses, matches played) are strictly untouched!
+  if (resolutionReason === 'PLAYED' || resolutionReason === 'DISCONNECT_FORFEIT') {
+    if (f1) f1.qualifierMatchesPlayed += 1;
+    if (f2) f2.qualifierMatchesPlayed += 1;
+
+    if (winnerId) {
+      const winnerFighter = f1?.id === winnerId ? f1 : f2;
+      const loserFighter = f1?.id === winnerId ? f2 : f1;
+      if (winnerFighter) {
+        winnerFighter.qualifierPoints += 3;
+        winnerFighter.qualifierWins += 1;
+      }
+      if (loserFighter) {
+        loserFighter.qualifierLosses += 1;
+      }
+    }
+  } else if (isTie) {
+    if (f1) { f1.qualifierMatchesPlayed += 1; f1.qualifierPoints += 1; f1.qualifierTies += 1; }
+    if (f2) { f2.qualifierMatchesPlayed += 1; f2.qualifierPoints += 1; f2.qualifierTies += 1; }
+  }
+
+  // Recompute current tournament rankings after qualifier match using pure 5-layer tiebreaker
+  const completedQualifiers = sched.matches.filter(m => !m.isChampionship && m.completed);
+  computeTournamentRankings(players, completedQualifiers, sched.stableRosterOrder);
 }

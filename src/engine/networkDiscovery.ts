@@ -173,3 +173,117 @@ export function discoverLanAddresses(
     candidateIps: candidateIps.length > 0 ? candidateIps : ['127.0.0.1'],
   };
 }
+
+export interface JoinEndpointResolution {
+  hostToConnect: string | undefined;
+  source: 'explicit' | 'query' | 'discovered' | 'config' | 'none';
+}
+
+/**
+ * Resolves the host and port target for joining a game room.
+ * Prioritizes:
+ * 1. Explicit target host passed from caller / deep link
+ * 2. Cold deep-link URL search parameters (?room=...&host=...&port=...)
+ * 3. Local mDNS / UDP discovered rooms
+ * 4. Native Android bridge global config
+ */
+export function resolveJoinEndpoint(
+  roomCode: string,
+  targetHost?: string,
+  search?: string,
+  discoveredRooms?: Map<string, { hostIp: string; port: number; lastSeen?: number }>,
+  globalConfig?: { hostIp?: string; discoveredHosts?: Array<{ ip: string; port?: number; roomCode?: string }> }
+): JoinEndpointResolution {
+  const cleanCode = (roomCode || '').trim().toUpperCase();
+
+  // 1. Explicit target host passed directly
+  if (targetHost && targetHost.trim()) {
+    return { hostToConnect: targetHost.trim(), source: 'explicit' };
+  }
+
+  // 2. Cold deep-link URL search parameters (?room=...&host=...&port=...)
+  if (search) {
+    try {
+      const params = new URLSearchParams(search);
+      const qRoom = (params.get('room') || params.get('code') || '').trim().toUpperCase();
+      const qHost = (params.get('host') || '').trim();
+      const qPort = params.get('port');
+      if (qHost && (!qRoom || qRoom === cleanCode)) {
+        return {
+          hostToConnect: qPort ? `${qHost}:${qPort}` : qHost,
+          source: 'query',
+        };
+      }
+    } catch {}
+  }
+
+  // 3. Discovered rooms via mDNS / UDP discovery
+  if (discoveredRooms && cleanCode) {
+    const discovered = discoveredRooms.get(cleanCode);
+    if (discovered && (!discovered.lastSeen || Date.now() - discovered.lastSeen < 30000)) {
+      return {
+        hostToConnect: discovered.port ? `${discovered.hostIp}:${discovered.port}` : discovered.hostIp,
+        source: 'discovered',
+      };
+    }
+  }
+
+  // 4. Android global config discovered hosts
+  if (globalConfig?.discoveredHosts && cleanCode) {
+    const match = globalConfig.discoveredHosts.find(d => d.roomCode === cleanCode);
+    if (match) {
+      return {
+        hostToConnect: match.port ? `${match.ip}:${match.port}` : match.ip,
+        source: 'config',
+      };
+    }
+  }
+
+  return { hostToConnect: undefined, source: 'none' };
+}
+
+/**
+ * Computes canonical WebSocket URL for a given target host/port, search params, or environment config.
+ */
+export function resolveWsUrl(
+  customHost?: string,
+  customPort: number = 8080,
+  search?: string,
+  globalConfig?: { wsUrl?: string; hostIp?: string; wsPort?: number },
+  locationObj?: { protocol?: string; host?: string }
+): string {
+  // 1. Explicit parameter
+  if (customHost) {
+    if (customHost.startsWith('ws://') || customHost.startsWith('wss://')) {
+      return customHost;
+    }
+    if (customHost.includes(':')) {
+      return `ws://${customHost}/ws`;
+    }
+    return `ws://${customHost}:${customPort}/ws`;
+  }
+
+  // 2. URL search params e.g. ?host=192.168.1.5&port=8080
+  if (search) {
+    try {
+      const params = new URLSearchParams(search);
+      const queryHost = params.get('host');
+      const queryPort = params.get('port');
+      if (queryHost) {
+        return `ws://${queryHost}:${queryPort || customPort}/ws`;
+      }
+    } catch {}
+  }
+
+  // 3. Global config
+  if (globalConfig?.wsUrl) return globalConfig.wsUrl;
+  if (globalConfig?.hostIp) return `ws://${globalConfig.hostIp}:${globalConfig.wsPort || customPort}/ws`;
+
+  // 4. Browser location
+  if (locationObj && locationObj.protocol !== 'file:' && locationObj.host) {
+    const proto = locationObj.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${proto}//${locationObj.host}/ws`;
+  }
+
+  return 'ws://127.0.0.1:8080/ws';
+}

@@ -9,6 +9,7 @@ import {
   computeTournamentRankings,
   getFinalTournamentStandings,
   selectMiniGame,
+  applyQualifierMatchResolution,
   MIN_PLAYERS_TO_START,
   MAX_PLAYERS_CAPACITY,
 } from './roomEngine.ts';
@@ -388,23 +389,25 @@ test('qualifier VOID advances completion without changing fighter qualifier stat
   const initialF2Losses = f2.qualifierLosses;
   const initialF2Matches = f2.qualifierMatchesPlayed;
 
-  // On VOID: qualifiersCompleted advances by 1, but fighter stats remain untouched
-  schedule.qualifiersCompleted += 1;
-  const match = schedule.matches[0];
-  match.completed = true;
-  match.winnerId = null;
-  match.tieResult = false;
-  match.resolutionReason = 'VOID';
+  // On VOID: qualifiersCompleted advances by 1 via real production resolution handler, while fighter stats remain completely untouched
+  applyQualifierMatchResolution(schedule, players, [f1.id, f2.id], null, false, 'VOID');
 
-  assert.equal(schedule.qualifiersCompleted, 1);
-  assert.equal(f1.qualifierPoints, initialF1Points);
-  assert.equal(f1.qualifierWins, initialF1Wins);
-  assert.equal(f1.qualifierLosses, initialF1Losses);
-  assert.equal(f1.qualifierMatchesPlayed, initialF1Matches);
-  assert.equal(f2.qualifierPoints, initialF2Points);
-  assert.equal(f2.qualifierWins, initialF2Wins);
-  assert.equal(f2.qualifierLosses, initialF2Losses);
-  assert.equal(f2.qualifierMatchesPlayed, initialF2Matches);
+  assert.equal(schedule.qualifiersCompleted, 1, 'qualifiersCompleted must increment on VOID');
+  assert.equal(schedule.matches[0].completed, true, 'Match must be marked completed');
+  assert.equal(schedule.matches[0].resolutionReason, 'VOID');
+
+  // Fighter stats must be completely unchanged
+  assert.equal(f1.qualifierPoints, initialF1Points, 'f1 points must remain unchanged on VOID');
+  assert.equal(f1.qualifierWins, initialF1Wins, 'f1 wins must remain unchanged on VOID');
+  assert.equal(f1.qualifierTies, 0, 'f1 ties must remain unchanged on VOID');
+  assert.equal(f1.qualifierLosses, initialF1Losses, 'f1 losses must remain unchanged on VOID');
+  assert.equal(f1.qualifierMatchesPlayed, initialF1Matches, 'f1 matches played must remain unchanged on VOID');
+
+  assert.equal(f2.qualifierPoints, initialF2Points, 'f2 points must remain unchanged on VOID');
+  assert.equal(f2.qualifierWins, initialF2Wins, 'f2 wins must remain unchanged on VOID');
+  assert.equal(f2.qualifierTies, 0, 'f2 ties must remain unchanged on VOID');
+  assert.equal(f2.qualifierLosses, initialF2Losses, 'f2 losses must remain unchanged on VOID');
+  assert.equal(f2.qualifierMatchesPlayed, initialF2Matches, 'f2 matches played must remain unchanged on VOID');
 });
 
 test('public bet masking does not mutate authoritative round bets', () => {

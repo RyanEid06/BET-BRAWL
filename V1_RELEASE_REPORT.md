@@ -65,7 +65,7 @@ All automated tests across 5 test files, type checking, linting, and production 
 |---|---|---|---|
 | **TypeScript Typecheck** | `npm run typecheck` | **PASS** | 0 errors (`tsc --noEmit`) |
 | **Code Linting** | `npm run lint` | **PASS** | Clean syntax and import graph |
-| **Automated Test Suite** | `npm test` | **PASS** | **52 / 52 passing** across 5 test files (13.15s) |
+| **Automated Test Suite** | `npm test` | **PASS** | **58 / 58 passing** across 5 test files (13.64s) |
 | **Production Vite Build** | `npm run build` | **PASS** | Clean `dist/` bundle generated (689ms) |
 | **Full Verification Pipeline** | `npm run verify` | **PASS** | Composite typecheck, test, and build pipeline |
 | **AI Studio Applet Compilation**| `compile_applet` | **PASS** | Build succeeded |
@@ -113,7 +113,7 @@ All automated tests across 5 test files, type checking, linting, and production 
 3. **Obsolete Terminology Cleaned:**
    - Cleaned references to "Championship Final" and "Qualifiers + Finals" in `LobbyScreen.tsx` and `server.ts`.
 4. **Documentation Aligned:**
-   - `README.md` and `V1_STATUS.md` updated with real test counts (52 tests) and verified command results.
+   - `README.md` and `V1_STATUS.md` updated with real test counts (58 tests) and verified command results.
 
 ---
 

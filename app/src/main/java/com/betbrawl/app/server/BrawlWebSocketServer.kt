@@ -711,26 +711,14 @@ class BrawlWebSocketServer(
                 }
             }
         } else {
-            schedule.qualifiersCompleted += 1
-            if (reason != RoundResolutionReason.VOID) {
-                f1?.qualifierMatchesPlayed = (f1?.qualifierMatchesPlayed ?: 0) + 1
-                f2?.qualifierMatchesPlayed = (f2?.qualifierMatchesPlayed ?: 0) + 1
-                if (isTie) {
-                    f1?.qualifierPoints = (f1?.qualifierPoints ?: 0) + 1
-                    f2?.qualifierPoints = (f2?.qualifierPoints ?: 0) + 1
-                    f1?.qualifierTies = (f1?.qualifierTies ?: 0) + 1
-                    f2?.qualifierTies = (f2?.qualifierTies ?: 0) + 1
-                } else if (winnerId != null) {
-                    val winPlayer = players.values.find { it.id == winnerId }
-                    val loserPlayer = players.values.find { it.id == if (winnerId == f1Id) f2Id else f1Id }
-                    winPlayer?.qualifierPoints = (winPlayer?.qualifierPoints ?: 0) + 3
-                    winPlayer?.qualifierWins = (winPlayer?.qualifierWins ?: 0) + 1
-                    loserPlayer?.qualifierLosses = (loserPlayer?.qualifierLosses ?: 0) + 1
-                }
-            }
-            // Recompute live tournament rankings after qualifier match
-            val completedQualifiers = schedule.matches.filter { !it.isChampionship && it.completed }
-            RoomEngine.computeTournamentRankings(players.values.toList(), completedQualifiers, schedule.stableRosterOrder)
+            RoomEngine.applyQualifierMatchResolution(
+                schedule = schedule,
+                players = players.values.toList(),
+                fighterIds = round.fighterIds,
+                winnerId = winnerId,
+                isTie = isTie,
+                reason = reason
+            )
         }
 
         // Payouts

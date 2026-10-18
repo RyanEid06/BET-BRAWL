@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import os from 'os';
-import { discoverLanAddresses, isRfc1918, isLinkLocal, isLoopback, buildJoinUrl, isLoopbackUrl } from './networkDiscovery.ts';
+import { discoverLanAddresses, isRfc1918, isLinkLocal, isLoopback, buildJoinUrl, isLoopbackUrl, resolveJoinEndpoint, resolveWsUrl } from './networkDiscovery.ts';
 
 test('networkDiscovery: correctly identifies RFC1918 and link-local ranges', () => {
   assert.equal(isRfc1918('192.168.1.10'), true);
@@ -93,19 +93,36 @@ test('Android QR never becomes null?room=... and rejects null/file origins while
   assert.equal(browserQr, 'http://192.168.1.50:3000/?room=BRAWL');
 });
 
-test('cold deep-link host/port reaches join target: URL search params correctly supply target host without discovery', () => {
-  // Cold launch: MainActivity supplies room, host, port in WebView URL
-  const coldUrl = 'file:///android_asset/web/index.html?room=BRAWL&host=192.168.1.42&port=8080';
-  const urlObj = new URL(coldUrl);
-  const qRoom = (urlObj.searchParams.get('room') || '').trim().toUpperCase();
-  const qHost = (urlObj.searchParams.get('host') || '').trim();
-  const qPort = urlObj.searchParams.get('port');
+test('cold deep-link host/port reaches join target and bypasses discovery via real production endpoint resolver', () => {
+  // Empty discovered rooms map proves discovery is bypassed
+  const emptyDiscoveredRooms = new Map<string, { hostIp: string; port: number }>();
+  const coldSearch = '?room=BRAWL&host=192.168.1.42&port=8080';
 
-  assert.equal(qRoom, 'BRAWL');
-  assert.equal(qHost, '192.168.1.42');
-  assert.equal(qPort, '8080');
+  // 1. Cold deep link directly resolves host and port from query search params
+  const resolution = resolveJoinEndpoint('BRAWL', undefined, coldSearch, emptyDiscoveredRooms);
+  assert.equal(resolution.source, 'query', 'Cold deep-link must resolve via query source');
+  assert.equal(resolution.hostToConnect, '192.168.1.42:8080');
 
-  // Verify target endpoint resolution
-  const targetEndpoint = qPort ? `${qHost}:${qPort}` : qHost;
-  assert.equal(targetEndpoint, '192.168.1.42:8080');
+  // 2. Real resolveWsUrl maps the resolved target to canonical WebSocket endpoint
+  const wsUrl = resolveWsUrl(resolution.hostToConnect);
+  assert.equal(wsUrl, 'ws://192.168.1.42:8080/ws', 'WebSocket URL must connect directly to supplied cold deep-link host/port');
+});
+
+test('manual room joins without deep-link parameters use normal discovery', () => {
+  // When no query params exist, manual join with no discovered room returns none
+  const emptyDiscoveredRooms = new Map<string, { hostIp: string; port: number }>();
+  const noDiscoveryRes = resolveJoinEndpoint('BRAWL', undefined, '', emptyDiscoveredRooms);
+  assert.equal(noDiscoveryRes.source, 'none');
+  assert.equal(noDiscoveryRes.hostToConnect, undefined);
+
+  // When room is discovered via mDNS/UDP discovery, it resolves via discovered source
+  const discoveredRooms = new Map<string, { hostIp: string; port: number }>();
+  discoveredRooms.set('BRAWL', { hostIp: '192.168.1.88', port: 8080 });
+
+  const manualJoinRes = resolveJoinEndpoint('BRAWL', undefined, '', discoveredRooms);
+  assert.equal(manualJoinRes.source, 'discovered', 'Manual join must use normal discovery');
+  assert.equal(manualJoinRes.hostToConnect, '192.168.1.88:8080');
+
+  const wsUrl = resolveWsUrl(manualJoinRes.hostToConnect);
+  assert.equal(wsUrl, 'ws://192.168.1.88:8080/ws');
 });

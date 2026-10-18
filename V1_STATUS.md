@@ -46,10 +46,10 @@ Last Updated: Final Hardening & Championship Series Acceptance Pass
 
 ### AUTOMATED VERIFIED (PASSING IN THIS ENVIRONMENT)
 - [x] `npm run typecheck`: **PASSING** (0 TypeScript errors)
-- [x] `npm test`: **PASSING** (52/52 automated tests passing across 5 test files)
+- [x] `npm test`: **PASSING** (58/58 automated tests passing across 5 test files)
 - [x] `npm run lint`: **PASSING** (`tsc --noEmit` clean)
 - [x] `npm run build`: **PASSING** (Clean Vite static production bundle in `dist/`)
-- [x] `npm run verify`: **PASSING** (typecheck + test [52/52 pass] + build pipeline)
+- [x] `npm run verify`: **PASSING** (typecheck + test [58/58 pass] + build pipeline)
 - [x] Genuine Production Server WebSocket Integration Tests: **PASSING** (Multi-client integration tests exercising `createBrawlServer` across full 3-player and 6-player tournaments)
 - [x] Production Server Standalone Launch (`npm start` / `server.ts`): **PASSING** (HTTP 200 on index, `/api/network-info` JSON payload verified, production `dist/` served directly)
 - [x] Reproducible dependency locking: `package-lock.json` present and tested with `npm ci`
@@ -71,22 +71,22 @@ Last Updated: Final Hardening & Championship Series Acceptance Pass
   ```
 - `npm test`:
   ```
-  # tests 52
+  # tests 58
   # suites 0
-  # pass 52
+  # pass 58
   # fail 0
-  (exit code 0, duration_ms: ~13000ms)
+  (exit code 0, duration_ms: ~13600ms)
   ```
 - `npm run build`:
   ```
   dist/index.html                   0.96 kB │ gzip:   0.43 kB
-  dist/assets/index-CXWPl50f.css   61.04 kB │ gzip:   9.65 kB
-  dist/assets/index-BJwv8r-7.js   597.18 kB │ gzip: 170.08 kB
-  ✓ built in 689ms
+  dist/assets/index-Dcym0_-F.css   61.80 kB │ gzip:   9.73 kB
+  dist/assets/index-DaycpC0Y.js   603.53 kB │ gzip: 171.71 kB
+  ✓ built in 879ms
   (exit code 0)
   ```
 - `npm run verify`:
   ```
-  typecheck -> test (52/52 pass) -> build (clean dist)
+  typecheck -> test (58/58 pass) -> build (clean dist)
   (exit code 0)
   ```

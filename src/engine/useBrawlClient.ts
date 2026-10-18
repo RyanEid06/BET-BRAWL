@@ -19,6 +19,7 @@ import type {
   TournamentSchedule,
 } from './types.ts';
 import { sound } from './audio.ts';
+import { resolveJoinEndpoint, resolveWsUrl as resolveWsUrlHelper } from './networkDiscovery.ts';
 
 const SESSION_TOKEN_KEY = 'betnbrawl_session_token';
 const PLAYER_NAME_KEY = 'betnbrawl_player_name';
@@ -295,50 +296,15 @@ export function useBrawlClient() {
 
   // Compute WebSocket URL cleanly across Android WebView, local host, LAN guest, or browser
   const resolveWsUrl = useCallback((customHost?: string, customPort?: number): string => {
-    // 1. Explicit parameter
-    if (customHost) {
-      if (customHost.startsWith('ws://') || customHost.startsWith('wss://')) {
-        return customHost;
-      }
-      if (customHost.includes(':')) {
-        return `ws://${customHost}/ws`;
-      }
-      const port = customPort || 8080;
-      return `ws://${customHost}:${port}/ws`;
-    }
-
-    // 2. URL search params e.g. ?host=192.168.1.5&port=8080
-    if (typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search);
-      const queryHost = params.get('host');
-      const queryPort = params.get('port');
-      if (queryHost) {
-        return `ws://${queryHost}:${queryPort || 8080}/ws`;
-      }
-    }
-
-    // 3. Android window config
-    const globalConfig = (window as unknown as { BETBRAWL_CONFIG?: { wsUrl?: string; hostIp?: string; wsPort?: number } }).BETBRAWL_CONFIG;
-    if (globalConfig?.wsUrl) {
-      return globalConfig.wsUrl;
-    }
-    if (globalConfig?.hostIp) {
-      return `ws://${globalConfig.hostIp}:${globalConfig.wsPort || 8080}/ws`;
-    }
-
-    // 4. Stored target endpoint ref
-    if (targetWsEndpointRef.current) {
+    if (targetWsEndpointRef.current && !customHost) {
       return targetWsEndpointRef.current;
     }
-
-    // 5. Browser window.location fallback (if not file://)
-    if (typeof window !== 'undefined' && window.location.protocol !== 'file:' && window.location.host) {
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      return `${protocol}//${window.location.host}/ws`;
-    }
-
-    // 6. Default local Android server
-    return 'ws://127.0.0.1:8080/ws';
+    const search = typeof window !== 'undefined' ? window.location.search : undefined;
+    const globalConfig = typeof window !== 'undefined'
+      ? (window as unknown as { BETBRAWL_CONFIG?: { wsUrl?: string; hostIp?: string; wsPort?: number } }).BETBRAWL_CONFIG
+      : undefined;
+    const loc = typeof window !== 'undefined' ? window.location : undefined;
+    return resolveWsUrlHelper(customHost, customPort || 8080, search, globalConfig, loc);
   }, []);
 
   // Connect WebSocket with immediate callback if already open and optional bounded retry
@@ -647,32 +613,11 @@ const hostGame = useCallback((playerName: string, avatar: string) => {
     setState(prev => ({ ...prev, errorMessage: null }));
 
     // Check if target host was provided or is in cold deep-link URL params or discovered rooms
-    let hostToConnect = targetHost;
-
-    if (!hostToConnect && typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search);
-      const qRoom = (params.get('room') || params.get('code') || '').trim().toUpperCase();
-      const qHost = (params.get('host') || '').trim();
-      const qPort = params.get('port');
-      if (qHost && (!qRoom || qRoom === cleanCode)) {
-        hostToConnect = qPort ? `${qHost}:${qPort}` : qHost;
-      }
-    }
-
-    if (!hostToConnect) {
-      const discovered = discoveredRoomsRef.current.get(cleanCode);
-      if (discovered && (Date.now() - discovered.lastSeen < 30000)) {
-        hostToConnect = discovered.port ? `${discovered.hostIp}:${discovered.port}` : discovered.hostIp;
-      }
-    }
-
-    if (!hostToConnect && typeof window !== 'undefined') {
-      const globalConfig = (window as unknown as { BETBRAWL_CONFIG?: { hostIp?: string; discoveredHosts?: Array<{ ip: string; port?: number; roomCode?: string }> } }).BETBRAWL_CONFIG;
-      if (globalConfig?.discoveredHosts) {
-        const match = globalConfig.discoveredHosts.find(d => d.roomCode === cleanCode);
-        if (match) hostToConnect = match.port ? `${match.ip}:${match.port}` : match.ip;
-      }
-    }
+    const search = typeof window !== 'undefined' ? window.location.search : undefined;
+    const globalConfig = typeof window !== 'undefined'
+      ? (window as unknown as { BETBRAWL_CONFIG?: { hostIp?: string; discoveredHosts?: Array<{ ip: string; port?: number; roomCode?: string }> } }).BETBRAWL_CONFIG
+      : undefined;
+    const { hostToConnect } = resolveJoinEndpoint(cleanCode, targetHost, search, discoveredRoomsRef.current, globalConfig);
 
     const isAndroid = typeof window !== 'undefined' && (
       window.location.protocol === 'file:' ||

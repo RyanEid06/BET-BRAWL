@@ -384,13 +384,15 @@ class TournamentParityTest {
         val initialP2Losses = p2.qualifierLosses
         val initialP2Matches = p2.qualifierMatchesPlayed
 
-        // Simulate VOID qualifier resolution
-        val voidMatch = schedule.matches[0]
-        voidMatch.completed = true
-        voidMatch.winnerId = null
-        voidMatch.tieResult = false
-        voidMatch.resolutionReason = RoundResolutionReason.VOID
-        schedule.qualifiersCompleted += 1
+        // Exercise real production RoomEngine qualifier resolution for VOID
+        RoomEngine.applyQualifierMatchResolution(
+            schedule = schedule,
+            players = listOf(p1, p2, p3),
+            fighterIds = listOf(p1.id, p2.id),
+            winnerId = null,
+            isTie = false,
+            reason = RoundResolutionReason.VOID
+        )
 
         assertEquals(1, schedule.qualifiersCompleted)
         assertEquals(initialP1Points, p1.qualifierPoints)

@@ -26,7 +26,7 @@ jobs:
       - name: TypeScript Typecheck
         run: npm run typecheck
 
-      - name: Run Golden Node Test Suite (52 tests)
+      - name: Run Golden Node Test Suite (58 tests)
         run: npm test
 
       - name: Build Web Production Bundle

@@ -36,6 +36,7 @@ import {
   computeSessionAwards,
   generateTournamentSchedule,
   computeTournamentRankings,
+  applyQualifierMatchResolution,
   MIN_PLAYERS_TO_START,
   MAX_PLAYERS_CAPACITY,
   sanitizePlayerName,
@@ -668,39 +669,14 @@ export function createBrawlServer(options: CreateServerOptions = {}) {
 
       if (!round.isChampionship) {
         // QUALIFIER BRAWL:
-        sched.qualifiersCompleted += 1;
-        const matchIndex = sched.matches.findIndex(m => !m.completed && !m.isChampionship);
-        if (matchIndex !== -1) {
-          sched.matches[matchIndex].completed = true;
-          sched.matches[matchIndex].winnerId = winnerId;
-          sched.matches[matchIndex].tieResult = isTie;
-          sched.matches[matchIndex].resolutionReason = resolutionReason;
-        }
-
-        // Win = 3 Brawl Points, Tie = 1 Brawl Point each, Loss = 0 Brawl Points
-        if (resolutionReason === 'PLAYED' || resolutionReason === 'DISCONNECT_FORFEIT') {
-          if (f1) f1.qualifierMatchesPlayed += 1;
-          if (f2) f2.qualifierMatchesPlayed += 1;
-
-          if (winnerId) {
-            const winnerFighter = f1?.id === winnerId ? f1 : f2;
-            const loserFighter = f1?.id === winnerId ? f2 : f1;
-            if (winnerFighter) {
-              winnerFighter.qualifierPoints += 3;
-              winnerFighter.qualifierWins += 1;
-            }
-            if (loserFighter) {
-              loserFighter.qualifierLosses += 1;
-            }
-          }
-        } else if (isTie) {
-          if (f1) { f1.qualifierMatchesPlayed += 1; f1.qualifierPoints += 1; f1.qualifierTies += 1; }
-          if (f2) { f2.qualifierMatchesPlayed += 1; f2.qualifierPoints += 1; f2.qualifierTies += 1; }
-        }
-
-        // Recompute current tournament rankings after qualifier match using pure 5-layer tiebreaker
-        const completedQualifiers = sched.matches.filter(m => !m.isChampionship && m.completed);
-        computeTournamentRankings(Array.from(activeRoom.players.values()), completedQualifiers, sched.stableRosterOrder);
+        applyQualifierMatchResolution(
+          sched,
+          Array.from(activeRoom.players.values()),
+          round.fighterIds,
+          winnerId,
+          isTie,
+          resolutionReason
+        );
       } else {
         // CHAMPIONSHIP SERIES (First to 2 Decisive Wins):
         sched.championshipGamesPlayed += 1;

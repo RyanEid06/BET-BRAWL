@@ -201,6 +201,47 @@ object RoomEngine {
         return finalRanked
     }
 
+    fun applyQualifierMatchResolution(
+        schedule: TournamentSchedule,
+        players: List<Player>,
+        fighterIds: List<String>,
+        winnerId: String?,
+        isTie: Boolean,
+        reason: RoundResolutionReason
+    ) {
+        val currentMatch = schedule.matches.firstOrNull { !it.isChampionship && !it.completed }
+        if (currentMatch != null) {
+            currentMatch.completed = true
+            currentMatch.winnerId = winnerId
+            currentMatch.tieResult = isTie
+            currentMatch.resolutionReason = reason
+        }
+
+        schedule.qualifiersCompleted += 1
+        val (f1Id, f2Id) = fighterIds.let { Pair(it[0], it[1]) }
+        val f1 = players.find { it.id == f1Id }
+        val f2 = players.find { it.id == f2Id }
+
+        if (reason != RoundResolutionReason.VOID) {
+            f1?.qualifierMatchesPlayed = (f1?.qualifierMatchesPlayed ?: 0) + 1
+            f2?.qualifierMatchesPlayed = (f2?.qualifierMatchesPlayed ?: 0) + 1
+            if (isTie) {
+                f1?.qualifierPoints = (f1?.qualifierPoints ?: 0) + 1
+                f2?.qualifierPoints = (f2?.qualifierPoints ?: 0) + 1
+                f1?.qualifierTies = (f1?.qualifierTies ?: 0) + 1
+                f2?.qualifierTies = (f2?.qualifierTies ?: 0) + 1
+            } else if (winnerId != null) {
+                val winPlayer = players.find { it.id == winnerId }
+                val loserPlayer = players.find { it.id == if (winnerId == f1Id) f2Id else f1Id }
+                winPlayer?.qualifierPoints = (winPlayer?.qualifierPoints ?: 0) + 3
+                winPlayer?.qualifierWins = (winPlayer?.qualifierWins ?: 0) + 1
+                loserPlayer?.qualifierLosses = (loserPlayer?.qualifierLosses ?: 0) + 1
+            }
+        }
+        val completedQualifiers = schedule.matches.filter { !it.isChampionship && it.completed }
+        computeTournamentRankings(players, completedQualifiers, schedule.stableRosterOrder)
+    }
+
     fun getFinalTournamentStandings(
         players: List<Player>,
         championId: String?,
