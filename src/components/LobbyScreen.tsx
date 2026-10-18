@@ -39,26 +39,16 @@ export const LobbyScreen: React.FC<Props> = ({
   onAddDebugBot,
   isDebug = false,
 }) => {
-  const isLoopbackUrl = (url: string | undefined): boolean => {
-    if (!url) return true;
-    try {
-      const parsed = new URL(url);
-      const host = parsed.hostname;
-      return host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0' || host === '::1';
-    } catch {
-      return url.includes('localhost') || url.includes('127.0.0.1') || url.includes('0.0.0.0');
-    }
-  };
-
   const [selectedBaseUrl, setSelectedBaseUrl] = useState<string>(() => {
-    // If client loaded over a proven non-loopback LAN host, use origin
-    if (typeof window !== 'undefined' && !isLoopbackUrl(window.location.origin)) {
-      return window.location.origin;
-    }
+    // 1. In Android WebView or native environment, prefer native networkInfo.fullJoinUrl (brawl://join?host=...)
     if (networkInfo?.fullJoinUrl && !isLoopbackUrl(networkInfo.fullJoinUrl)) {
       return networkInfo.fullJoinUrl;
     }
-    return typeof window !== 'undefined' ? window.location.origin : '';
+    // 2. If client loaded over a proven non-loopback LAN host in a normal browser, use origin
+    if (typeof window !== 'undefined' && !isLoopbackUrl(window.location.origin)) {
+      return window.location.origin;
+    }
+    return '';
   });
 
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
@@ -66,12 +56,12 @@ export const LobbyScreen: React.FC<Props> = ({
   useEffect(() => {
     if (!networkInfo) return;
 
-    // Never silently prefer localhost/loopback when a valid non-loopback LAN URL exists!
+    // Prefer native fullJoinUrl (e.g. Android brawl://join?host=...)
     if (networkInfo.fullJoinUrl && !isLoopbackUrl(networkInfo.fullJoinUrl)) {
-      if (isLoopbackUrl(selectedBaseUrl)) {
+      if (isLoopbackUrl(selectedBaseUrl) || selectedBaseUrl.startsWith('brawl://')) {
         setSelectedBaseUrl(networkInfo.fullJoinUrl);
       }
-    } else if (!selectedBaseUrl && networkInfo.fullJoinUrl) {
+    } else if (isLoopbackUrl(selectedBaseUrl) && networkInfo.fullJoinUrl) {
       setSelectedBaseUrl(networkInfo.fullJoinUrl);
     }
   }, [networkInfo, selectedBaseUrl]);

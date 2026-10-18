@@ -93,19 +93,54 @@ export function useBrawlClient() {
 
   // Load network info on mount (checks native Android bridge first, then /api/network-info)
   useEffect(() => {
-    // 1. Register live window.onDeepLinkJoin callback from native shell
+    // Check if cold deep-link URL params supplied room, host, port on mount
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const qRoom = (params.get('room') || params.get('code') || '').trim().toUpperCase();
+      const qHost = (params.get('host') || '').trim();
+      const qPort = parseInt(params.get('port') || '8080', 10) || 8080;
+      if (qRoom && qHost) {
+        discoveredRoomsRef.current.set(qRoom, { hostIp: qHost, port: qPort, lastSeen: Date.now() });
+        setState(prev => ({
+          ...prev,
+          networkInfo: {
+            localIp: qHost,
+            port: qPort,
+            roomCode: qRoom,
+            fullJoinUrl: `brawl://join?host=${qHost}&port=${qPort}&room=${qRoom}`,
+            hasActiveRoom: true,
+            playerCount: prev.networkInfo?.playerCount || 1,
+            candidateUrls: [`brawl://join?host=${qHost}&port=${qPort}&room=${qRoom}`],
+          },
+        }));
+      }
+    }
+
+    // 1. Canonical window.onDeepLinkJoin callback from native shell (warm deep link: { room, host, port })
     (window as unknown as { onDeepLinkJoin?: (data: unknown) => void }).onDeepLinkJoin = (data: unknown) => {
       let room = '';
       let host = '';
       let port = 8080;
       if (typeof data === 'object' && data !== null) {
-        const obj = data as Record<string, unknown>;
-        room = String(obj.room || obj.roomCode || '').trim().toUpperCase();
-        host = String(obj.host || obj.ip || '').trim();
+        const obj = data as { room?: string; host?: string; port?: number };
+        room = (obj.room || '').trim().toUpperCase();
+        host = (obj.host || '').trim();
         port = typeof obj.port === 'number' ? obj.port : 8080;
       }
       if (room && host) {
         discoveredRoomsRef.current.set(room, { hostIp: host, port, lastSeen: Date.now() });
+        setState(prev => ({
+          ...prev,
+          networkInfo: {
+            localIp: host,
+            port,
+            roomCode: room,
+            fullJoinUrl: `brawl://join?host=${host}&port=${port}&room=${room}`,
+            hasActiveRoom: true,
+            playerCount: prev.networkInfo?.playerCount || 1,
+            candidateUrls: [`brawl://join?host=${host}&port=${port}&room=${room}`],
+          },
+        }));
         const savedName = localStorage.getItem(PLAYER_NAME_KEY) || 'You (Ace)';
         const savedAvatar = localStorage.getItem(PLAYER_AVATAR_KEY) || '⚡';
         joinGameRef.current(room, savedName, savedAvatar, `${host}:${port}`);
@@ -175,34 +210,6 @@ export function useBrawlClient() {
           }
           return prev;
         });
-      }
-    };
-
-    // Register live window.onDeepLinkJoin callback from native shell (warm deep link)
-    (window as unknown as { onDeepLinkJoin?: (data: unknown) => void }).onDeepLinkJoin = (data: unknown) => {
-      let room = '';
-      let host = '';
-      let port = 8080;
-      if (typeof data === 'object' && data !== null) {
-        const obj = data as { room?: string; host?: string; port?: number };
-        room = (obj.room || '').trim().toUpperCase();
-        host = (obj.host || '').trim();
-        port = typeof obj.port === 'number' ? obj.port : 8080;
-      }
-      if (room && host) {
-        discoveredRoomsRef.current.set(room, { hostIp: host, port, lastSeen: Date.now() });
-        setState(prev => ({
-          ...prev,
-          networkInfo: {
-            localIp: host,
-            port,
-            roomCode: room,
-            fullJoinUrl: `brawl://join?host=${host}&port=${port}&room=${room}`,
-            hasActiveRoom: true,
-            playerCount: prev.networkInfo?.playerCount || 1,
-            candidateUrls: [`brawl://join?host=${host}&port=${port}&room=${room}`],
-          },
-        }));
       }
     };
 
@@ -290,6 +297,12 @@ export function useBrawlClient() {
   const resolveWsUrl = useCallback((customHost?: string, customPort?: number): string => {
     // 1. Explicit parameter
     if (customHost) {
+      if (customHost.startsWith('ws://') || customHost.startsWith('wss://')) {
+        return customHost;
+      }
+      if (customHost.includes(':')) {
+        return `ws://${customHost}/ws`;
+      }
       const port = customPort || 8080;
       return `ws://${customHost}:${port}/ws`;
     }
@@ -633,20 +646,31 @@ const hostGame = useCallback((playerName: string, avatar: string) => {
     const savedToken = localStorage.getItem(SESSION_TOKEN_KEY) || undefined;
     setState(prev => ({ ...prev, errorMessage: null }));
 
-    // Check if target host was provided or is in discovered rooms
+    // Check if target host was provided or is in cold deep-link URL params or discovered rooms
     let hostToConnect = targetHost;
+
+    if (!hostToConnect && typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const qRoom = (params.get('room') || params.get('code') || '').trim().toUpperCase();
+      const qHost = (params.get('host') || '').trim();
+      const qPort = params.get('port');
+      if (qHost && (!qRoom || qRoom === cleanCode)) {
+        hostToConnect = qPort ? `${qHost}:${qPort}` : qHost;
+      }
+    }
+
     if (!hostToConnect) {
       const discovered = discoveredRoomsRef.current.get(cleanCode);
       if (discovered && (Date.now() - discovered.lastSeen < 30000)) {
-        hostToConnect = discovered.hostIp;
+        hostToConnect = discovered.port ? `${discovered.hostIp}:${discovered.port}` : discovered.hostIp;
       }
     }
 
     if (!hostToConnect && typeof window !== 'undefined') {
-      const globalConfig = (window as unknown as { BETBRAWL_CONFIG?: { hostIp?: string; discoveredHosts?: Array<{ ip: string; roomCode?: string }> } }).BETBRAWL_CONFIG;
+      const globalConfig = (window as unknown as { BETBRAWL_CONFIG?: { hostIp?: string; discoveredHosts?: Array<{ ip: string; port?: number; roomCode?: string }> } }).BETBRAWL_CONFIG;
       if (globalConfig?.discoveredHosts) {
         const match = globalConfig.discoveredHosts.find(d => d.roomCode === cleanCode);
-        if (match) hostToConnect = match.ip;
+        if (match) hostToConnect = match.port ? `${match.ip}:${match.port}` : match.ip;
       }
     }
 

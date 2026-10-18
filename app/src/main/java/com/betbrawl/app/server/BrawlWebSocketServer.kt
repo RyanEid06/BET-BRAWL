@@ -711,8 +711,8 @@ class BrawlWebSocketServer(
                 }
             }
         } else {
+            schedule.qualifiersCompleted += 1
             if (reason != RoundResolutionReason.VOID) {
-                schedule.qualifiersCompleted += 1
                 f1?.qualifierMatchesPlayed = (f1?.qualifierMatchesPlayed ?: 0) + 1
                 f2?.qualifierMatchesPlayed = (f2?.qualifierMatchesPlayed ?: 0) + 1
                 if (isTie) {

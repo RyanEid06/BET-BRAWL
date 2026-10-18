@@ -251,8 +251,8 @@ class TournamentParityTest {
     @Test
     fun testFinalPodiumState() {
         val p1 = RoomEngine.createFreshPlayer("P1", "⚡")
-        val awards = RoomEngine.computeSessionAwards(listOf(p1), emptyList(), championId = p1.id)
-        assertTrue(awards.any { it.id == "award_champion" && it.recipientId == p1.id })
+        val awards = RoomEngine.computeSessionAwards(listOf(p1), championId = p1.id)
+        assertTrue(awards.any { it.id == "tournament_champion" && it.recipientId == p1.id })
     }
 
     // 18. Duplicate Progression After Completion Ignored
@@ -364,5 +364,42 @@ class TournamentParityTest {
         assertEquals(6, p1.qualifierPoints)
         assertEquals(3, p2.qualifierPoints)
         assertEquals(0, p3.qualifierPoints)
+    }
+
+    // 21. Qualifier VOID Advances QualifiersCompleted Without Mutating Fighter Stats
+    @Test
+    fun testQualifierVoidAdvancesCompletionWithoutMutatingFighterStats() {
+        val p1 = RoomEngine.createFreshPlayer("P1", "⚡")
+        val p2 = RoomEngine.createFreshPlayer("P2", "🦊")
+        val p3 = RoomEngine.createFreshPlayer("P3", "🎯")
+        val schedule = RoomEngine.generateTournamentSchedule(listOf(p1, p2, p3))
+        assertEquals(0, schedule.qualifiersCompleted)
+
+        val initialP1Points = p1.qualifierPoints
+        val initialP1Wins = p1.qualifierWins
+        val initialP1Losses = p1.qualifierLosses
+        val initialP1Matches = p1.qualifierMatchesPlayed
+        val initialP2Points = p2.qualifierPoints
+        val initialP2Wins = p2.qualifierWins
+        val initialP2Losses = p2.qualifierLosses
+        val initialP2Matches = p2.qualifierMatchesPlayed
+
+        // Simulate VOID qualifier resolution
+        val voidMatch = schedule.matches[0]
+        voidMatch.completed = true
+        voidMatch.winnerId = null
+        voidMatch.tieResult = false
+        voidMatch.resolutionReason = RoundResolutionReason.VOID
+        schedule.qualifiersCompleted += 1
+
+        assertEquals(1, schedule.qualifiersCompleted)
+        assertEquals(initialP1Points, p1.qualifierPoints)
+        assertEquals(initialP1Wins, p1.qualifierWins)
+        assertEquals(initialP1Losses, p1.qualifierLosses)
+        assertEquals(initialP1Matches, p1.qualifierMatchesPlayed)
+        assertEquals(initialP2Points, p2.qualifierPoints)
+        assertEquals(initialP2Wins, p2.qualifierWins)
+        assertEquals(initialP2Losses, p2.qualifierLosses)
+        assertEquals(initialP2Matches, p2.qualifierMatchesPlayed)
     }
 }

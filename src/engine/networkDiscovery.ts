@@ -41,12 +41,28 @@ export function isLoopback(ip: string): boolean {
 
 export function isLoopbackUrl(url: string | undefined): boolean {
   if (!url) return true;
+  const trimmed = url.trim();
+  if (!trimmed || trimmed === 'null' || trimmed.startsWith('file:') || trimmed.startsWith('about:')) {
+    return true;
+  }
+  if (trimmed.startsWith('brawl://')) {
+    const qIdx = trimmed.indexOf('?');
+    if (qIdx !== -1) {
+      const params = new URLSearchParams(trimmed.slice(qIdx + 1));
+      const host = params.get('host');
+      if (!host || host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0' || host === '::1') {
+        return true;
+      }
+      return false;
+    }
+    return true;
+  }
   try {
-    const parsed = new URL(url);
+    const parsed = new URL(trimmed);
     const host = parsed.hostname;
     return host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0' || host === '::1';
   } catch {
-    return url.includes('localhost') || url.includes('127.0.0.1') || url.includes('0.0.0.0') || url.includes('::1');
+    return trimmed.includes('localhost') || trimmed.includes('127.0.0.1') || trimmed.includes('0.0.0.0') || trimmed.includes('::1');
   }
 }
 
@@ -56,10 +72,14 @@ export function isLoopbackUrl(url: string | undefined): boolean {
  */
 export function buildJoinUrl(baseUrl: string, roomCode: string): string {
   if (!baseUrl) return '';
+  const trimmedBase = baseUrl.trim();
+  if (trimmedBase === 'null' || trimmedBase.startsWith('file:') || trimmedBase.startsWith('about:')) {
+    return '';
+  }
   const trimmedCode = (roomCode || '').trim().toUpperCase();
 
   // Custom scheme: brawl://join
-  if (baseUrl.startsWith('brawl://')) {
+  if (trimmedBase.startsWith('brawl://')) {
     const questionIdx = baseUrl.indexOf('?');
     const baseUri = questionIdx !== -1 ? baseUrl.slice(0, questionIdx) : baseUrl;
     const queryString = questionIdx !== -1 ? baseUrl.slice(questionIdx + 1) : '';

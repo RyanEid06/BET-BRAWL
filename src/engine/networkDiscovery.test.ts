@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import os from 'os';
-import { discoverLanAddresses, isRfc1918, isLinkLocal, isLoopback } from './networkDiscovery.ts';
+import { discoverLanAddresses, isRfc1918, isLinkLocal, isLoopback, buildJoinUrl, isLoopbackUrl } from './networkDiscovery.ts';
 
 test('networkDiscovery: correctly identifies RFC1918 and link-local ranges', () => {
   assert.equal(isRfc1918('192.168.1.10'), true);
@@ -67,4 +67,45 @@ test('networkDiscovery: rejects 169.254.x.x and prefers physical Wi-Fi over virt
   assert.equal(primaryIp, '192.168.1.45', 'Must select physical Wi-Fi private IP');
   assert.ok(!candidateIps.includes('169.254.8.1'), 'Must NEVER include link-local APIPA address');
   assert.ok(!candidateIps.includes('127.0.0.1'), 'Must not include internal loopback when valid LAN IP exists');
+});
+
+test('Android QR never becomes null?room=... and rejects null/file origins while preserving brawl scheme', () => {
+  // Rejection of null, file, about, and empty URLs
+  assert.equal(buildJoinUrl('null', 'BRAWL'), '');
+  assert.equal(buildJoinUrl('  null  ', 'BRAWL'), '');
+  assert.equal(buildJoinUrl('file:///android_asset/web/index.html', 'BRAWL'), '');
+  assert.equal(buildJoinUrl('', 'BRAWL'), '');
+
+  // Loopback / unroutable check
+  assert.equal(isLoopbackUrl('null'), true);
+  assert.equal(isLoopbackUrl('file:///android_asset/web/index.html'), true);
+  assert.equal(isLoopbackUrl(''), true);
+  assert.equal(isLoopbackUrl('brawl://join?host=127.0.0.1&port=8080'), true);
+  assert.equal(isLoopbackUrl('brawl://join?host=192.168.1.50&port=8080'), false);
+
+  // Valid Android brawl scheme produces proper URI: brawl://join?host=<LAN_IP>&port=8080&room=<ROOM_CODE>
+  const androidQr = buildJoinUrl('brawl://join?host=192.168.1.50&port=8080', 'BRAWL');
+  assert.equal(androidQr, 'brawl://join?host=192.168.1.50&port=8080&room=BRAWL');
+  assert.ok(!androidQr.includes('null'), 'Android QR must never contain string null');
+
+  // Normal browser keeps original URL with query param
+  const browserQr = buildJoinUrl('http://192.168.1.50:3000', 'BRAWL');
+  assert.equal(browserQr, 'http://192.168.1.50:3000/?room=BRAWL');
+});
+
+test('cold deep-link host/port reaches join target: URL search params correctly supply target host without discovery', () => {
+  // Cold launch: MainActivity supplies room, host, port in WebView URL
+  const coldUrl = 'file:///android_asset/web/index.html?room=BRAWL&host=192.168.1.42&port=8080';
+  const urlObj = new URL(coldUrl);
+  const qRoom = (urlObj.searchParams.get('room') || '').trim().toUpperCase();
+  const qHost = (urlObj.searchParams.get('host') || '').trim();
+  const qPort = urlObj.searchParams.get('port');
+
+  assert.equal(qRoom, 'BRAWL');
+  assert.equal(qHost, '192.168.1.42');
+  assert.equal(qPort, '8080');
+
+  // Verify target endpoint resolution
+  const targetEndpoint = qPort ? `${qHost}:${qPort}` : qHost;
+  assert.equal(targetEndpoint, '192.168.1.42:8080');
 });

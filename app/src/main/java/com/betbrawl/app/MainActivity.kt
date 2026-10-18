@@ -16,6 +16,7 @@ import androidx.appcompat.app.AppCompatActivity
 import com.betbrawl.app.server.LanDiscovery
 import com.betbrawl.app.webview.BrawlWebInterface
 import com.betbrawl.app.webview.BrawlWebViewClient
+import com.betbrawl.app.webview.DeepLinkParser
 import org.json.JSONObject
 import java.net.URLEncoder
 

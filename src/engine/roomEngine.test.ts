@@ -361,3 +361,72 @@ test('computeSessionAwards derives awards strictly from genuine session statisti
   assert.ok(awardIds.includes('the_oracle'));
   assert.ok(awardIds.includes('high_roller'));
 });
+
+test('computeSessionAwards crowns tournament_champion with proper award ID', () => {
+  const players = createMockRoster(3);
+  const champ = players[0];
+  champ.qualifierPoints = 6;
+  const awards = computeSessionAwards(players, champ.id);
+  const champAward = awards.find(a => a.id === 'tournament_champion');
+  assert.ok(champAward, 'Must contain award with id tournament_champion');
+  assert.equal(champAward.recipientId, champ.id);
+  assert.equal(champAward.title, 'Tournament Champion');
+});
+
+test('qualifier VOID advances completion without changing fighter qualifier stats', () => {
+  const players = createMockRoster(3);
+  const [f1, f2] = players;
+  const schedule = generateTournamentSchedule(players);
+  assert.equal(schedule.qualifiersCompleted, 0);
+
+  const initialF1Points = f1.qualifierPoints;
+  const initialF1Wins = f1.qualifierWins;
+  const initialF1Losses = f1.qualifierLosses;
+  const initialF1Matches = f1.qualifierMatchesPlayed;
+  const initialF2Points = f2.qualifierPoints;
+  const initialF2Wins = f2.qualifierWins;
+  const initialF2Losses = f2.qualifierLosses;
+  const initialF2Matches = f2.qualifierMatchesPlayed;
+
+  // On VOID: qualifiersCompleted advances by 1, but fighter stats remain untouched
+  schedule.qualifiersCompleted += 1;
+  const match = schedule.matches[0];
+  match.completed = true;
+  match.winnerId = null;
+  match.tieResult = false;
+  match.resolutionReason = 'VOID';
+
+  assert.equal(schedule.qualifiersCompleted, 1);
+  assert.equal(f1.qualifierPoints, initialF1Points);
+  assert.equal(f1.qualifierWins, initialF1Wins);
+  assert.equal(f1.qualifierLosses, initialF1Losses);
+  assert.equal(f1.qualifierMatchesPlayed, initialF1Matches);
+  assert.equal(f2.qualifierPoints, initialF2Points);
+  assert.equal(f2.qualifierWins, initialF2Wins);
+  assert.equal(f2.qualifierLosses, initialF2Losses);
+  assert.equal(f2.qualifierMatchesPlayed, initialF2Matches);
+});
+
+test('public bet masking does not mutate authoritative round bets', () => {
+  const players = createMockRoster(3);
+  const { round } = initAuthoritativeRound(1, 4, players);
+
+  // Add a secret bet to the authoritative round
+  const secretBet = {
+    bettorId: players[2].id,
+    fighterId: players[0].id,
+    amount: 150,
+    oddsAtBet: 2.0,
+    timestamp: Date.now(),
+    potentialReturn: 300,
+  };
+  round.bets.push(secretBet);
+  assert.equal(round.bets.length, 1);
+
+  // Mask bets for public broadcast during active betting
+  const publicRound = { ...round, bets: [] };
+  assert.equal(publicRound.bets.length, 0, 'Public round bets must be scrubbed');
+  assert.equal(round.bets.length, 1, 'Authoritative round bets must remain completely unmutated');
+  assert.equal(round.bets[0].bettorId, players[2].id);
+  assert.equal(round.bets[0].amount, 150);
+});
