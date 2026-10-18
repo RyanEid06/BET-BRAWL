@@ -89,10 +89,30 @@ export function useBrawlClient() {
   const timeOffsetSamplesRef = useRef<number[]>([]);
   const targetWsEndpointRef = useRef<string | null>(null);
   const discoveredRoomsRef = useRef<Map<string, { hostIp: string; port: number; lastSeen: number }>>(new Map());
+  const joinGameRef = useRef<(roomCode: string, playerName: string, avatar: string, targetHost?: string) => void>(() => {});
 
   // Load network info on mount (checks native Android bridge first, then /api/network-info)
   useEffect(() => {
-    // 1. Check for native Android bridge injected network info & discovered rooms
+    // 1. Register live window.onDeepLinkJoin callback from native shell
+    (window as unknown as { onDeepLinkJoin?: (data: unknown) => void }).onDeepLinkJoin = (data: unknown) => {
+      let room = '';
+      let host = '';
+      let port = 8080;
+      if (typeof data === 'object' && data !== null) {
+        const obj = data as Record<string, unknown>;
+        room = String(obj.room || obj.roomCode || '').trim().toUpperCase();
+        host = String(obj.host || obj.ip || '').trim();
+        port = typeof obj.port === 'number' ? obj.port : 8080;
+      }
+      if (room && host) {
+        discoveredRoomsRef.current.set(room, { hostIp: host, port, lastSeen: Date.now() });
+        const savedName = localStorage.getItem(PLAYER_NAME_KEY) || 'You (Ace)';
+        const savedAvatar = localStorage.getItem(PLAYER_AVATAR_KEY) || '⚡';
+        joinGameRef.current(room, savedName, savedAvatar, `${host}:${port}`);
+      }
+    };
+
+    // 2. Check for native Android bridge injected network info & discovered rooms
     const androidBridge = (window as unknown as { BetBrawlAndroid?: { getNetworkInfoJson?: () => string; getDiscoveredHostsJson?: () => string } }).BetBrawlAndroid;
     if (androidBridge && typeof androidBridge.getDiscoveredHostsJson === 'function') {
       try {
@@ -155,6 +175,34 @@ export function useBrawlClient() {
           }
           return prev;
         });
+      }
+    };
+
+    // Register live window.onDeepLinkJoin callback from native shell (warm deep link)
+    (window as unknown as { onDeepLinkJoin?: (data: unknown) => void }).onDeepLinkJoin = (data: unknown) => {
+      let room = '';
+      let host = '';
+      let port = 8080;
+      if (typeof data === 'object' && data !== null) {
+        const obj = data as { room?: string; host?: string; port?: number };
+        room = (obj.room || '').trim().toUpperCase();
+        host = (obj.host || '').trim();
+        port = typeof obj.port === 'number' ? obj.port : 8080;
+      }
+      if (room && host) {
+        discoveredRoomsRef.current.set(room, { hostIp: host, port, lastSeen: Date.now() });
+        setState(prev => ({
+          ...prev,
+          networkInfo: {
+            localIp: host,
+            port,
+            roomCode: room,
+            fullJoinUrl: `brawl://join?host=${host}&port=${port}&room=${room}`,
+            hasActiveRoom: true,
+            playerCount: prev.networkInfo?.playerCount || 1,
+            candidateUrls: [`brawl://join?host=${host}&port=${port}&room=${room}`],
+          },
+        }));
       }
     };
 
@@ -280,8 +328,12 @@ export function useBrawlClient() {
     return 'ws://127.0.0.1:8080/ws';
   }, []);
 
-  // Connect WebSocket with immediate callback if already open
-  const connectWs = useCallback((targetUrlOrHost?: string | (() => void), onConnected?: () => void) => {
+  // Connect WebSocket with immediate callback if already open and optional bounded retry
+  const connectWs = useCallback((
+    targetUrlOrHost?: string | (() => void),
+    onConnected?: () => void,
+    options?: { maxRetries?: number; retryDelayMs?: number; retryErrorMessage?: string }
+  ) => {
     let callback = onConnected;
     let targetUrl: string | undefined;
 
@@ -300,44 +352,68 @@ export function useBrawlClient() {
     targetWsEndpointRef.current = wsUrl;
 
     // If socket is already OPEN to the same target, invoke the callback immediately!
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN && wsRef.current.url === wsUrl) {
       if (callback) callback();
       return;
     }
 
-    // If socket is CONNECTING, wait for it
-    if (wsRef.current && wsRef.current.readyState === WebSocket.CONNECTING) {
-      const checkInterval = setInterval(() => {
-        if (wsRef.current?.readyState === WebSocket.OPEN) {
-          clearInterval(checkInterval);
-          if (callback) callback();
-        } else if (!wsRef.current || wsRef.current.readyState === WebSocket.CLOSED) {
-          clearInterval(checkInterval);
-        }
-      }, 50);
-      return;
+    // Clean up any existing socket before opening a new one
+    if (wsRef.current) {
+      try {
+        wsRef.current.onopen = null;
+        wsRef.current.onmessage = null;
+        wsRef.current.onclose = null;
+        wsRef.current.onerror = null;
+        wsRef.current.close();
+      } catch {}
+      wsRef.current = null;
     }
 
     setState(prev => ({ ...prev, status: 'CONNECTING', errorMessage: null }));
 
-    const ws = new WebSocket(wsUrl);
-    wsRef.current = ws;
+    let attempts = 0;
+    const maxRetries = options?.maxRetries ?? 0;
+    const retryDelay = options?.retryDelayMs ?? 200;
+    let isConnected = false;
 
-    ws.onopen = () => {
-      setState(prev => ({ ...prev, status: 'CONNECTED', errorMessage: null }));
-      if (callback) callback();
+    const tryConnect = () => {
+      if (isConnected) return;
+      attempts++;
 
-      // Start ping heartbeat with timestamps for server-time synchronization
-      if (heartbeatIntervalRef.current) clearInterval(heartbeatIntervalRef.current);
-      heartbeatIntervalRef.current = setInterval(() => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({
-            type: 'PING',
-            payload: { clientSentAt: Date.now() },
-          }));
+      let ws: WebSocket;
+      try {
+        ws = new WebSocket(wsUrl);
+      } catch {
+        if (attempts <= maxRetries) {
+          setTimeout(tryConnect, retryDelay);
+          return;
         }
-      }, 5000);
-    };
+        setState(prev => ({
+          ...prev,
+          status: 'ERROR',
+          errorMessage: options?.retryErrorMessage || "Couldn’t connect to the game.",
+        }));
+        return;
+      }
+
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        isConnected = true;
+        setState(prev => ({ ...prev, status: 'CONNECTED', errorMessage: null }));
+        if (callback) callback();
+
+        // Start ping heartbeat with timestamps for server-time synchronization
+        if (heartbeatIntervalRef.current) clearInterval(heartbeatIntervalRef.current);
+        heartbeatIntervalRef.current = setInterval(() => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+              type: 'PING',
+              payload: { clientSentAt: Date.now() },
+            }));
+          }
+        }, 5000);
+      };
 
     ws.onmessage = (event) => {
       try {
@@ -494,87 +570,61 @@ export function useBrawlClient() {
     };
 
     ws.onerror = () => {
-      setState(prev => ({ ...prev, status: 'ERROR', errorMessage: "Couldn’t connect to the game." }));
-    };
-  }, [send]);
-
-  // Actions
-  const hostGame = useCallback((playerName: string, avatar: string) => {
-    localStorage.setItem(PLAYER_NAME_KEY, playerName);
-    localStorage.setItem(PLAYER_AVATAR_KEY, avatar);
-    setState(prev => ({ ...prev, status: 'CONNECTING', errorMessage: null }));
-
-    const isAndroid = typeof window !== 'undefined' && (
-      window.location.protocol === 'file:' ||
-      !!(window as unknown as { BetBrawlAndroid?: unknown }).BetBrawlAndroid
-    );
-
-    if (isAndroid) {
-      // Notify Android native shell to start Host Foreground Service
-      const androidBridge = (window as unknown as { BetBrawlAndroid?: { startHosting?: (name: string, av: string) => void } }).BetBrawlAndroid;
-      if (androidBridge && typeof androidBridge.startHosting === 'function') {
-        androidBridge.startHosting(playerName, avatar);
+      if (!isConnected && attempts <= maxRetries) {
+        try { ws.close(); } catch {}
+        setTimeout(tryConnect, retryDelay);
+        return;
       }
+      setState(prev => ({
+        ...prev,
+        status: 'ERROR',
+        errorMessage: options?.retryErrorMessage || "Couldn’t connect to the game.",
+      }));
+    };
+  };
 
-      // Bounded retry loop waiting for local WebSocket server to accept connections
-      let attempts = 0;
-      const maxAttempts = 15;
-      let activeWs: WebSocket | null = null;
-      let isOpened = false;
+  tryConnect();
+}, [resolveWsUrl, send]);
 
-      const attemptConnect = () => {
-        if (isOpened) return;
-        attempts++;
-        try {
-          activeWs = new WebSocket('ws://127.0.0.1:8080/ws');
-          activeWs.onopen = () => {
-            isOpened = true;
-            wsRef.current = activeWs;
-            connectWs('ws://127.0.0.1:8080/ws', () => {
-              send({
-                type: 'CREATE_ROOM',
-                payload: { playerName, avatar, debugMode: state.isDebug },
-              });
-            });
-          };
-          activeWs.onerror = () => {
-            try { activeWs?.close(); } catch {}
-            if (!isOpened) {
-              if (attempts < maxAttempts) {
-                setTimeout(attemptConnect, 200);
-              } else {
-                setState(prev => ({
-                  ...prev,
-                  status: 'ERROR',
-                  errorMessage: 'Failed to start local host service. Please try again.',
-                }));
-              }
-            }
-          };
-        } catch {
-          if (attempts < maxAttempts) {
-            setTimeout(attemptConnect, 200);
-          } else {
-            setState(prev => ({
-              ...prev,
-              status: 'ERROR',
-              errorMessage: 'Failed to start local host service. Please try again.',
-            }));
-          }
-        }
-      };
+// Actions
+const hostGame = useCallback((playerName: string, avatar: string) => {
+  localStorage.setItem(PLAYER_NAME_KEY, playerName);
+  localStorage.setItem(PLAYER_AVATAR_KEY, avatar);
+  setState(prev => ({ ...prev, status: 'CONNECTING', errorMessage: null }));
 
-      setTimeout(attemptConnect, 150);
-    } else {
-      // Normal browser flow
-      connectWs(undefined, () => {
-        send({
-          type: 'CREATE_ROOM',
-          payload: { playerName, avatar, debugMode: state.isDebug },
-        });
-      });
+  const isAndroid = typeof window !== 'undefined' && (
+    window.location.protocol === 'file:' ||
+    !!(window as unknown as { BetBrawlAndroid?: unknown }).BetBrawlAndroid
+  );
+
+  if (isAndroid) {
+    // Notify Android native shell to start Host Foreground Service
+    const androidBridge = (window as unknown as { BetBrawlAndroid?: { startHosting?: (name: string, av: string) => void } }).BetBrawlAndroid;
+    if (androidBridge && typeof androidBridge.startHosting === 'function') {
+      androidBridge.startHosting(playerName, avatar);
     }
-  }, [connectWs, send, state.isDebug]);
+
+    // Single application WebSocket with bounded retry while native server starts
+    connectWs('ws://127.0.0.1:8080/ws', () => {
+      send({
+        type: 'CREATE_ROOM',
+        payload: { playerName, avatar, debugMode: state.isDebug },
+      });
+    }, {
+      maxRetries: 15,
+      retryDelayMs: 200,
+      retryErrorMessage: 'Failed to start local host service. Please try again.',
+    });
+  } else {
+    // Normal browser flow
+    connectWs(undefined, () => {
+      send({
+        type: 'CREATE_ROOM',
+        payload: { playerName, avatar, debugMode: state.isDebug },
+      });
+    });
+  }
+}, [connectWs, send, state.isDebug]);
 
   const joinGame = useCallback((roomCode: string, playerName: string, avatar: string, targetHost?: string) => {
     const cleanCode = roomCode.trim().toUpperCase();

@@ -173,6 +173,7 @@ object OddsEngine {
             val halfPot = round.matchPot / 2
             if (fighterA != null) {
                 fighterA.coins += halfPot
+                fighterA.matchesPlayed += 1
                 payouts.add(
                     RoundPayoutItem(
                         playerId = fighterA.id,
@@ -187,6 +188,7 @@ object OddsEngine {
             }
             if (fighterB != null) {
                 fighterB.coins += halfPot
+                fighterB.matchesPlayed += 1
                 payouts.add(
                     RoundPayoutItem(
                         playerId = fighterB.id,
@@ -223,8 +225,12 @@ object OddsEngine {
         // DISCONNECT_FORFEIT: Winner gets bounty, bets refunded
         if (resolutionReason == RoundResolutionReason.DISCONNECT_FORFEIT) {
             val winner = players.find { it.id == winnerId }
+            val loserId = if (f1Id == winnerId) f2Id else f1Id
+            val loser = players.find { it.id == loserId }
             if (winner != null) {
                 winner.coins += round.matchPot
+                winner.matchesWon += 1
+                winner.matchesPlayed += 1
                 payouts.add(
                     RoundPayoutItem(
                         playerId = winner.id,
@@ -237,6 +243,7 @@ object OddsEngine {
                     )
                 )
             }
+            loser?.let { it.matchesPlayed += 1 }
 
             for (bet in round.bets) {
                 val bettor = players.find { it.id == bet.bettorId } ?: continue
@@ -260,8 +267,12 @@ object OddsEngine {
 
         // Standard Win
         val winner = players.find { it.id == winnerId }
+        val loserId = if (f1Id == winnerId) f2Id else f1Id
+        val loser = players.find { it.id == loserId }
         if (winner != null) {
             winner.coins += round.matchPot
+            winner.matchesWon += 1
+            winner.matchesPlayed += 1
             payouts.add(
                 RoundPayoutItem(
                     playerId = winner.id,
@@ -274,6 +285,7 @@ object OddsEngine {
                 )
             )
         }
+        loser?.let { it.matchesPlayed += 1 }
 
         for (bet in round.bets) {
             val bettor = players.find { it.id == bet.bettorId } ?: continue

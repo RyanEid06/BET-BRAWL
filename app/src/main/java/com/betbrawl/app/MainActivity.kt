@@ -24,12 +24,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var webView: WebView
     private lateinit var lanDiscovery: LanDiscovery
 
-    data class ValidatedDeepLink(
-        val roomCode: String,
-        val host: String,
-        val port: Int
-    )
-
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -70,7 +64,7 @@ class MainActivity : AppCompatActivity() {
 
         if (savedInstanceState == null) {
             // Cold launch: Parse validated deep link and append as safe query parameters to initial URL
-            val coldLink = parseValidatedDeepLink(intent)
+            val coldLink = DeepLinkParser.parse(intent?.data)
             val initialUrl = if (coldLink != null) {
                 val encodedRoom = URLEncoder.encode(coldLink.roomCode, "UTF-8")
                 val encodedHost = URLEncoder.encode(coldLink.host, "UTF-8")
@@ -86,7 +80,7 @@ class MainActivity : AppCompatActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         // Warm launch: dispatch safely via JSON
-        val warmLink = parseValidatedDeepLink(intent)
+        val warmLink = DeepLinkParser.parse(intent?.data)
         if (warmLink != null) {
             val payload = JSONObject().apply {
                 put("room", warmLink.roomCode)
@@ -95,26 +89,6 @@ class MainActivity : AppCompatActivity() {
             }
             webView.evaluateJavascript("if (typeof window.onDeepLinkJoin === 'function') { window.onDeepLinkJoin(${payload}); }", null)
         }
-    }
-
-    private fun parseValidatedDeepLink(intent: Intent?): ValidatedDeepLink? {
-        val uri: Uri = intent?.data ?: return null
-        if (uri.scheme != "brawl" || uri.host != "join") return null
-
-        val rawRoom = uri.getQueryParameter("room").orEmpty().trim().uppercase()
-        val rawHost = uri.getQueryParameter("host").orEmpty().trim()
-        val rawPort = uri.getQueryParameter("port")?.toIntOrNull() ?: 8080
-
-        // Strict validation: room must be alphanumeric (3..12 chars)
-        if (!rawRoom.matches(Regex("^[A-Z0-9]{3,12}$"))) return null
-
-        // Host must be a valid private IPv4 or loopback
-        if (rawHost != "127.0.0.1" && !LanDiscovery.isPrivateIPv4(rawHost)) return null
-
-        // Port must be in valid unprivileged TCP range
-        if (rawPort !in 1024..65535) return null
-
-        return ValidatedDeepLink(rawRoom, rawHost, rawPort)
     }
 
     @SuppressLint("SetJavaScriptEnabled")

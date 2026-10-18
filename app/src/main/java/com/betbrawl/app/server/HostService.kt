@@ -12,6 +12,7 @@ import com.betbrawl.app.R
 class HostService : Service() {
 
     private var lanDiscovery: LanDiscovery? = null
+    private var advertisedRoomCode: String? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -30,10 +31,22 @@ class HostService : Service() {
 
         if (serverInstance == null) {
             val server = BrawlWebSocketServer("0.0.0.0", port) { roomState ->
-                // When room is created or code is assigned, register LAN discovery
-                if (roomState.roomCode.isNotEmpty() && lanDiscovery == null) {
-                    lanDiscovery = LanDiscovery(applicationContext).apply {
-                        registerService(port, roomState.roomCode)
+                val currentRoomCode = roomState.roomCode
+                if (currentRoomCode.isNotEmpty()) {
+                    if (lanDiscovery == null) {
+                        lanDiscovery = LanDiscovery(applicationContext)
+                    }
+                    if (advertisedRoomCode != currentRoomCode) {
+                        advertisedRoomCode = currentRoomCode
+                        lanDiscovery?.registerService(port, currentRoomCode)
+                    }
+                } else {
+                    // Room closed or reset
+                    advertisedRoomCode = null
+                    lanDiscovery?.stopAdvertising()
+                    if (roomState.phase == com.betbrawl.app.server.model.GamePhase.ENTRY) {
+                        stopHosting()
+                        stopSelf()
                     }
                 }
             }
@@ -83,10 +96,17 @@ class HostService : Service() {
     }
 
     private fun stopHosting() {
+        advertisedRoomCode = null
         lanDiscovery?.stop()
         lanDiscovery = null
         serverInstance?.stopServer()
         serverInstance = null
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        } else {
+            @Suppress("DEPRECATION")
+            stopForeground(true)
+        }
     }
 
     override fun onDestroy() {

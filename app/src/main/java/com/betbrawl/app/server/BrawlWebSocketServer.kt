@@ -346,7 +346,20 @@ class BrawlWebSocketServer(
 
         val schedule = RoomEngine.generateTournamentSchedule(connectedPlayers)
         tournamentSchedule = schedule
-        totalRounds = schedule.matches.size
+        totalRounds = schedule.totalRounds
+
+        // Reset all players' tournament stats for fresh tournament
+        for (p in players.values) {
+            p.qualifierPoints = 0
+            p.qualifierWins = 0
+            p.qualifierTies = 0
+            p.qualifierLosses = 0
+            p.qualifierMatchesPlayed = 0
+            p.tournamentRank = null
+        }
+
+        // Initialize authoritative initial tournament rankings based on frozen roster seed
+        RoomEngine.computeTournamentRankings(players.values.toList(), emptyList(), schedule.stableRosterOrder)
 
         transitionToNextTournamentMatch()
     }
@@ -392,10 +405,13 @@ class BrawlWebSocketServer(
                 )
                 val finalists = listOf(ranked[0].id, ranked[1].id)
                 schedule.finalists = finalists
-                schedule.thirdPlaceId = ranked[2].id
+                schedule.thirdPlaceId = ranked.getOrNull(2)?.id
+                schedule.championshipWins.clear()
+                schedule.championshipWins[finalists[0]] = 0
+                schedule.championshipWins[finalists[1]] = 0
 
                 // Start Championship Series Game 1
-                schedule.championshipGamesPlayed = 1
+                schedule.championshipGamesPlayed = 0
                 val champMatch = TournamentMatch(
                     matchIndex = schedule.matches.size,
                     roundNumber = schedule.matches.size + 1,
@@ -404,11 +420,12 @@ class BrawlWebSocketServer(
                     championshipGameNumber = 1
                 )
                 schedule.matches.add(champMatch)
-                totalRounds = schedule.matches.size
+                totalRounds = maxOf(totalRounds, schedule.matches.size)
                 initMatchRound(champMatch, isChampionship = true)
             }
         } else if (schedule.stage == TournamentStage.CHAMPIONSHIP) {
-            val (f1, f2) = schedule.finalists!!
+            val finalists = schedule.finalists!!
+            val (f1, f2) = finalists
             val w1 = schedule.championshipWins.getOrDefault(f1, 0)
             val w2 = schedule.championshipWins.getOrDefault(f2, 0)
 
@@ -424,16 +441,16 @@ class BrawlWebSocketServer(
                 broadcastRoomState()
             } else {
                 // Series continues!
-                schedule.championshipGamesPlayed += 1
+                val nextGameNumber = schedule.championshipGamesPlayed + 1
                 val nextChampMatch = TournamentMatch(
                     matchIndex = schedule.matches.size,
                     roundNumber = schedule.matches.size + 1,
-                    fighterIds = schedule.finalists!!,
+                    fighterIds = finalists,
                     isChampionship = true,
-                    championshipGameNumber = schedule.championshipGamesPlayed
+                    championshipGameNumber = nextGameNumber
                 )
                 schedule.matches.add(nextChampMatch)
-                totalRounds = schedule.matches.size
+                totalRounds = maxOf(totalRounds, schedule.matches.size)
                 initMatchRound(nextChampMatch, isChampionship = true)
             }
         }
@@ -452,7 +469,7 @@ class BrawlWebSocketServer(
         val (f1, f2) = match.fighterIds
         val fighterA = players.values.find { it.id == f1 } ?: RoomEngine.createFreshPlayer("Fighter A", "⚡")
         val fighterB = players.values.find { it.id == f2 } ?: RoomEngine.createFreshPlayer("Fighter B", "🦊")
-        val initialOdds = OddsEngine.calculateDynamicOdds(fighterA, fighterB, roundHistory)
+        val initialOdds = OddsEngine.calculateDynamicOdds(fighterA, fighterB, emptyList())
 
         val matchPot = if (isChampionship) 500 else 250
         val now = System.currentTimeMillis()
@@ -552,16 +569,25 @@ class BrawlWebSocketServer(
         }
     }
 
+    private fun toStrictPositiveInteger(num: Any?): Int? {
+        if (num !is Number) return null
+        val d = num.toDouble()
+        if (!d.isFinite() || d <= 0.0 || d % 1.0 != 0.0 || d > Int.MAX_VALUE.toDouble()) {
+            return null
+        }
+        return d.toInt()
+    }
+
     private fun handlePlaceBet(conn: WebSocket, payload: Map<String, Any?>?) {
         val token = socketToToken[conn] ?: return
         val bettor = players[token] ?: return
         val fighterId = payload?.get("fighterId") as? String ?: return
         val rawAmount = payload?.get("amount")
-        if (rawAmount !is Number) {
-            sendToSocket(conn, "BET_REJECTED", mapOf("reason" to "Amount must be a whole number."))
+        val amount = toStrictPositiveInteger(rawAmount)
+        if (amount == null) {
+            sendToSocket(conn, "BET_REJECTED", mapOf("reason" to "Bet amount must be a positive whole number"))
             return
         }
-        val amount = rawAmount.toInt()
 
         val err = OddsEngine.validateBetPlacement(
             bettor = bettor,
@@ -600,7 +626,7 @@ class BrawlWebSocketServer(
         val (f1, f2) = round.fighterIds
         val fighterA = players.values.find { it.id == f1 } ?: RoomEngine.createFreshPlayer("A", "⚡")
         val fighterB = players.values.find { it.id == f2 } ?: RoomEngine.createFreshPlayer("B", "🦊")
-        round.odds = OddsEngine.calculateDynamicOdds(fighterA, fighterB, roundHistory, round.bets)
+        round.odds = OddsEngine.calculateDynamicOdds(fighterA, fighterB, round.bets)
 
         sendToSocket(conn, "BET_ACCEPTED", mapOf(
             "bet" to bet,
@@ -671,30 +697,40 @@ class BrawlWebSocketServer(
         val f1 = players.values.find { it.id == f1Id }
         val f2 = players.values.find { it.id == f2Id }
 
-        f1?.matchesPlayed = (f1?.matchesPlayed ?: 0) + 1
-        f2?.matchesPlayed = (f2?.matchesPlayed ?: 0) + 1
-
         if (round.isChampionship) {
+            schedule.championshipGamesPlayed += 1
             if (!isTie && winnerId != null && reason != RoundResolutionReason.VOID) {
-                schedule.championshipWins[winnerId] = schedule.championshipWins.getOrDefault(winnerId, 0) + 1
-                val winPlayer = players.values.find { it.id == winnerId }
-                winPlayer?.matchesWon = (winPlayer?.matchesWon ?: 0) + 1
+                val currentWins = schedule.championshipWins.getOrDefault(winnerId, 0) + 1
+                schedule.championshipWins[winnerId] = currentWins
+
+                if (currentWins >= 2) {
+                    schedule.championId = winnerId
+                    val loserId = if (winnerId == f1Id) f2Id else f1Id
+                    schedule.runnerUpId = loserId
+                    schedule.stage = TournamentStage.COMPLETE
+                }
             }
         } else {
-            schedule.qualifiersCompleted += 1
-            if (isTie) {
-                f1?.qualifierPoints = (f1?.qualifierPoints ?: 0) + 1
-                f2?.qualifierPoints = (f2?.qualifierPoints ?: 0) + 1
-                f1?.qualifierTies = (f1?.qualifierTies ?: 0) + 1
-                f2?.qualifierTies = (f2?.qualifierTies ?: 0) + 1
-            } else if (winnerId != null) {
-                val winPlayer = players.values.find { it.id == winnerId }
-                val loserPlayer = players.values.find { it.id == if (winnerId == f1Id) f2Id else f1Id }
-                winPlayer?.qualifierPoints = (winPlayer?.qualifierPoints ?: 0) + 3
-                winPlayer?.qualifierWins = (winPlayer?.qualifierWins ?: 0) + 1
-                winPlayer?.matchesWon = (winPlayer?.matchesWon ?: 0) + 1
-                loserPlayer?.qualifierLosses = (loserPlayer?.qualifierLosses ?: 0) + 1
+            if (reason != RoundResolutionReason.VOID) {
+                schedule.qualifiersCompleted += 1
+                f1?.qualifierMatchesPlayed = (f1?.qualifierMatchesPlayed ?: 0) + 1
+                f2?.qualifierMatchesPlayed = (f2?.qualifierMatchesPlayed ?: 0) + 1
+                if (isTie) {
+                    f1?.qualifierPoints = (f1?.qualifierPoints ?: 0) + 1
+                    f2?.qualifierPoints = (f2?.qualifierPoints ?: 0) + 1
+                    f1?.qualifierTies = (f1?.qualifierTies ?: 0) + 1
+                    f2?.qualifierTies = (f2?.qualifierTies ?: 0) + 1
+                } else if (winnerId != null) {
+                    val winPlayer = players.values.find { it.id == winnerId }
+                    val loserPlayer = players.values.find { it.id == if (winnerId == f1Id) f2Id else f1Id }
+                    winPlayer?.qualifierPoints = (winPlayer?.qualifierPoints ?: 0) + 3
+                    winPlayer?.qualifierWins = (winPlayer?.qualifierWins ?: 0) + 1
+                    loserPlayer?.qualifierLosses = (loserPlayer?.qualifierLosses ?: 0) + 1
+                }
             }
+            // Recompute live tournament rankings after qualifier match
+            val completedQualifiers = schedule.matches.filter { !it.isChampionship && it.completed }
+            RoomEngine.computeTournamentRankings(players.values.toList(), completedQualifiers, schedule.stableRosterOrder)
         }
 
         // Payouts
@@ -729,6 +765,15 @@ class BrawlWebSocketServer(
         val token = socketToToken[conn] ?: return
         val player = players[token] ?: return
         if (!player.isHost) return
+
+        val schedule = tournamentSchedule
+        if (schedule != null && schedule.stage == TournamentStage.COMPLETE) {
+            phase = GamePhase.FINAL_PODIUM
+            awards.clear()
+            awards.addAll(RoomEngine.computeSessionAwards(players.values.toList(), schedule.championId))
+            broadcastRoomState()
+            return
+        }
 
         transitionToNextTournamentMatch()
     }
@@ -815,6 +860,8 @@ class BrawlWebSocketServer(
     }
 
     private fun resetRoom() {
+        clearAllTimers()
+        clearConnectionTimers()
         players.clear()
         clientSockets.clear()
         socketToToken.clear()
@@ -825,17 +872,24 @@ class BrawlWebSocketServer(
         roomCode = ""
         roomId = ""
         phase = GamePhase.ENTRY
+        broadcastRoomState()
     }
 
     fun broadcastRoomState() {
         val publicPlayers = players.values.map { it.toPublicPlayer() }
 
         // MASK SECRET BETS: Before PAYOUT_RECAP and FINAL_PODIUM, bets MUST be empty!
-        val scrubbedRound = currentRound?.copy()
-        if (scrubbedRound != null) {
-            if (phase != GamePhase.PAYOUT_RECAP && phase != GamePhase.FINAL_PODIUM) {
-                scrubbedRound.bets.clear()
+        // CRITICAL: Do NOT mutate authoritative round.bets via shallow copy!
+        val scrubbedRound = currentRound?.let { round ->
+            val publicBets = if (phase == GamePhase.PAYOUT_RECAP || phase == GamePhase.FINAL_PODIUM) {
+                round.bets.toMutableList()
+            } else {
+                mutableListOf<SecretBet>()
             }
+            round.copy(
+                bets = publicBets,
+                fighterScores = round.fighterScores.toMutableMap()
+            )
         }
 
         val baseRoomState = PublicRoomState(
@@ -845,9 +899,14 @@ class BrawlWebSocketServer(
             players = publicPlayers,
             totalRounds = totalRounds,
             currentRound = scrubbedRound,
-            tournamentSchedule = tournamentSchedule,
-            roundHistory = roundHistory,
-            awards = awards,
+            tournamentSchedule = tournamentSchedule?.let { sched ->
+                sched.copy(
+                    matches = sched.matches.toMutableList(),
+                    championshipWins = sched.championshipWins.toMutableMap()
+                )
+            },
+            roundHistory = roundHistory.toList(),
+            awards = awards.toList(),
             debugMode = debugMode
         )
 

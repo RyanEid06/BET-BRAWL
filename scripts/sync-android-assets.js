@@ -47,4 +47,13 @@ fs.mkdirSync(targetAssetsDir, { recursive: true });
 
 copyRecursiveSync(distDir, targetAssetsDir);
 
+// Verify and rewrite index.html paths to ensure relative asset loading on Android
+const indexHtmlPath = path.join(targetAssetsDir, 'index.html');
+if (fs.existsSync(indexHtmlPath)) {
+  let html = fs.readFileSync(indexHtmlPath, 'utf8');
+  html = html.replace(/src="\/assets\//g, 'src="./assets/');
+  html = html.replace(/href="\/assets\//g, 'href="./assets/');
+  fs.writeFileSync(indexHtmlPath, html, 'utf8');
+}
+
 console.log(`[BET & BRAWL] Successfully synced bundled frontend assets to: ${targetAssetsDir}`);

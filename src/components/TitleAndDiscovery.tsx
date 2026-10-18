@@ -5,7 +5,7 @@
  * Bet & BRAWL: Party Game Entry Screen (Host vs Join)
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Play, Users, Wifi, LogIn, AlertCircle } from 'lucide-react';
 import { sound } from '../engine/audio.ts';
 import type { RoomNetworkInfo } from '../engine/types.ts';
@@ -49,6 +49,29 @@ export const TitleAndDiscovery: React.FC<Props> = ({
     }
     return '';
   });
+
+  useEffect(() => {
+    const handleDeepLink = (data: unknown) => {
+      if (typeof data === 'object' && data !== null) {
+        const obj = data as { room?: string };
+        const code = (obj.room || '').trim().toUpperCase();
+        if (code) {
+          setJoinCode(code);
+          setMode('JOIN_INPUT');
+        }
+      }
+    };
+    const prevHandler = (window as unknown as { onDeepLinkJoin?: (data: unknown) => void }).onDeepLinkJoin;
+    (window as unknown as { onDeepLinkJoin?: (data: unknown) => void }).onDeepLinkJoin = (data: unknown) => {
+      if (typeof prevHandler === 'function') {
+        try { prevHandler(data); } catch {}
+      }
+      handleDeepLink(data);
+    };
+    return () => {
+      (window as unknown as { onDeepLinkJoin?: (data: unknown) => void }).onDeepLinkJoin = prevHandler;
+    };
+  }, []);
 
   const handleStartHosting = () => {
     sound.playFanfare();

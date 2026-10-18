@@ -11,6 +11,7 @@ import { Users, Wifi, Play, Bot, WifiOff, LogOut, Trophy } from 'lucide-react';
 import type { PublicPlayer, RoomNetworkInfo } from '../engine/types.ts';
 import { MIN_PLAYERS_TO_START, MAX_PLAYERS_CAPACITY } from '../engine/roomEngine.ts';
 import { sound } from '../engine/audio.ts';
+import { isLoopbackUrl, buildJoinUrl } from '../engine/networkDiscovery.ts';
 
 interface Props {
   players: PublicPlayer[];
@@ -75,9 +76,7 @@ export const LobbyScreen: React.FC<Props> = ({
     }
   }, [networkInfo, selectedBaseUrl]);
 
-  const joinUrlWithRoom = roomCode
-    ? `${selectedBaseUrl}?room=${roomCode}`
-    : selectedBaseUrl;
+  const joinUrlWithRoom = buildJoinUrl(selectedBaseUrl, roomCode);
 
   const isLanReady = !isLoopbackUrl(selectedBaseUrl);
 

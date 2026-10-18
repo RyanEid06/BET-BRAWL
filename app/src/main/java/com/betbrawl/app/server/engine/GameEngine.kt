@@ -214,17 +214,29 @@ object GameEngine {
                 return GameActionResult(resolved = false, winnerId = null, isTie = false, scoreUpdate = fighterScores)
             }
 
+    fun toStrictNonNegativeInteger(value: Any?): Int? {
+        if (value !is Number) return null
+        val d = value.toDouble()
+        if (!d.isFinite() || d < 0.0 || d % 1.0 != 0.0 || d > Int.MAX_VALUE.toDouble()) return null
+        return d.toInt()
+    }
+
+    fun toStrictInteger(value: Any?): Int? {
+        if (value !is Number) return null
+        val d = value.toDouble()
+        if (!d.isFinite() || d % 1.0 != 0.0 || d < Int.MIN_VALUE.toDouble() || d > Int.MAX_VALUE.toDouble()) return null
+        return d.toInt()
+    }
+
             "speed_math" -> {
                 if (actionType != "ANSWER") {
                     return GameActionResult(resolved = false, winnerId = null, rejectionReason = "Invalid action for Speed Math")
                 }
-                val rawQIndex = action["questionIndex"]
-                val rawAnswer = action["answer"]
-                if (rawQIndex !is Number || rawAnswer !is Number) {
+                val qIndex = toStrictNonNegativeInteger(action["questionIndex"])
+                val answer = toStrictInteger(action["answer"])
+                if (qIndex == null || answer == null) {
                     return GameActionResult(resolved = false, winnerId = null, rejectionReason = "Invalid Speed Math payload")
                 }
-                val qIndex = rawQIndex.toInt()
-                val answer = rawAnswer.toInt()
 
                 // Penalty lock check
                 val penaltyUntil = internal.speedMathPenaltyUntil[fighterId] ?: 0L
@@ -298,11 +310,10 @@ object GameEngine {
                 if (guess != "HIGHER" && guess != "LOWER") {
                     return GameActionResult(resolved = false, winnerId = null, rejectionReason = "Guess must be HIGHER or LOWER")
                 }
-                val rawQIndex = action["questionIndex"]
-                if (rawQIndex !is Number) {
+                val qIndex = toStrictNonNegativeInteger(action["questionIndex"])
+                if (qIndex == null) {
                     return GameActionResult(resolved = false, winnerId = null, rejectionReason = "Invalid questionIndex")
                 }
-                val qIndex = rawQIndex.toInt()
 
                 val currentStep = internal.higherLowerStepIndex[fighterId] ?: 0
                 if (qIndex != currentStep) {
@@ -390,14 +401,14 @@ object GameEngine {
                 fighterScores[fighterId] = distanceKm
 
                 if (internal.blindPinpointPins.containsKey(f1) && internal.blindPinpointPins.containsKey(f2)) {
-                    val dist1 = (internal.blindPinpointPins[f1]?.get("km") as Number).toInt()
-                    val dist2 = (internal.blindPinpointPins[f2]?.get("km") as Number).toInt()
+                    val dist1 = (internal.blindPinpointPins[f1]?.get("km") as Number).toDouble()
+                    val dist2 = (internal.blindPinpointPins[f2]?.get("km") as Number).toDouble()
                     val patch = mapOf(
                         "revealedCity" to targetCity,
                         "pins" to internal.blindPinpointPins
                     )
 
-                    if (abs(dist1 - dist2) < 10) {
+                    if (abs(dist1 - dist2) < 10.0) {
                         return GameActionResult(
                             resolved = true,
                             winnerId = null,
@@ -536,9 +547,9 @@ object GameEngine {
                 )
 
                 if (p1 != null && p2 != null) {
-                    val dist1 = (p1["km"] as Number).toInt()
-                    val dist2 = (p2["km"] as Number).toInt()
-                    if (abs(dist1 - dist2) < 10) return Triple(null, true, patch)
+                    val dist1 = (p1["km"] as Number).toDouble()
+                    val dist2 = (p2["km"] as Number).toDouble()
+                    if (abs(dist1 - dist2) < 10.0) return Triple(null, true, patch)
                     return Triple(if (dist1 < dist2) f1 else f2, false, patch)
                 }
                 if (p1 != null && p2 == null) return Triple(f1, false, patch)

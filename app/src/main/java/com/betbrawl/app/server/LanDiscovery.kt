@@ -30,7 +30,19 @@ class LanDiscovery(private val context: Context) {
         var timestamp: Long = System.currentTimeMillis()
     )
 
+    fun stopAdvertising() {
+        udpBroadcastJob?.cancel()
+        udpBroadcastJob = null
+        try {
+            registrationListener?.let { nsdManager?.unregisterService(it) }
+        } catch (e: Exception) {
+            // Ignore
+        }
+        registrationListener = null
+    }
+
     fun registerService(port: Int, roomCode: String) {
+        stopAdvertising()
         // 1. Register mDNS via Android NSD
         try {
             val serviceInfo = NsdServiceInfo().apply {
@@ -195,19 +207,11 @@ class LanDiscovery(private val context: Context) {
     }
 
     fun stop() {
-        udpBroadcastJob?.cancel()
-        udpBroadcastJob = null
+        stopAdvertising()
         udpListenJob?.cancel()
         udpListenJob = null
         ttlPruneJob?.cancel()
         ttlPruneJob = null
-
-        try {
-            registrationListener?.let { nsdManager?.unregisterService(it) }
-        } catch (e: Exception) {
-            // Ignore
-        }
-        registrationListener = null
 
         try {
             discoveryListener?.let { nsdManager?.stopServiceDiscovery(it) }

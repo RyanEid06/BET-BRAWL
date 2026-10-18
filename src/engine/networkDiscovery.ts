@@ -50,6 +50,47 @@ export function isLoopbackUrl(url: string | undefined): boolean {
   }
 }
 
+/**
+ * Safely constructs a canonical Join URL without duplicate query strings or malformed parameters.
+ * Preserves host and port, supporting http://, https://, and custom brawl://join schemes.
+ */
+export function buildJoinUrl(baseUrl: string, roomCode: string): string {
+  if (!baseUrl) return '';
+  const trimmedCode = (roomCode || '').trim().toUpperCase();
+
+  // Custom scheme: brawl://join
+  if (baseUrl.startsWith('brawl://')) {
+    const questionIdx = baseUrl.indexOf('?');
+    const baseUri = questionIdx !== -1 ? baseUrl.slice(0, questionIdx) : baseUrl;
+    const queryString = questionIdx !== -1 ? baseUrl.slice(questionIdx + 1) : '';
+    const params = new URLSearchParams(queryString);
+    if (trimmedCode) {
+      params.set('room', trimmedCode);
+    }
+    const qs = params.toString();
+    return qs ? `${baseUri}?${qs}` : baseUri;
+  }
+
+  // Standard http/https URL
+  try {
+    const url = new URL(baseUrl);
+    if (trimmedCode) {
+      url.searchParams.set('room', trimmedCode);
+    }
+    return url.toString();
+  } catch {
+    const questionIdx = baseUrl.indexOf('?');
+    const baseUri = questionIdx !== -1 ? baseUrl.slice(0, questionIdx) : baseUrl;
+    const queryString = questionIdx !== -1 ? baseUrl.slice(questionIdx + 1) : '';
+    const params = new URLSearchParams(queryString);
+    if (trimmedCode) {
+      params.set('room', trimmedCode);
+    }
+    const qs = params.toString();
+    return qs ? `${baseUri}?${qs}` : baseUri;
+  }
+}
+
 interface ScoredInterface {
   address: string;
   interfaceName: string;

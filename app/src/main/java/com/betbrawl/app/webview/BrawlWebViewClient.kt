@@ -17,11 +17,16 @@ class BrawlWebViewClient : WebViewClient() {
 
         // Support brawl://join custom deep links
         if (scheme == "brawl" && uri.host == "join") {
-            val roomCode = uri.getQueryParameter("room").orEmpty()
-            val host = uri.getQueryParameter("host").orEmpty()
-            val port = uri.getQueryParameter("port")?.toIntOrNull() ?: 8080
-            val js = "if (window.onDeepLinkJoin) { window.onDeepLinkJoin('$roomCode', '$host', $port); }"
-            view?.evaluateJavascript(js, null)
+            val validLink = DeepLinkParser.parse(uri)
+            if (validLink != null) {
+                val payload = org.json.JSONObject().apply {
+                    put("room", validLink.roomCode)
+                    put("host", validLink.host)
+                    put("port", validLink.port)
+                }
+                val js = "if (typeof window.onDeepLinkJoin === 'function') { window.onDeepLinkJoin($payload); }"
+                view?.evaluateJavascript(js, null)
+            }
             return true
         }
 

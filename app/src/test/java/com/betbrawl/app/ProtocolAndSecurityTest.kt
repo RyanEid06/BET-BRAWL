@@ -84,9 +84,8 @@ class ProtocolAndSecurityTest {
         round.bets.add(secretBet)
         assertEquals(1, round.bets.size)
 
-        // In BETTING_WINDOW / MINIGAME_ACTIVE: public state MUST scrub bets!
-        val publicRoundBetting = round.copy()
-        publicRoundBetting.bets.clear() // server scrubs bets before broadcast
+        // In BETTING_WINDOW / MINIGAME_ACTIVE: public state MUST scrub bets without mutating authoritative round.bets!
+        val publicRoundBetting = round.copy(bets = mutableListOf())
         val publicStateBetting = PublicRoomState(
             roomId = "r1",
             roomCode = "BRAWL",
@@ -103,8 +102,11 @@ class ProtocolAndSecurityTest {
         assertTrue("Serialized state during betting must have empty bets array", jsonBetting.contains("\"bets\":[]"))
         assertFalse("Serialized state must NOT leak spectator bettorId", jsonBetting.contains(spectator.id + "\",\"fighterId"))
 
+        // Authoritative round bets MUST still contain the spectator's bet!
+        assertEquals("Authoritative round bets must remain intact after public scrub", 1, round.bets.size)
+
         // In PAYOUT_RECAP: bets are honestly revealed!
-        val publicRoundRecap = round.copy()
+        val publicRoundRecap = round.copy(bets = round.bets.toMutableList())
         val publicStateRecap = PublicRoomState(
             roomId = "r1",
             roomCode = "BRAWL",
