@@ -1,45 +1,80 @@
-# BET & BRAWL V1 release checkpoint
+# BET & BRAWL V1 release report
 
-2026-10-20. Implementation/local automated checks are complete. Exact-head CI/lint/APKs remain pending; this is a truthful checkpoint, not the final verdict. The owner's scope correction makes Android manual acceptance and Cloudflare deployment/public smoke USER FOLLOW-UP.
+2026-10-20. **GREEN** for the owner's corrected coding scope. Code, automated gates and CI builds pass. Cloudflare deployment/public acceptance and Android physical acceptance are USER FOLLOW-UP. No emulator, ADB, installation or extra Android tooling was used.
 
 ## 1. Repository cleanup
 
-One canonical Git repository at `C:/Users/Administrator/Desktop/Projects/BET-BRAWL`. The nested Cloudflare directory was a clean separate clone; every ref was imported/verified before removal. All 40 historical ZIP entries matched frozen Git content exactly, and the modern branch's existing ZIP removal was retained. One temporary managed worktree is outside the root. Generated WebView assets are ignored/rebuilt; dependencies/builds/SQLite/dev vars/signing files/APKs/ZIPs are excluded. No history rewrite or unique work loss.
+Canonical repository: `C:/Users/Administrator/Desktop/Projects/BET-BRAWL`. The nested `BET-BRAWL-Cloudflare/` was a clean independent clone. All refs were imported and objects verified before removing it; no unique local/ignored/stashed work existed. All 40 historical ZIP entries matched frozen Git blobs; the modern branches' existing ZIP removal was retained. No history rewrite, forced push, branch deletion or new signing identity.
+
+Maintained targets are `main` (Android/LAN) and `v1-web-cloudflare-ready` (online web). Generated WebView assets, dependencies, builds, APKs/ZIPs, local SQLite, environment and signing files are ignored. Temporary managed Cloud worktree is outside the root and is archived at final closure after preserving useful logs in canonical `artifacts/`. `git fsck` found no corrupt objects; one harmless dangling tree was preserved. Skill junctions are retained.
 
 ## 2. Cloudflare web
 
-`v1-web-cloudflare-ready`, based on `9aa66f1`: Worker/SQLite Durable Object architecture retained. Exact qualifier resolution, replacement-socket authority, repeated-join protection, offline fighter grace, frozen-roster finalists, strict deadlines, three-player debug minimum and restart seat cleanup fixed. UI/QR/page metadata now describe online play; local Node reference keeps LAN behavior.
+Verified source: `v1-web-cloudflare-ready` at `c910cb909920bfa9a4dbd90655219917b9ff07e7`. This contains the frozen web branch's complete reachable history; there are no frozen-only commits to merge. One Worker serves React/Vite assets and routes each room to an authoritative SQLite Durable Object over HTTPS/WSS.
 
-Executed: clean install, typecheck, 58/58 TS tests, 14/14 Worker tests, production build, Worker typecheck, Wrangler dry-run, actual local multi-client full tournament plus SQLite process-restart/deadline/bet recovery, and complete `npm run cf:verify`, all PASS. Evidence remains in the external worktree `artifacts/cloud-final-verify.log`. No deployment or public URL is claimed. README contains exact login/deploy commands.
+Important changes: exact-round/idempotent qualifier resolution, revoked replacement-socket authority, duplicate-seat protection, offline next-fighter grace, frozen-roster rankings, strict deadlines, close handshake, minimum three even in debug, restarted-lobby expiry. Cloud/LAN mode, online copy/public QR URLs, stale socket/QR guards and championship/VOID recap wording corrected. Files include `worker/BrawlRoom.ts`, shared `src/engine/roomEngine.ts`, `server.ts`, `src/App.tsx`, recap component/tests, network helpers, `wrangler.jsonc`, locked package configuration and runtime tests.
+
+PASS: clean install, 60 TS tests, 14 Worker tests, frontend/Worker typechecks, production build, Wrangler4.151.1 dry-run, actual local Worker/SQLite multiplayer tests and full `npm run cf:verify`. Runtime coverage includes all qualifiers, championship2–1 with a tie, private bets/deadlines/refunds/VOID, reconnect/authority/capacity/isolation, excluded nonparticipants, podium and process restart recovering active deadlines/bets. A readiness fixture race was fixed by waiting for every known participant, preserving all assertions.
+
+[Exact source CI39483447180](https://github.com/RyanEid06/BET-BRAWL/actions/runs/39483447180): SUCCESS. Local and CI evidence: `artifacts/cloudflare-c910cb9-verify.log`, `artifacts/cloudflare-c910cb9-ci.log`. No live deployment, public URL or public smoke result is claimed.
+
+From the canonical root after switching to the web branch:
+
+```powershell
+git switch v1-web-cloudflare-ready
+npm ci
+npm run cf:verify
+npm exec wrangler whoami
+# Only if authentication is needed, complete this interactive command:
+npm exec wrangler login
+npm run cf:deploy
+```
+
+Use the existing Cloudflare account/configuration. Owner then checks public HTTPS/WSS, QR and three clients across networks. Do not configure the test-only timing variable in production.
 
 ## 3. Android
 
-`main`, based on `9ac170b`: server previously pre-completed Q1, then its helper selected/completed Q2. The helper now owns one exact scheduled qualifier and rejects replay. Server state/timers are serialized; stale socket authority, offline next-round fighter grace, frozen-roster ranking, Higher/Lower reveal-key crash, disconnected-seat kick and restarted-lobby cleanup fixed. HostService readiness/failure handling, Activity restoration and strict join target validation repaired.
+Verified source: `main` at `83d3cdf6bdeab20e6e6db3ec534697755bc52779`. The original qualifier bug pre-marked Q1 completed, then the helper selected Q2 and completed it too. The helper now owns one exact scheduled qualifier identity and rejects replay; VOID completes that match without fighter statistics.
 
-Executed: clean npm install, typecheck, 64/64 TS tests, production frontend build/sync, and 51/51 Kotlin tests via existing compiler/JUnit. Twenty protocol tests drive actual JSON handlers and serialization, including the full qualifier/championship 2–1/tie sequence and VOID/refunds/deadlines/reconnect/authority/graces. No transport/device acceptance is implied.
+Kotlin fixes cover serialized callbacks/timers, round identity/deadlines, independent host grace, replacement ownership, offline next-fighter grace, frozen-roster rankings, Higher/Lower reveal-key crash, disconnected-seat kick and restarted-lobby cleanup. HostService announces readiness only after bind success, surfaces errors and handles notification permission; Activity restore/warm intents, strict deep-link/IPv4/port parsing, NSD liveness and UDP cancellation repaired. Shared recap handles championship ties/first wins and VOID accurately. Important files: Kotlin server/RoomEngine/HostService, MainActivity, join/discovery helpers, ServerProtocolTest and shared engine/UI tests.
 
-Local Android lint/APKs are unverified: SDK 35 is absent and existing Gradle daemon cannot establish loopback. No additional Android tooling was installed. CI is configured for unit/lint/debug/release and artifact upload. Signing secrets were absent; no key was created or committed. An unsigned release is not a signed production APK.
+PASS: 66 TS tests/typecheck/frontend build+sync; 51 Kotlin tests with production and tests compiled separately; GitHub Android lint and debug/release assembly. Twenty Kotlin protocol tests exercise actual JSON handlers/serialization, full qualifiers and championship2–1 with tie, VOID/refunds/deadlines/reconnect/authority/graces. CI test report:51 tests,0 failures,0 ignored. Lint:0 errors,14 warnings (API/dependency advisories, LAN cleartext policy, backup/icon/unused-resource suggestions). No warning suppression or dependency upgrades added to force green.
+
+Local SDK35 is absent and existing Gradle launcher was unusable; CI supplied build/lint proof using the repository workflow. No extra local Android tooling installed. [Exact source CI39483279215](https://github.com/RyanEid06/BET-BRAWL/actions/runs/39483279215): SUCCESS.
+
+Downloaded artifacts, relative to canonical root:
+
+| Artifact | Bytes | SHA-256 |
+|---|---:|---|
+| `artifacts/android-v1/83d3cdf/apks/debug/app-debug.apk` | 6433705 | `6c1ecd657e14b6ebdd6c18cd41c342181b597884eafa1964b03fa69c45ccb96a` |
+| `artifacts/android-v1/83d3cdf/apks/release/app-release-unsigned.apk` | 5164350 | `567a858320f1369584b001ad5eab4ff43abfddb2592f3cd7093c45a0a1348d36` |
+
+Both APKs independently inspected: `com.betbrawl.app`,1.0.0/code1,minSdk24,target/compileSdk35; three identical bundled web assets between debug/release. Debug signature verifies with Android Debug certificate. Release is explicitly unsigned; apksigner rejects it as expected. No established signing secrets were available and signing CI step was skipped. Evidence: `artifacts/android-v1/83d3cdf/verification.json`, `ci.log` and `reports/`. No emulator/device/transport/LAN/QR/deep-link manual PASS is claimed.
 
 ## 4. Cross-platform parity
 
-Both modern targets retain 3–9 players, two qualifiers against distinct opponents, 3/1/0 points, deterministic five-level ranking, locked top two, first-to-two decisive wins, tie/VOID non-wins, invariant championship qualifier statistics, private betting/refunds, authoritative deadlines/reconnect ownership and champion/runner-up/best non-finalist podium. Debug also requires three players. Networking deliberately differs: Cloudflare internet rooms versus Android phone/LAN.
+Preserved on both targets:3–9 players; two qualifiers versus distinct opponents; win/tie/loss3/1/0; deterministic five-level ranking; locked top two; first-to-two decisive championship wins; tie/VOID non-wins; invariant championship qualifier statistics; private betting/refunds; authoritative deadlines/reconnect ownership; champion/runner-up/best-ranked non-finalist podium. Debug also requires three players. Exact shared engine/catalog/odds/Node reference/recap files compare identical between verified heads.
+
+Intentional difference: Cloudflare internet Worker/DO rooms versus Android Kotlin host on local Wi-Fi/LAN with bundled UI. CI/JVM/runtime tests are automated evidence; hardware and public deployment remain separate acceptance.
 
 ## 5. CI
 
-Android workflow removes the stale committed generated-assets gate, always runs unit/lint/debug/unsigned release, and fixes signing-secret scope. Cloud workflow verifies the maintained branch/PR target via clean install/full cf:verify. Neither deploys. Current-head results still must be observed after pushing source commits; prior runs are not current-head proof.
+Cloud `.github/workflows/ci.yml`: maintained branch/PR target, clean install, complete cf:verify. Android `.github/workflows/android-ci.yml`: locked install, TS tests, generated UI sync, Kotlin tests/lint/debug/release, optional established signing, APK/report uploads. Neither workflow deploys. Both verified source runs linked above succeeded. Earlier Android833a67d failed cross-module nullable smart casts in tests; fixed, reproduced RED locally with separated compilation, then51/51 GREEN and successful native CI. Historical failed runs are not presented as current proof.
+
+Final report/worklog commits change documentation only; source/artifact provenance remains the exact verified SHAs above. See branch Actions for the final documentation-head reruns.
 
 ## 6. Documentation
 
-README/V1_STATUS/metadata/build comments were corrected on each target; Cloudflare migration/deploy guidance rewritten. Old Node-only counts, AI Studio compilation claims and unperformed hardware PASS claims are removed by this report.
+README, V1_STATUS, this report and CODEX_WORKLOG explain the correct architecture and user follow-up. Cloud verification/migration/deploy docs and UI metadata corrected. Original brief retained at `docs/V1_RELEASE_BRIEF.md`; later scope correction is recorded in worklogs. Removed stale Node-only counts, AI Studio/container build claims and unperformed physical acceptance claims. Frozen historical documentation remains untouched in its branch/tag.
 
-## 7. Remaining work and user follow-up
+## 7. Remaining blockers and user follow-up
 
-Coding task: commit/push, exact-head CI/lint/build, final evidence and temporary-worktree cleanup. Owner follow-up: manual Android/LAN/QR/deep-link acceptance; established release signing if desired; Cloudflare login/deploy/public HTTPS/WSS/QR multi-client acceptance. These manual items are not coding-task blockers.
+No coding-scope blocker. Owner handles Cloudflare authentication/deployment/public HTTPS/WSS/QR/multi-client acceptance, Android physical/LAN/QR/deep-link acceptance, and established release signing if a signed production APK is wanted. The debug APK is available for manual testing. These manual items are USER FOLLOW-UP and do not block this coding task.
 
 ## 8. V1 verdict
 
-NOT READY — only current-head CI/lint/build and final repository closure remain in this checkpoint.
+**GREEN** — implementation, reconciled game rules, automated tests, lint, CI builds/APKs and Cloudflare dry-run passed under the corrected scope. This does not claim signed-production, live-provider or physical-device acceptance.
 
 ## 9. Old branch retirement
 
-`v1-web-final safe to retire: NO`. Frozen SHA `e1f948c6c6e46355435fd70ea9ab8ee63031ebea`, tag `v1.0.0-web-final`. Baseline source typecheck/52 tests/build passed using repaired installed dependencies; its original lock cannot clean-install on Windows. No branch/tag deletion performed. Retirement still requires final replacement acceptance, uniqueness comparison and separate explicit owner confirmation.
+`v1-web-final safe to retire: NO` pending the owner's personal acceptance of both replacements and separate explicit deletion confirmation. Frozen SHA `e1f948c6c6e46355435fd70ea9ab8ee63031ebea` equals existing annotated tag `v1.0.0-web-final` target. It is an ancestor of the verified web replacement with no frozen-only commits. Frozen source typecheck/52 tests/build passed using repaired installed dependencies; frozen original lock lacks platform entries. No branch/tag deletion or unnecessary new tag was performed.
