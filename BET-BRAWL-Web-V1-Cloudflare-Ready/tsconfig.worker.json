@@ -1,0 +1,28 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": [
+      "ES2022",
+      "WebWorker"
+    ],
+    "types": [
+      "node"
+    ],
+    "strict": true,
+    "skipLibCheck": true,
+    "allowImportingTsExtensions": true,
+    "noEmit": true
+  },
+  "files": [
+    "worker/cloudflare-runtime.d.ts",
+    "worker/index.ts",
+    "worker/roomCore.ts",
+    "src/engine/types.ts",
+    "src/engine/roomEngine.ts",
+    "src/engine/odds.ts",
+    "src/engine/miniGamesCatalog.ts",
+    "src/engine/gameEngine.ts"
+  ]
+}
