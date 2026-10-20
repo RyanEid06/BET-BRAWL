@@ -56,7 +56,7 @@ function attach(ctx: FakeContext, roomCode: string): FakeSocket {
   return ws;
 }
 
-async function send(room: BrawlRoom, ws: FakeSocket, message: unknown) {
+async function send(room: BrawlRoomCore, ws: FakeSocket, message: unknown) {
   await room.webSocketMessage(ws as unknown as WebSocket, JSON.stringify(message));
 }
 
