@@ -18,7 +18,7 @@ The real-runtime suite checks min/max/ready/host authority, seat cleanup/replace
 
 Worker regressions additionally reject old closing-socket commands, repeated joins, early alarm transitions/actions, solo/two-player debug starts, and stale seats after returning to lobby. Exact-round shared qualifier tests reject replay/incorrect identity.
 
-Verified source c910cb909920bfa9a4dbd90655219917b9ff07e7: [CI39483447180 SUCCESS](https://github.com/RyanEid06/BET-BRAWL/actions/runs/39483447180), running the entire gate from clean dependencies. Local evidence was preserved in canonical `artifacts/cloudflare-c910cb9-verify.log` and CI log alongside it before temporary worktree archive. Two recap SSR regressions and a readiness barrier cover the final source changes. Final report/worklog commits are documentation only; inspect branch Actions for their reruns. No workflow deploys automatically.
+Verified source 51a7adf6af295a868760c37cc94ea5788797d774: [CI39485599127 SUCCESS](https://github.com/RyanEid06/BET-BRAWL/actions/runs/39485599127), running the entire gate from clean dependencies. Local evidence was preserved in canonical `artifacts/cloudflare-zero-stop-verify.log` and artifacts/cloudflare-51a7adf-ci.log in the canonical checkout. Two recap SSR regressions and a readiness barrier cover the final source changes. Final report/worklog commits are documentation only; inspect branch Actions for their reruns. No workflow deploys automatically.
 
 ## Preserved history
 
