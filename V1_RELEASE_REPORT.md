@@ -10,7 +10,7 @@ Canonical Git root: `C:/Users/Administrator/Desktop/Projects/BET-BRAWL`. The nes
 
 Verified source: `v1-web-cloudflare-ready` at `c910cb909920bfa9a4dbd90655219917b9ff07e7` (initial9aa66f1). Frozen web history is fully contained; no frozen-only commits need merging. One authoritative SQLite Durable Object per room behind Worker HTTPS/WSS remains the production architecture. Fixed exact qualifier resolution, closing-socket authority/handshake, duplicate seats, disconnected next-round fighters, frozen-roster qualification, strict deadlines, debug minimum 3 and restarted-lobby expiry. Online copy/QR/loading/socket guards and public page metadata corrected. Shared recap now distinguishes VOID, championship ties, a first decisive win and title victory; two SSR regressions pass. The runtime readiness fixture waits for all intended participants rather than an earlier vacuous snapshot. Shared TS helper serves Worker and the local Node reference.
 
-Clean install, typecheck, 60/60 TS tests, 14/14 Worker tests, build, Worker typecheck, dry-run, full actual local Wrangler tournament/restart/pending-deadline-and-bet recovery, and complete cf:verify all PASS. Exact commands/evidence are in CLOUDFLARE_VERIFICATION.md. No public deployment performed or URL invented; README documents `npm exec wrangler whoami`, interactive login if needed, and `npm run cf:deploy` after verification.
+Clean install, typecheck, 61/61 TS tests, 14/14 Worker tests, build, Worker typecheck, dry-run, full actual local Wrangler tournament/restart/pending-deadline-and-bet recovery, and complete cf:verify all PASS. Exact commands/evidence are in CLOUDFLARE_VERIFICATION.md. No public deployment performed or URL invented; README documents `npm exec wrangler whoami`, interactive login if needed, and `npm run cf:deploy` after verification.
 
 ## 3. Android
 
@@ -41,3 +41,5 @@ No coding-scope blocker. Owner: established signing identity if desired, manual 
 ## 9. Old branch retirement
 
 `v1-web-final safe to retire: NO`. SHA `e1f948c6c6e46355435fd70ea9ab8ee63031ebea`, preserved tag `v1.0.0-web-final`. Baseline 52 source tests/typecheck/build passed. No deletion or new tag performed. Frozen is an ancestor of c910cb9 with no frozen-only commits; existing tag target verified identical. Owner personal acceptance and separate explicit deletion confirmation are still required.
+
+Final boundary follow-up: timeout now uses recorded Millisecond Stop actions, so a valid0ms stop is not DNF. New regression failed before correction and passes afterward; full local cf:verify now61TS+14Worker and all actual runtime cases PASS (canonical artifacts/cloudflare-zero-stop-verify.log). Node championship tie fixture uses no actions rather than assuming sub5ms socket delivery. Earlier source CI links remain historical; final boundary source is the branch head, with its result in branch Actions and canonical artifacts/v1-closure.json. Android parity follow-up is tracked on main.

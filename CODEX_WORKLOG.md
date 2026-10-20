@@ -19,3 +19,8 @@ Auto-review rejected whole-file branch copies; used inspected narrow edits. Ambi
 
 ## Next action / follow-up
 Final agent closure observes documentation-head Actions, archives this clean managed worktree and records canonical artifacts/v1-closure.json. Shared evidence already preserved. Canonical root remains main; frozen/tag unchanged. Joint final report has9sections in V1_RELEASE_REPORT.md. No more product code planned. Owner handles Cloudflare login/deploy/public acceptance, Android physical acceptance and established signing if wanted; frozen retirement remains NO until personal acceptance and separate confirmation. Mark goal complete after repository closure.
+
+## Closure regression discovered
+Final documentation-head Cloud CI39484678029 failed Node championship winner assertion. Deterministic new regression reproduces a valid STOP at exactly0ms being treated as DNF (score>0 check). Fix timeout ownership to use recorded STOP flag in TS and Kotlin; preserve immutable rules. Tie fixture should use no actions, avoiding sub5ms socket scheduling assumption. Full gates/new exact CI and fresh Android APKs required; prior APK/source proof retained as historical. Worktree archive succeeded but restore reports missing snapshot; all pushed refs/source preserved, continue in canonical checkout, no new worktree needed. Current branch web; source edits in progress.
+
+Boundary follow-up full local gate completed0:61TS+14Worker,typechecks/build/dry-run/all actual runtime scenarios PASS. Commit/push this focused correction, then carry the checked patch and Kotlin regression to main; refresh APK provenance and final heads.

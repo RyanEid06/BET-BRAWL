@@ -43,7 +43,8 @@ test('Millisecond Stop: declares explicit tie if stop delta difference < 0.005s'
 test('Millisecond Stop: timeout awards win to the fighter who stopped if opponent DNF', () => {
   const gameStartsAt = 10000;
   const { internal } = initMiniGameServerState('millisecond_stop', ['f1', 'f2'], gameStartsAt);
-  const scores: Record<string, number> = { f1: 4.85 }; // only f1 stopped
+  const scores: Record<string, number> = { f1: 0, f2: 0 };
+  processFighterAction(internal, scores, 'f1', { type: 'STOP' }, gameStartsAt + 4850);
 
   const timeoutRes = resolveGameTimeout(internal, scores);
   assert.equal(timeoutRes.winnerId, 'f1');
@@ -51,9 +52,18 @@ test('Millisecond Stop: timeout awards win to the fighter who stopped if opponen
 
   // Neither stopped
   const neitherScores: Record<string, number> = {};
-  const timeoutNeither = resolveGameTimeout(internal, neitherScores);
+  const { internal: neitherInternal } = initMiniGameServerState('millisecond_stop', ['f1', 'f2'], gameStartsAt);
+  const timeoutNeither = resolveGameTimeout(neitherInternal, neitherScores);
   assert.equal(timeoutNeither.isTie, true);
   assert.equal(timeoutNeither.winnerId, null);
+});
+
+test('Millisecond Stop: a stop at exactly zero is an action, not a DNF', () => {
+  const { internal } = initMiniGameServerState('millisecond_stop', ['f1', 'f2'], 10000);
+  const scores: Record<string, number> = { f1: 0, f2: 0 };
+  processFighterAction(internal, scores, 'f1', { type: 'STOP' }, 10000);
+  assert.equal(scores.f1, 0);
+  assert.deepEqual(resolveGameTimeout(internal, scores), { winnerId: 'f1', isTie: false });
 });
 
 // ---------------------------------------------------------------------------

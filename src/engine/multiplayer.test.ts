@@ -545,17 +545,7 @@ test('Production Server: full 3-player Tournament Lifecycle (3 Qualifiers -> Cha
       const miniGameId = round.miniGame.id;
 
       if (targetWinnerId === 'TIE') {
-        if (miniGameId === 'millisecond_stop') {
-          // Synchronous STOP from both fighters yields elapsed time delta < 0.005s -> instant TIE
-          f1Client.ws.send(JSON.stringify({ type: 'FIGHTER_ACTION', payload: { type: 'STOP' } }));
-          f2Client.ws.send(JSON.stringify({ type: 'FIGHTER_ACTION', payload: { type: 'STOP' } }));
-        } else if (miniGameId === 'blind_pinpoint') {
-          // Both send exact same coordinates -> distance delta is 0 < 10km -> instant TIE
-          f1Client.ws.send(JSON.stringify({ type: 'FIGHTER_ACTION', payload: { type: 'PIN', normX: 0.5, normY: 0.5 } }));
-          f2Client.ws.send(JSON.stringify({ type: 'FIGHTER_ACTION', payload: { type: 'PIN', normX: 0.5, normY: 0.5 } }));
-        } else {
-          // For rapid_red_green, speed_math, higher_lower: neither taps/answers -> timeout fires (150ms) -> score1 === score2 (0 === 0) -> TIE
-        }
+        // No fighter acts: every game times out as a tie, independent of socket scheduling.
       } else {
         const winnerClient = clientMap[targetWinnerId];
         const loserId = targetWinnerId === f1Id ? f2Id : f1Id;
@@ -694,7 +684,7 @@ test('Production Server: full 3-player Tournament Lifecycle (3 Qualifiers -> Cha
     playedMiniGames.push(g1Active.payload.currentRound!.miniGame.id);
 
     const g1Recap = await playRoundToDesiredOutcome(4, p1Id);
-    assert.equal(g1Recap.currentRound?.winnerId, p1Id);
+    assert.equal(g1Recap.currentRound?.winnerId, p1Id, `Championship G1 ${g1Recap.currentRound?.miniGame.id}`);
     assert.equal(activeRoom.tournamentSchedule?.championshipWins[p1Id], 1, 'P1 must have 1 Championship win');
     assert.equal(activeRoom.tournamentSchedule?.championshipWins[p2Id], 0, 'P2 must have 0 Championship wins');
     assert.equal(activeRoom.tournamentSchedule?.championId, null, 'Champion must not be crowned after 1 win');

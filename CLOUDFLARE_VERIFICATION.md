@@ -6,7 +6,7 @@ This is the maintained online web target. Node 24/Windows local evidence is sepa
 |---|---|
 | npm ci | PASS: 213 packages, zero reported vulnerabilities |
 | npm run typecheck | PASS |
-| npm test | PASS: 60/60 TS/Node protocol tests |
+| npm test | PASS: 61/61 TS/Node protocol tests |
 | npm run test:worker-core | PASS: 14/14 Worker tests |
 | npm run build | PASS |
 | npm run cf:typecheck | PASS |
@@ -27,3 +27,5 @@ Frozen `v1-web-final` is `e1f948c6c6e46355435fd70ea9ab8ee63031ebea`, tagged `v1.
 ## Owner follow-up
 
 Authenticate/deploy using README commands, then test public HTTPS/WSS/QR and multiple clients on different networks. No production deployment URL or success is claimed. These manual steps are USER FOLLOW-UP under the owner's corrected scope.
+
+Final boundary follow-up: timeout now uses recorded Millisecond Stop actions, so a valid0ms stop is not DNF. New regression failed before correction and passes afterward; full local cf:verify now61TS+14Worker and all actual runtime cases PASS (canonical artifacts/cloudflare-zero-stop-verify.log). Node championship tie fixture uses no actions rather than assuming sub5ms socket delivery. Earlier source CI links remain historical; final boundary source is the branch head, with its result in branch Actions and canonical artifacts/v1-closure.json. Android parity follow-up is tracked on main.
