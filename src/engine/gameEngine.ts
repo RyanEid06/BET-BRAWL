@@ -553,8 +553,8 @@ export function resolveGameTimeout(
   const s2 = fighterScores[f2];
 
   if (internal.miniGameId === 'millisecond_stop') {
-    const has1 = s1 !== undefined && s1 > 0;
-    const has2 = s2 !== undefined && s2 > 0;
+    const has1 = internal.millisecondStop!.stopped[f1];
+    const has2 = internal.millisecondStop!.stopped[f2];
     if (has1 && has2) {
       const d1 = Math.abs(s1 - 5.0);
       const d2 = Math.abs(s2 - 5.0);

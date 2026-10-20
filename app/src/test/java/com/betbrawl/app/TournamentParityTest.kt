@@ -1,5 +1,6 @@
 package com.betbrawl.app
 
+import com.betbrawl.app.server.engine.GameEngine
 import com.betbrawl.app.server.engine.OddsEngine
 import com.betbrawl.app.server.engine.RoomEngine
 import com.betbrawl.app.server.model.*
@@ -7,6 +8,19 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class TournamentParityTest {
+
+    @Test
+    fun zeroTimeStopIsNotDidNotFinish() {
+        for (fighterId in listOf("f1", "f2")) {
+            val (internal, _) = GameEngine.initMiniGameServerState("millisecond_stop", listOf("f1", "f2"), 10000L)
+            val scores = mutableMapOf<String, Number>("f1" to 0.0, "f2" to 0.0)
+            GameEngine.processFighterAction(internal, scores, fighterId, mapOf("type" to "STOP"), 10000L)
+            assertEquals(0.0, scores[fighterId]!!.toDouble(), 0.0)
+            val result = GameEngine.resolveGameTimeout(internal, scores)
+            assertEquals(fighterId, result.first)
+            assertFalse(result.second)
+        }
+    }
 
     // 1. Room Creation
     @Test

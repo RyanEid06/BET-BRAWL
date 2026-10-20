@@ -518,8 +518,8 @@ object GameEngine {
 
         when (internal.miniGameId) {
             "millisecond_stop" -> {
-                val has1 = s1 != null && s1.toDouble() > 0.0
-                val has2 = s2 != null && s2.toDouble() > 0.0
+                val has1 = internal.millisecondStopStopped[f1] == true
+                val has2 = internal.millisecondStopStopped[f2] == true
                 if (has1 && has2) {
                     val d1 = abs(s1!!.toDouble() - 5.0)
                     val d2 = abs(s2!!.toDouble() - 5.0)
