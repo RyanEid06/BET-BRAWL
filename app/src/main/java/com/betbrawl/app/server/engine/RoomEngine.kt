@@ -132,6 +132,7 @@ object RoomEngine {
         val groupsMap = mutableMapOf<String, MutableList<Player>>()
 
         for (player in players) {
+            if (stableRosterOrder != null && player.id !in stableRosterOrder) continue
             val key = "${player.qualifierPoints}_${player.qualifierWins}"
             groupsMap.getOrPut(key) { mutableListOf() }.add(player)
         }
@@ -204,21 +205,22 @@ object RoomEngine {
     fun applyQualifierMatchResolution(
         schedule: TournamentSchedule,
         players: List<Player>,
-        fighterIds: List<String>,
+        roundNumber: Int,
         winnerId: String?,
         isTie: Boolean,
         reason: RoundResolutionReason
-    ) {
-        val currentMatch = schedule.matches.firstOrNull { !it.isChampionship && !it.completed }
-        if (currentMatch != null) {
-            currentMatch.completed = true
-            currentMatch.winnerId = winnerId
-            currentMatch.tieResult = isTie
-            currentMatch.resolutionReason = reason
-        }
+    ): Boolean {
+        val currentMatch = schedule.matches.firstOrNull { !it.isChampionship && it.roundNumber == roundNumber }
+            ?: return false
+        if (currentMatch.completed || schedule.stage != TournamentStage.QUALIFIERS) return false
+        if (winnerId != null && winnerId !in currentMatch.fighterIds) return false
+        currentMatch.completed = true
+        currentMatch.winnerId = winnerId
+        currentMatch.tieResult = isTie
+        currentMatch.resolutionReason = reason
 
         schedule.qualifiersCompleted += 1
-        val (f1Id, f2Id) = fighterIds.let { Pair(it[0], it[1]) }
+        val (f1Id, f2Id) = currentMatch.fighterIds
         val f1 = players.find { it.id == f1Id }
         val f2 = players.find { it.id == f2Id }
 
@@ -240,6 +242,7 @@ object RoomEngine {
         }
         val completedQualifiers = schedule.matches.filter { !it.isChampionship && it.completed }
         computeTournamentRankings(players, completedQualifiers, schedule.stableRosterOrder)
+        return true
     }
 
     fun getFinalTournamentStandings(

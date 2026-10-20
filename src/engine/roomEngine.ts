@@ -357,6 +357,40 @@ export function computeTournamentRankings(
   return finalRanked;
 }
 
+/** Complete the exact qualifier once; callers never pre-mark its schedule entry. */
+export function applyQualifierMatchResolution(
+  sched: TournamentSchedule,
+  players: Player[],
+  roundNumber: number,
+  fighterIds: [string, string],
+  winnerId: string | null,
+  isTie: boolean,
+  resolutionReason: RoundResolutionReason,
+): boolean {
+  const match = sched.matches.find(m => !m.isChampionship && m.roundNumber === roundNumber
+    && m.fighterIds[0] === fighterIds[0] && m.fighterIds[1] === fighterIds[1]);
+  if (!match || match.completed) return false;
+  match.completed = true;
+  match.winnerId = winnerId;
+  match.tieResult = isTie;
+  match.resolutionReason = resolutionReason;
+  sched.qualifiersCompleted += 1;
+
+  if (resolutionReason !== 'VOID') {
+    for (const id of fighterIds) {
+      const player = players.find(p => p.id === id);
+      if (!player) continue;
+      player.qualifierMatchesPlayed += 1;
+      if (isTie) { player.qualifierPoints += 1; player.qualifierTies += 1; }
+      else if (id === winnerId) { player.qualifierPoints += 3; player.qualifierWins += 1; }
+      else player.qualifierLosses += 1;
+    }
+  }
+  const roster = players.filter(p => sched.stableRosterOrder.includes(p.id));
+  computeTournamentRankings(roster, sched.matches.filter(m => !m.isChampionship && m.completed), sched.stableRosterOrder);
+  return true;
+}
+
 /**
  * Pure function providing the authoritative final tournament podium & standings order:
  * 1st = Champion (winner of championship series)
@@ -614,58 +648,4 @@ export function computeSessionAwards(players: Player[], championId?: string | nu
   }
 
   return awards;
-}
-
-/**
- * Authoritative tournament qualifier match resolution handler.
- * Advances qualifiersCompleted for all resolved qualifiers (including VOID).
- * On VOID: increments qualifiersCompleted, but preserves fighter stats (points, wins, ties, losses, matches played).
- * On PLAYED / DISCONNECT_FORFEIT / TIE: updates fighter points, wins, ties, losses, and matches played.
- */
-export function applyQualifierMatchResolution(
-  sched: TournamentSchedule,
-  players: Player[],
-  fighterIds: [string, string],
-  winnerId: string | null,
-  isTie: boolean,
-  resolutionReason: RoundResolutionReason
-): void {
-  sched.qualifiersCompleted += 1;
-  const matchIndex = sched.matches.findIndex(m => !m.completed && !m.isChampionship);
-  if (matchIndex !== -1) {
-    sched.matches[matchIndex].completed = true;
-    sched.matches[matchIndex].winnerId = winnerId;
-    sched.matches[matchIndex].tieResult = isTie;
-    sched.matches[matchIndex].resolutionReason = resolutionReason;
-  }
-
-  const [f1Id, f2Id] = fighterIds;
-  const f1 = players.find(p => p.id === f1Id);
-  const f2 = players.find(p => p.id === f2Id);
-
-  // Win = 3 Brawl Points, Tie = 1 Brawl Point each, Loss = 0 Brawl Points
-  // On VOID: fighter stats (points, wins, ties, losses, matches played) are strictly untouched!
-  if (resolutionReason === 'PLAYED' || resolutionReason === 'DISCONNECT_FORFEIT') {
-    if (f1) f1.qualifierMatchesPlayed += 1;
-    if (f2) f2.qualifierMatchesPlayed += 1;
-
-    if (winnerId) {
-      const winnerFighter = f1?.id === winnerId ? f1 : f2;
-      const loserFighter = f1?.id === winnerId ? f2 : f1;
-      if (winnerFighter) {
-        winnerFighter.qualifierPoints += 3;
-        winnerFighter.qualifierWins += 1;
-      }
-      if (loserFighter) {
-        loserFighter.qualifierLosses += 1;
-      }
-    }
-  } else if (isTie) {
-    if (f1) { f1.qualifierMatchesPlayed += 1; f1.qualifierPoints += 1; f1.qualifierTies += 1; }
-    if (f2) { f2.qualifierMatchesPlayed += 1; f2.qualifierPoints += 1; f2.qualifierTies += 1; }
-  }
-
-  // Recompute current tournament rankings after qualifier match using pure 5-layer tiebreaker
-  const completedQualifiers = sched.matches.filter(m => !m.isChampionship && m.completed);
-  computeTournamentRankings(players, completedQualifiers, sched.stableRosterOrder);
 }

@@ -3,6 +3,31 @@ import assert from 'node:assert/strict';
 import os from 'os';
 import { discoverLanAddresses, isRfc1918, isLinkLocal, isLoopback, buildJoinUrl, isLoopbackUrl, resolveJoinEndpoint, resolveWsUrl } from './networkDiscovery.ts';
 
+test('LAN addresses reject malformed octets instead of accepting numeric prefixes', () => {
+  for (const address of ['10.bad.1.2.3', '10.1.2.999', '10.1.2.3x', '192.168.-1.2']) {
+    assert.equal(isRfc1918(address), false, address);
+  }
+});
+
+test('guest QR links reject unsafe targets and replace existing room parameters', () => {
+  for (const source of ['brawl://join?host=127.0.0.1&port=8080', 'brawl://join?host=169.254.1.1&port=8080',
+    'brawl://join?host=192.168.1.2&port=wrong', 'brawl://join?host=192.168.1.2&port=99999',
+    'http://127.0.0.1:8080', 'http://169.254.1.1:8080', 'javascript:alert(1)', 'not-a-url']) {
+    assert.equal(buildJoinUrl(source, 'ABC123'), '', source);
+  }
+  const url = new URL(buildJoinUrl('brawl://join?host=192.168.1.2&port=8181&room=OLD123&room=OLD456', 'ABC123'));
+  assert.deepEqual(url.searchParams.getAll('room'), ['ABC123']);
+  assert.equal(url.searchParams.get('port'), '8181');
+});
+
+test('guest endpoint resolution rejects invalid or ambiguous external targets', () => {
+  for (const search of ['?room=ABC123&host=127.0.0.1&port=8080', '?room=ABC123&host=192.168.1.2&port=bad',
+    '?room=ABC123&host=192.168.1.2&port=8080&port=8181', '?room=ABC123&room=DEF456&host=192.168.1.2']) {
+    assert.equal(resolveJoinEndpoint('ABC123', undefined, search).hostToConnect, undefined, search);
+  }
+  assert.equal(resolveJoinEndpoint('ABC123', '127.0.0.1:8080').hostToConnect, undefined);
+});
+
 test('networkDiscovery: correctly identifies RFC1918 and link-local ranges', () => {
   assert.equal(isRfc1918('192.168.1.10'), true);
   assert.equal(isRfc1918('10.0.0.5'), true);

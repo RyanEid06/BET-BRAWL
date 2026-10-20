@@ -1,172 +1,49 @@
-# BET & BRAWL: Local Wi-Fi Android Party Game
+# BET & BRAWL — Android V1
 
-**BET & BRAWL** is an offline, low-latency party game for 3 to 9 friends in the same physical room on the same local Wi-Fi network. Two brawlers compete in intense, 15-second mini-games while spectators place live secret wagers with dynamic odds.
+A local party game for 3–9 players. The host Android phone runs the authoritative Kotlin `BrawlWebSocketServer` inside `HostService`. The React/Vite interface is bundled in the APK and displayed in a WebView. Guests use the same Wi-Fi/LAN; gameplay needs no internet, laptop, Node server, Render, or Cloudflare.
 
----
+## Maintained targets
 
-## Architecture Overview (V1 Android Architecture)
+- `main`: Android local/LAN V1, application ID `com.betbrawl.app`, version `1.0.0` / code `1`.
+- `v1-web-cloudflare-ready`: online web V1, Cloudflare Worker and one SQLite Durable Object per room. Internet required.
+- `v1-web-final`: preserved Node/LAN behavioral reference at `e1f948c`, tagged `v1.0.0-web-final`. Do not modify or delete without separate owner approval.
 
-BET & BRAWL has transitioned from a laptop-hosted web prototype into a **standalone native Android application**:
+## Build and verify
 
-```
-+-------------------------------------------------------------------------+
-|                           ANDROID HOST PHONE                            |
-|                                                                         |
-|  +---------------------------+       +-------------------------------+  |
-|  |     Android WebView       |       |  Authoritative Kotlin Server  |  |
-|  |  (Bundled React/Vite UI)  | <---> |  (BrawlWebSocketServer:8080)  |  |
-|  +---------------------------+  ws   |  (Foreground HostService)     |  |
-|                                      +-------------------------------+  |
-+--------------------------------------------------^----------------------+
-                                                   |
-                             Same Wi-Fi LAN        | ws://<host-ip>:8080/ws
-                                                   |
-+--------------------------------------------------v----------------------+
-|                           ANDROID GUEST PHONES                          |
-|                                                                         |
-|  +---------------------------+       +-------------------------------+  |
-|  |     Android WebView       | <---> |    LAN Discovery / QR Join    |  |
-|  |  (Bundled React/Vite UI)  |       |    (mDNS NSD / UDP Beacon)    |  |
-|  +---------------------------+       +-------------------------------+  |
-+-------------------------------------------------------------------------+
-```
+Use Node 22+, JDK 17, and the project's existing Android SDK 35/Gradle setup. Do not install extra Android tooling merely to run this release task.
 
-### Key Architectural Pillars:
-1. **Standalone Android Host:**
-   - One Android device acts as the **authoritative room host**, running an embedded Kotlin WebSocket server (`org.java-websocket:Java-WebSocket`).
-   - The hosting phone participates in the game as a normal player via local loopback (`ws://127.0.0.1:8080/ws`).
-   - The authoritative server runs inside an Android **Foreground Service** (`HostService`) with an ongoing notification, keeping room state and timers alive through screen locks, rotations, and brief backgrounding.
-2. **Same-LAN Guest Participation:**
-   - Guest devices install the exact same APK and connect over local Wi-Fi (`ws://<host-ip>:8080/ws`).
-   - **Zero laptop, zero Node.js, and zero internet** required during gameplay.
-3. **Bundled React/Vite Frontend in WebView:**
-   - The mature, high-polish BET & BRAWL V1 React frontend is fully bundled into the APK under `app/src/main/assets/web/`.
-   - Loaded securely via `file:///android_asset/web/index.html`.
-   - No external websites or CDNs are contacted.
-4. **Zero-Config LAN Discovery & QR Joining:**
-   - Android Network Service Discovery (`_brawl._tcp.` mDNS) and a lightweight UDP beacon broadcast host presence.
-   - The lobby generates an in-app QR code and join link tailored to the host's LAN IP address, or users can tap one-click quick join from the title screen.
-5. **Node.js Role:**
-   - Node remains strictly for developer tooling, frontend asset compilation, and golden reference test suites.
-
----
-
-## Application Specifications
-
-| Parameter | Value |
-|---|---|
-| **Application ID** | `com.betbrawl.app` |
-| **App Name** | `BET & BRAWL` |
-| **Minimum SDK** | `24` (Android 7.0 Nougat) |
-| **Target SDK** | `35` (Android 15) |
-| **Compile SDK** | `35` (Android 15) |
-| **JDK Required** | `Java 17+` |
-| **Gradle Version** | `8.7` |
-| **Core Libraries** | `org.java-websocket:Java-WebSocket:1.5.7`, `com.google.code.gson:gson:2.11.0`, `androidx.webkit:webkit:1.12.1`, Kotlin Coroutines |
-
----
-
-## Source Control & Reference Points
-
-The migration was performed on `main` while maintaining immutable reference points:
-- **Preserved Web V1 Branch:** `v1-web-final`
-- **Permanent Preserved Web Tag:** `v1.0.0-web-final`
-- The golden Node test suite (`58 tests`) remains active and verified.
-
----
-
-## Build Pipeline & Instructions
-
-### 1. Build and Sync Frontend Assets into Android
-```bash
-# Install Node dependencies
+```powershell
 npm ci
-
-# Typecheck, run golden reference tests, build Vite bundle, and sync into Android assets
-npm run verify
+npm run typecheck
+npm test
+npm run build:android
+.\gradlew.bat :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleRelease --no-daemon
 ```
 
-The sync script (`scripts/sync-android-assets.js`) automatically transfers Vite production outputs from `dist/` directly into `app/src/main/assets/web/`.
+`build:android` builds `dist/` then synchronizes it into `app/src/main/assets/web/`. Both directories are generated and ignored; never manually edit bundled JavaScript. Build/sync before opening or assembling Android. APKs are generated under `app/build/outputs/apk/`, not committed as source.
 
-### 2. Run Android / JVM Unit Tests
-```bash
-gradle :app:testDebugUnitTest
-```
-Runs 20 automated Android test cases covering:
-- Room creation and session token generation
-- Player join flow and capacity constraints (3 to 9 players)
-- Ready / start gating
-- Authoritative circular qualifier scheduling
-- 5-tier tournament ranking hierarchy (Brawl Points, Wins, Head-to-Head, Bankroll, Stable Roster Seed)
-- Bankroll invariance (coins do not override higher tournament points)
-- Finalist locking (top 2 advance to Championship)
-- Championship Series first-to-2 decisive wins
-- Tie awards zero Championship wins and extends the series
-- Qualifier points invariance during Championship
-- Third-place exclusion from Championship matches
-- Podium standings (Champion, Runner-up, Third Place)
-- Reconnect and session token seat recovery
-- Complete 3-player lifecycle integration test
+The optional standalone JVM suite compiles the same Kotlin server/tests without the Android Gradle plugin: `gradle -p scripts/kotlin-tests test` (JDK 17 and an existing platform `android.jar` are required only as API stubs). It does not launch Android or test service lifecycle on a device.
 
-### 3. Build Android Debug APK
-```bash
-gradle :app:assembleDebug
-```
-Generates the debug APK at:
-```
-app/build/outputs/apk/debug/app-debug.apk
-```
+`server.ts` is retained as a tested Node protocol reference/development server. It is not used by the APK. `npm start` is for that reference only.
 
----
+## Game rules
 
-## Tournament Rules & Brawl Points
+Every frozen roster member plays two qualifiers against distinct opponents. Wins award 3 points, ties 1, losses 0. Ranking uses points, qualifier wins, applicable two-player decisive head-to-head, bankroll, then frozen roster order. Top two finalists lock for a first-to-two decisive-win championship; ties and VOID grant no series win. Qualifier statistics stay unchanged during championship. Podium: champion, runner-up, highest-ranked non-finalist.
 
-1. **Circular Qualifiers:**
-   - The authoritative server freezes the session roster (3–9 players).
-   - Generates a fair circular graph (`P0 vs P1`, `P1 vs P2`, ..., `P(n-1) vs P0`).
-   - Every player fights exactly twice against 2 different opponents.
-   - Match bounty: +250 coins.
-2. **Brawl Points:**
-   - **Win:** 3 Brawl Points
-   - **Tie:** 1 Brawl Point each
-   - **Loss:** 0 Brawl Points
-3. **5-Tier Ranking Hierarchy:**
-   - `1. Qualifier Brawl Points DESC`
-   - `2. Qualifier Wins DESC`
-   - `3. Decisive Head-to-Head Match Result (if exactly 2 players tied and they fought)`
-   - `4. Total Bankroll / Coins DESC`
-   - `5. Deterministic Roster Seed Order (frozen session seed)`
-4. **Championship Series (First to 2 Decisive Wins):**
-   - Locked top two finalists battle in a best-of series requiring **2 decisive wins**.
-   - Ties award 0 wins and extend the series.
-   - Qualifier points remain invariant.
-   - Spectator betting active for every bout (+500 coin victory bounty).
-   - Grand podium crowns Champion, Runner-up, and Third Place.
+Bets stay private until payout. VOID refunds bets and adds no qualifier fighter statistics; disconnect-forfeit awards the surviving fighter and refunds spectators. Server deadlines and reconnect tokens are authoritative. Old sockets lose authority when replaced.
 
----
+## Android joining and lifecycle
 
-## Mini-Game Catalog (6 Active Games)
+Native NSD/mDNS discovery has UDP fallback and stale-entry cleanup. QR invites use `brawl://join?host=<RFC1918-IP>&port=<port>&room=<code>`; invalid addresses, loopback/link-local guest targets, ambiguous parameters and invalid ports are rejected. Cold and warm intents share the parser. HostService publishes hosting readiness only after bind success and keeps serving through Activity recreation.
 
-1. **Millisecond Stop (9s):** Counter counts toward `05.000s`. At `03.000s`, the timer blinds out into `??.???` for everyone. Closest tap to `05.000s` wins.
-2. **Rapid Red Light, Green Light (15s):** Authoritative server schedule flips between Green (+1) and Red (-3). First to 40 or highest score wins.
-3. **Speed Math (16s):** 3-question arithmetic race. Mistakes trigger a 1.5s server-enforced penalty freeze. First to 3 correct answers wins.
-4. **Higher or Lower (18s):** Stable real-world trivia measurements (physics, monument heights, geography, astronomy). First to 3 correct answers wins.
-5. **Blind Pinpoint (15s):** Equirectangular world map with genuine Haversine distance formula calculation in kilometers. Closest pin to target city wins.
-6. **Quick Draw (10s):** Randomized "WAIT..." phase. When "DRAW!" flashes, tap instantly. Tapping even 1ms before "DRAW!" is an authoritative false-start foul.
+[Release evidence and user follow-up](V1_RELEASE_REPORT.md) distinguish automated tests/CI from manual Android acceptance. No ADB, emulator, APK installation, physical LAN/QR/deep-link testing, or new signing identity is part of this coding task.
 
----
+## Signing
 
-## Physical Device QA Checklist
+Release assembly without an established signing configuration produces an unsigned APK. CI signs only if all four existing `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, and `ANDROID_KEY_PASSWORD` secrets are configured. No signing key or passwords belong in Git. The owner supplies the established identity; do not replace it with a throwaway key.
 
-*(To be executed on physical Android phones connected to the same Wi-Fi router or phone hotspot)*
+## Repository
 
-- [ ] **Host Game Creation:** Host phone creates room; verifies room code and LAN address generated.
-- [ ] **Guest Discovery:** 2 guest phones open app; verify active room appears in quick-join on title screen.
-- [ ] **QR Join:** Guest phone scans QR code from host lobby screen; verifies instant room join.
-- [ ] **Ready Flow:** All 3 players toggle ready; host starts game.
-- [ ] **Qualifier Round 1:** Active fighters engage in mini-game; spectators place live wagers; verify payouts and coin balances.
-- [ ] **Qualifier Rounds 2 & 3:** Verify fighter rotation adheres to circular schedule; all players fight twice.
-- [ ] **Championship Transition:** Top 2 qualifiers locked into Championship; third place excluded.
-- [ ] **Championship Tie:** Simulate or observe tie; verify 0 wins awarded and series extended.
-- [ ] **Championship Conclusion:** Finalist reaches 2 decisive wins; crowned Champion on podium.
-- [ ] **Screen Lock / Reconnect:** Host phone briefly locked/unlocked; guest phone toggles Wi-Fi; verify player session recovered without duplicate seats.
+One canonical Git database, with variants represented by branches. External managed worktrees may be used temporarily; never nest a clone/worktree or ZIP pseudo-branch under this root. See [CODEX_WORKLOG.md](CODEX_WORKLOG.md) for the current checkpoint and [release brief](docs/V1_RELEASE_BRIEF.md) for the original scope; the owner's later scope correction in the worklog takes precedence.
+
+Natural Earth map geometry used by Blind Pinpoint is public domain.

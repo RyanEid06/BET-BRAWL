@@ -89,7 +89,7 @@ export const LobbyScreen: React.FC<Props> = ({
   }, [joinUrlWithRoom, isLanReady]);
 
   const connectedPlayers = players.filter(p => p.connected);
-  const enoughPlayers = connectedPlayers.length >= MIN_PLAYERS_TO_START || isDebug;
+  const enoughPlayers = connectedPlayers.length >= MIN_PLAYERS_TO_START;
   const allReady = connectedPlayers.every(p => p.isReady || p.isHost) || isDebug;
   const canStart = isHost && enoughPlayers && allReady;
 

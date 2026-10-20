@@ -16,8 +16,9 @@ export interface LanDiscoveryResult {
 }
 
 export function isRfc1918(ip: string): boolean {
-  const parts = ip.split('.').map(p => parseInt(p, 10));
-  if (parts.length !== 4 || parts.some(isNaN)) return false;
+  const octets = ip.split('.');
+  if (octets.length !== 4 || octets.some(part => !/^[0-9]{1,3}$/.test(part) || Number(part) > 255)) return false;
+  const parts = octets.map(Number);
 
   // 10.0.0.0 - 10.255.255.255
   if (parts[0] === 10) return true;
@@ -39,76 +40,38 @@ export function isLoopback(ip: string): boolean {
   return ip.startsWith('127.');
 }
 
-export function isLoopbackUrl(url: string | undefined): boolean {
-  if (!url) return true;
-  const trimmed = url.trim();
-  if (!trimmed || trimmed === 'null' || trimmed.startsWith('file:') || trimmed.startsWith('about:')) {
-    return true;
-  }
-  if (trimmed.startsWith('brawl://')) {
-    const qIdx = trimmed.indexOf('?');
-    if (qIdx !== -1) {
-      const params = new URLSearchParams(trimmed.slice(qIdx + 1));
-      const host = params.get('host');
-      if (!host || host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0' || host === '::1') {
-        return true;
-      }
-      return false;
-    }
-    return true;
-  }
+function lanEndpoint(host: string, port?: string | number | null): string | undefined {
+  if (!isRfc1918(host)) return undefined;
+  if (port == null || port === '') return host;
+  if (!/^[0-9]+$/.test(String(port)) || Number(port) < 1024 || Number(port) > 65535) return undefined;
+  return `${host}:${Number(port)}`;
+}
+
+export function isLoopbackUrl(source: string | undefined): boolean {
+  if (!source) return true;
   try {
-    const parsed = new URL(trimmed);
-    const host = parsed.hostname;
-    return host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0' || host === '::1';
+    const url = new URL(source.trim());
+    if (url.protocol === 'brawl:') {
+      return url.hostname !== 'join' || ['host', 'port'].some(key => url.searchParams.getAll(key).length > 1) ||
+        !lanEndpoint(url.searchParams.get('host') || '', url.searchParams.get('port'));
+    }
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return true;
+    const host = url.hostname;
+    return host === 'localhost' || host.endsWith('.localhost') || isLoopback(host) || isLinkLocal(host) ||
+      host === '0.0.0.0' || host === '[::1]' || host === '[::]';
   } catch {
-    return trimmed.includes('localhost') || trimmed.includes('127.0.0.1') || trimmed.includes('0.0.0.0') || trimmed.includes('::1');
+    return true;
   }
 }
 
-/**
- * Safely constructs a canonical Join URL without duplicate query strings or malformed parameters.
- * Preserves host and port, supporting http://, https://, and custom brawl://join schemes.
- */
+/** Build a reachable guest invite while replacing any previous room query. */
 export function buildJoinUrl(baseUrl: string, roomCode: string): string {
-  if (!baseUrl) return '';
-  const trimmedBase = baseUrl.trim();
-  if (trimmedBase === 'null' || trimmedBase.startsWith('file:') || trimmedBase.startsWith('about:')) {
-    return '';
-  }
-  const trimmedCode = (roomCode || '').trim().toUpperCase();
-
-  // Custom scheme: brawl://join
-  if (trimmedBase.startsWith('brawl://')) {
-    const questionIdx = baseUrl.indexOf('?');
-    const baseUri = questionIdx !== -1 ? baseUrl.slice(0, questionIdx) : baseUrl;
-    const queryString = questionIdx !== -1 ? baseUrl.slice(questionIdx + 1) : '';
-    const params = new URLSearchParams(queryString);
-    if (trimmedCode) {
-      params.set('room', trimmedCode);
-    }
-    const qs = params.toString();
-    return qs ? `${baseUri}?${qs}` : baseUri;
-  }
-
-  // Standard http/https URL
-  try {
-    const url = new URL(baseUrl);
-    if (trimmedCode) {
-      url.searchParams.set('room', trimmedCode);
-    }
-    return url.toString();
-  } catch {
-    const questionIdx = baseUrl.indexOf('?');
-    const baseUri = questionIdx !== -1 ? baseUrl.slice(0, questionIdx) : baseUrl;
-    const queryString = questionIdx !== -1 ? baseUrl.slice(questionIdx + 1) : '';
-    const params = new URLSearchParams(queryString);
-    if (trimmedCode) {
-      params.set('room', trimmedCode);
-    }
-    const qs = params.toString();
-    return qs ? `${baseUri}?${qs}` : baseUri;
-  }
+  if (isLoopbackUrl(baseUrl)) return '';
+  const url = new URL(baseUrl.trim());
+  const code = roomCode.trim().toUpperCase();
+  if (code && !/^[A-Z0-9]{3,12}$/.test(code)) return '';
+  if (code) url.searchParams.set('room', code);
+  return url.toString();
 }
 
 interface ScoredInterface {
@@ -198,7 +161,9 @@ export function resolveJoinEndpoint(
 
   // 1. Explicit target host passed directly
   if (targetHost && targetHost.trim()) {
-    return { hostToConnect: targetHost.trim(), source: 'explicit' };
+    const [host, port, extra] = targetHost.trim().split(':');
+    const endpoint = extra === undefined ? lanEndpoint(host, port) : undefined;
+    if (endpoint) return { hostToConnect: endpoint, source: 'explicit' };
   }
 
   // 2. Cold deep-link URL search parameters (?room=...&host=...&port=...)
@@ -208,9 +173,11 @@ export function resolveJoinEndpoint(
       const qRoom = (params.get('room') || params.get('code') || '').trim().toUpperCase();
       const qHost = (params.get('host') || '').trim();
       const qPort = params.get('port');
-      if (qHost && (!qRoom || qRoom === cleanCode)) {
+      const ambiguous = ['host', 'port', 'room', 'code'].some(key => params.getAll(key).length > 1);
+      const endpoint = !ambiguous ? lanEndpoint(qHost, qPort) : undefined;
+      if (endpoint && (!qRoom || qRoom === cleanCode)) {
         return {
-          hostToConnect: qPort ? `${qHost}:${qPort}` : qHost,
+          hostToConnect: endpoint,
           source: 'query',
         };
       }
@@ -220,7 +187,7 @@ export function resolveJoinEndpoint(
   // 3. Discovered rooms via mDNS / UDP discovery
   if (discoveredRooms && cleanCode) {
     const discovered = discoveredRooms.get(cleanCode);
-    if (discovered && (!discovered.lastSeen || Date.now() - discovered.lastSeen < 30000)) {
+    if (discovered && lanEndpoint(discovered.hostIp, discovered.port) && (!discovered.lastSeen || Date.now() - discovered.lastSeen < 30000)) {
       return {
         hostToConnect: discovered.port ? `${discovered.hostIp}:${discovered.port}` : discovered.hostIp,
         source: 'discovered',
@@ -231,7 +198,7 @@ export function resolveJoinEndpoint(
   // 4. Android global config discovered hosts
   if (globalConfig?.discoveredHosts && cleanCode) {
     const match = globalConfig.discoveredHosts.find(d => d.roomCode === cleanCode);
-    if (match) {
+    if (match && lanEndpoint(match.ip, match.port)) {
       return {
         hostToConnect: match.port ? `${match.ip}:${match.port}` : match.ip,
         source: 'config',

@@ -3,8 +3,13 @@ package com.betbrawl.app.server
 import android.app.*
 import android.content.Context
 import android.content.Intent
+import android.Manifest
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.IBinder
+import android.os.Handler
+import android.os.Looper
+import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import com.betbrawl.app.MainActivity
 import com.betbrawl.app.R
@@ -13,6 +18,8 @@ class HostService : Service() {
 
     private var lanDiscovery: LanDiscovery? = null
     private var advertisedRoomCode: String? = null
+    private var startingServer: BrawlWebSocketServer? = null
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     override fun onCreate() {
         super.onCreate()
@@ -29,8 +36,30 @@ class HostService : Service() {
 
         val port = intent?.getIntExtra(EXTRA_PORT, 8080) ?: 8080
 
-        if (serverInstance == null) {
-            val server = BrawlWebSocketServer("0.0.0.0", port) { roomState ->
+        startForeground(NOTIFICATION_ID, createNotification(serverInstance != null))
+        if (serverInstance == null && startingServer == null) {
+            lateinit var server: BrawlWebSocketServer
+            server = BrawlWebSocketServer("0.0.0.0", port,
+                onServerReady = {
+                    mainHandler.post {
+                        if (startingServer === server) {
+                            startingServer = null
+                            serverInstance = server
+                            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+                                checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) {
+                                getSystemService(NotificationManager::class.java)
+                                    ?.notify(NOTIFICATION_ID, createNotification(true))
+                            }
+                        }
+                    }
+                },
+                onServerFailure = {
+                    mainHandler.post {
+                        if (startingServer === server || serverInstance === server) hostingFailed()
+                    }
+                }
+            ) { roomState -> mainHandler.post {
+                if (serverInstance !== server) return@post
                 val currentRoomCode = roomState.roomCode
                 if (currentRoomCode.isNotEmpty()) {
                     if (lanDiscovery == null) {
@@ -49,19 +78,21 @@ class HostService : Service() {
                         stopSelf()
                     }
                 }
-            }
+            } }
+            startingServer = server
             try {
                 server.start()
-                serverInstance = server
             } catch (e: Exception) {
-                e.printStackTrace()
+                hostingFailed()
             }
         }
+        return START_NOT_STICKY
+    }
 
-        val notification = createNotification()
-        startForeground(NOTIFICATION_ID, notification)
-
-        return START_STICKY
+    private fun hostingFailed() {
+        Toast.makeText(this, R.string.host_service_failed, Toast.LENGTH_LONG).show()
+        stopHosting()
+        stopSelf()
     }
 
     private fun createNotificationChannel() {
@@ -78,7 +109,7 @@ class HostService : Service() {
         }
     }
 
-    private fun createNotification(): Notification {
+    private fun createNotification(ready: Boolean): Notification {
         val pendingIntent = PendingIntent.getActivity(
             this,
             0,
@@ -88,7 +119,7 @@ class HostService : Service() {
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(getString(R.string.host_service_title))
-            .setContentText(getString(R.string.host_service_text))
+            .setContentText(getString(if (ready) R.string.host_service_text else R.string.host_service_starting))
             .setSmallIcon(R.drawable.ic_notification)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
@@ -99,8 +130,12 @@ class HostService : Service() {
         advertisedRoomCode = null
         lanDiscovery?.stop()
         lanDiscovery = null
-        serverInstance?.stopServer()
+        val running = serverInstance
+        val starting = startingServer
         serverInstance = null
+        startingServer = null
+        running?.stopServer()
+        if (starting !== running) starting?.stopServer()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             stopForeground(STOP_FOREGROUND_REMOVE)
         } else {

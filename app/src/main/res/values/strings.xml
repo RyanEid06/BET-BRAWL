@@ -2,6 +2,8 @@
     <string name="app_name">BET &amp; BRAWL</string>
     <string name="host_service_channel_name">BET &amp; BRAWL Game Host</string>
     <string name="host_service_channel_desc">Local Wi-Fi party game host session</string>
-    <string name="host_service_title">BET &amp; BRAWL Host Active</string>
+    <string name="host_service_title">BET &amp; BRAWL Game Host</string>
     <string name="host_service_text">Hosting party game on local Wi-Fi</string>
+    <string name="host_service_starting">Starting local game host…</string>
+    <string name="host_service_failed">Could not start the local game host. Close other game sessions and try again.</string>
 </resources>

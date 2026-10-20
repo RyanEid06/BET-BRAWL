@@ -63,7 +63,7 @@ class MainActivity : AppCompatActivity() {
             }
         })
 
-        if (savedInstanceState == null) {
+        if (savedInstanceState == null || webView.restoreState(savedInstanceState) == null) {
             // Cold launch: Parse validated deep link and append as safe query parameters to initial URL
             val coldLink = DeepLinkParser.parse(intent?.data)
             val initialUrl = if (coldLink != null) {
@@ -75,6 +75,11 @@ class MainActivity : AppCompatActivity() {
             }
             webView.loadUrl(initialUrl)
         }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        webView.saveState(outState)
+        super.onSaveInstanceState(outState)
     }
 
     override fun onNewIntent(intent: Intent?) {

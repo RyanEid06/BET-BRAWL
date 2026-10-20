@@ -1,129 +1,45 @@
-# BET & BRAWL — V1 Release Verification Report
+# BET & BRAWL V1 release checkpoint
 
-**Date:** October 17, 2026  
-**Status:** V1 Code Candidate Ready  
-**Application:** Bet & BRAWL (Offline Local Wi-Fi Party Game Engine)
+2026-10-20. Implementation/local automated checks are complete. Exact-head CI/lint/APKs remain pending; this is a truthful checkpoint, not the final verdict. The owner's scope correction makes Android manual acceptance and Cloudflare deployment/public smoke USER FOLLOW-UP.
 
----
+## 1. Repository cleanup
 
-## 1. V1 Product Scope
+One canonical Git repository at `C:/Users/Administrator/Desktop/Projects/BET-BRAWL`. The nested Cloudflare directory was a clean separate clone; every ref was imported/verified before removal. All 40 historical ZIP entries matched frozen Git content exactly, and the modern branch's existing ZIP removal was retained. One temporary managed worktree is outside the root. Generated WebView assets are ignored/rebuilt; dependencies/builds/SQLite/dev vars/signing files/APKs/ZIPs are excluded. No history rewrite or unique work loss.
 
-Bet & BRAWL is a self-hosted, zero-cloud party game engine engineered specifically for 3 to 9 players sharing the same physical room and local Wi-Fi router (or mobile hotspot).
+## 2. Cloudflare web
 
-### Core Features Supported
-- **Authoritative Node.js Server:** Built with Express + native WebSockets (`ws`). All game logic, timing, scoring, betting odds, and payouts are calculated server-side.
-- **Dynamic Spectator Wagering:** When two fighters enter the arena, spectators place secret wagers during a 15-second betting window with real-time Laplace-smoothed dynamic odds. Bets remain secret until round payout recap.
-- **LAN & QR Discovery:** Real RFC1918 private IPv4 network detection. Host screen renders a scannable QR code directing players straight to the host machine's LAN IP address.
-- **Robust Reconnection Engine:** Handles socket reconnect races without ghost seats, supports host grace reconnects across mini-game round resolutions, and automatically recycles stale seats after 60 seconds.
-- **6 Authoritative Mini-Games:**
-  1. *Millisecond Stop:* Screen blinds out to `??.???` at 03.000s for all players; closest stop to 05.000s wins.
-  2. *Rapid Red Light, Green Light:* Mash on Green (+1), freeze on Red (-3). First to 40 or high score at timeout.
-  3. *Speed Math:* 3-question mental arithmetic race with 1.5s freeze penalty on mistakes.
-  4. *Higher or Lower:* Real-world statistical trivia; secret stats scrubbed until player answers.
-  5. *Blind Pinpoint:* Target world city pinpointing with Haversine spherical distance error.
-  6. *Quick Draw:* Reflex showdown; pre-taps before "DRAW!" result in immediate false-start disqualification.
-- **Kahoot-Style Final Podium:** Confetti fanfare, 1st (Gold/Champion), 2nd (Silver/Runner-up), and 3rd (Bronze) podium placement, accompanied by genuine session awards.
+`v1-web-cloudflare-ready`, based on `9aa66f1`: Worker/SQLite Durable Object architecture retained. Exact qualifier resolution, replacement-socket authority, repeated-join protection, offline fighter grace, frozen-roster finalists, strict deadlines, three-player debug minimum and restart seat cleanup fixed. UI/QR/page metadata now describe online play; local Node reference keeps LAN behavior.
 
----
+Executed: clean install, typecheck, 58/58 TS tests, 14/14 Worker tests, production build, Worker typecheck, Wrangler dry-run, actual local multi-client full tournament plus SQLite process-restart/deadline/bet recovery, and complete `npm run cf:verify`, all PASS. Evidence remains in the external worktree `artifacts/cloud-final-verify.log`. No deployment or public URL is claimed. README contains exact login/deploy commands.
 
-## 2. Authoritative Tournament Rules
+## 3. Android
 
-1. **Roster & Qualifiers:**
-   - Minimum 3 connected players to start. Maximum 9 players per room.
-   - Circular pairing graph (`P0 vs P1`, `P1 vs P2`, ..., `P(n-1) vs P0`).
-   - Every participant fights in exactly 2 qualifier matches facing 2 distinct opponents.
-   - Bounties: +250 coins on qualifier win (+125 coins each on tie).
-2. **Scoring:**
-   - Win = 3 Brawl Points, Tie = 1 Brawl Point, Loss = 0 Brawl Points.
-3. **Deterministic 5-Tier Tiebreaker:**
-   1. Qualifier Brawl Points DESC
-   2. Qualifier Wins DESC
-   3. Applicable Head-to-Head match result (strictly applied to 2-player tied subgroups that fought)
-   4. Current bankroll / coins DESC
-   5. Frozen session roster seed order (avoids 3-way cyclic sorting traps)
-4. **Championship Series (First to 2 Decisive Wins):**
-   - The top two qualifier seeds become locked finalists for the entire series.
-   - Non-finalists never enter the championship ring.
-   - First finalist to earn 2 decisive victories is crowned Champion.
-   - A tied championship brawl awards zero series wins and never ends the series.
-   - Mini-game selection prevents immediate back-to-back repetitions.
-   - Qualifier Brawl Points remain strictly invariant throughout the Championship Series.
-   - +500 coins bounty per decisive championship game.
-5. **Podium Standings:**
-   - 1st Place: Champion (winner of Championship Series)
-   - 2nd Place: Runner-up (loser of Championship Series)
-   - 3rd Place: Third Place (highest-ranked non-finalist from qualifiers)
-   - 4th+ Place: Remaining players in qualifier ranking order
+`main`, based on `9ac170b`: server previously pre-completed Q1, then its helper selected/completed Q2. The helper now owns one exact scheduled qualifier and rejects replay. Server state/timers are serialized; stale socket authority, offline next-round fighter grace, frozen-roster ranking, Higher/Lower reveal-key crash, disconnected-seat kick and restarted-lobby cleanup fixed. HostService readiness/failure handling, Activity restoration and strict join target validation repaired.
 
----
+Executed: clean npm install, typecheck, 64/64 TS tests, production frontend build/sync, and 51/51 Kotlin tests via existing compiler/JUnit. Twenty protocol tests drive actual JSON handlers and serialization, including the full qualifier/championship 2–1/tie sequence and VOID/refunds/deadlines/reconnect/authority/graces. No transport/device acceptance is implied.
 
-## 3. Automated Verification Results
+Local Android lint/APKs are unverified: SDK 35 is absent and existing Gradle daemon cannot establish loopback. No additional Android tooling was installed. CI is configured for unit/lint/debug/release and artifact upload. Signing secrets were absent; no key was created or committed. An unsigned release is not a signed production APK.
 
-All automated tests across 5 test files, type checking, linting, and production builds were executed and verified from a clean state.
+## 4. Cross-platform parity
 
-| Check | Command | Result | Details |
-|---|---|---|---|
-| **TypeScript Typecheck** | `npm run typecheck` | **PASS** | 0 errors (`tsc --noEmit`) |
-| **Code Linting** | `npm run lint` | **PASS** | Clean syntax and import graph |
-| **Automated Test Suite** | `npm test` | **PASS** | **58 / 58 passing** across 5 test files (13.64s) |
-| **Production Vite Build** | `npm run build` | **PASS** | Clean `dist/` bundle generated (689ms) |
-| **Full Verification Pipeline** | `npm run verify` | **PASS** | Composite typecheck, test, and build pipeline |
-| **AI Studio Applet Compilation**| `compile_applet` | **PASS** | Build succeeded |
+Both modern targets retain 3–9 players, two qualifiers against distinct opponents, 3/1/0 points, deterministic five-level ranking, locked top two, first-to-two decisive wins, tie/VOID non-wins, invariant championship qualifier statistics, private betting/refunds, authoritative deadlines/reconnect ownership and champion/runner-up/best non-finalist podium. Debug also requires three players. Networking deliberately differs: Cloudflare internet rooms versus Android phone/LAN.
 
----
+## 5. CI
 
-## 4. Key Regression Coverage
+Android workflow removes the stale committed generated-assets gate, always runs unit/lint/debug/unsigned release, and fixes signing-secret scope. Cloud workflow verifies the maintained branch/PR target via clean install/full cf:verify. Neither deploys. Current-head results still must be observed after pushing source commits; prior runs are not current-head proof.
 
-1. **Full 3-Player WebSocket Tournament Lifecycle (`multiplayer.test.ts`):**
-   - Exercises real `createBrawlServer` factory and WebSocket clients.
-   - Drives all 3 qualifiers to completion with deterministic results.
-   - Verifies 5-tier ranking generates locked finalists (P1 and P2) and 3rd place (P3).
-   - Drives Championship Game 1 (P1 wins -> 1–0).
-   - Drives Championship Game 2 (Tie -> score stays 1–0, series extended).
-   - Drives Championship Game 3 (P2 wins -> 1–1).
-   - Drives Championship Game 4 (P1 wins -> 2–1, championship clinched).
-   - Asserts qualifier Brawl Points snapshot invariant after every championship game.
-   - Asserts locked finalist invariant (P3 never fights in Championship).
-   - Asserts no-immediate-repeat mini-game rule between rounds.
-   - Reaches `FINAL_PODIUM` on all connected clients and confirms tournament cannot continue.
-2. **Authoritative Standings Single Source of Truth (`PayoutRecapModal.tsx`, `roomEngine.test.ts`):**
-   - Verified that recap leaderboard orders players by `tournamentRank` provided by the server.
-   - Tested that a spectator with higher bankroll but fewer points/wins cannot displace a qualified finalist.
-3. **Higher-or-Lower Information Security (`gameEngine.test.ts`):**
-   - Verified that secret cards data (`isHigher`, `challengerStat`) is absent from public config before player submission.
-4. **Authoritative 5-Tier Tiebreaker & Subgroups (`roomEngine.test.ts`):**
-   - Verified 2-player head-to-head resolution.
-   - Verified 3-way cyclic tie (A > B > C > A) safely falls through to bankroll / stable roster seed without infinite sort loops.
-   - Subgroup isolation verified.
-5. **Quick Draw False-Start Prevention (`gameEngine.test.ts`):**
-   - Verified 5 boundary timestamps (`-100ms`, `-40ms`, `-1ms` are fouls; `drawAt` and `+1ms` are valid).
-6. **Network & Connection Resilience (`multiplayer.test.ts`):**
-   - Reconnect race protection tested (old socket close does not drop replaced seat).
-   - Host reconnect grace timer survives mini-game round resolution.
-   - Stale lobby seat automatic expiry tested.
+## 6. Documentation
 
----
+README/V1_STATUS/metadata/build comments were corrected on each target; Cloudflare migration/deploy guidance rewritten. Old Node-only counts, AI Studio compilation claims and unperformed hardware PASS claims are removed by this report.
 
-## 5. Repository Cleanup Performed
+## 7. Remaining work and user follow-up
 
-1. **Obsolete Screenshots Removed:**
-   - Removed `landing_screen.png`, `landing_screen_reloaded.png`, `landing_screen_updated.png`, `lobby_screen.png`, and `lobby_3_players.png` which contained obsolete UI ("Circular Graph", "Local Wi-Fi Server 127.0.0.1:3000", "Championship Final", "N + 1").
-2. **Obsolete Package Lock Removed:**
-   - Deleted `bun.lock` to maintain strict `npm` package management consistency.
-3. **Obsolete Terminology Cleaned:**
-   - Cleaned references to "Championship Final" and "Qualifiers + Finals" in `LobbyScreen.tsx` and `server.ts`.
-4. **Documentation Aligned:**
-   - `README.md` and `V1_STATUS.md` updated with real test counts (58 tests) and verified command results.
+Coding task: commit/push, exact-head CI/lint/build, final evidence and temporary-worktree cleanup. Owner follow-up: manual Android/LAN/QR/deep-link acceptance; established release signing if desired; Cloudflare login/deploy/public HTTPS/WSS/QR multi-client acceptance. These manual items are not coding-task blockers.
 
----
+## 8. V1 verdict
 
-## 6. Physical Hardware QA Gate (Recommended for Production Deployment)
+NOT READY — only current-head CI/lint/build and final repository closure remain in this checkpoint.
 
-Automated tests prove the complete software lifecycle and protocol correctness. The following items require physical hardware verification on a real local Wi-Fi router:
+## 9. Old branch retirement
 
-- [ ] Host computer running `npm start` on Windows (confirm Windows Defender Firewall prompt "Allow access on private networks").
-- [ ] At least 3 physical mobile devices (Android and iOS) connected to the same Wi-Fi.
-- [ ] Verify Wi-Fi router AP Client Isolation is disabled (router permits device-to-device traffic).
-- [ ] Scan QR code using physical phone camera and confirm instant lobby entry.
-- [ ] Verify touch responsiveness and latency on all 6 mini-games across mobile Safari and mobile Chrome.
-- [ ] Verify phone screen standby / lock reconnect behavior during an active match.
+`v1-web-final safe to retire: NO`. Frozen SHA `e1f948c6c6e46355435fd70ea9ab8ee63031ebea`, tag `v1.0.0-web-final`. Baseline source typecheck/52 tests/build passed using repaired installed dependencies; its original lock cannot clean-install on Windows. No branch/tag deletion performed. Retirement still requires final replacement acceptance, uniqueness comparison and separate explicit owner confirmation.

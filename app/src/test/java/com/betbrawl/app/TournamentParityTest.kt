@@ -368,6 +368,25 @@ class TournamentParityTest {
 
     // 21. Qualifier VOID Advances QualifiersCompleted Without Mutating Fighter Stats
     @Test
+    fun qualifierHelperResolvesExactIdentityAndIgnoresDuplicateOrUnknownMatch() {
+        val players = List(3) { RoomEngine.createFreshPlayer("P$it", "⚡") }
+        val schedule = RoomEngine.generateTournamentSchedule(players)
+        val target = schedule.matches[1]
+        assertTrue(RoomEngine.applyQualifierMatchResolution(schedule, players, target.roundNumber,
+            target.fighterIds[0], false, RoundResolutionReason.PLAYED))
+        assertEquals(listOf(false, true, false), schedule.matches.map { it.completed })
+        assertEquals(1, schedule.qualifiersCompleted)
+        assertEquals(3, players.first { it.id == target.fighterIds[0] }.qualifierPoints)
+        assertFalse(RoomEngine.applyQualifierMatchResolution(schedule, players, target.roundNumber,
+            target.fighterIds[0], false, RoundResolutionReason.PLAYED))
+        assertFalse(RoomEngine.applyQualifierMatchResolution(schedule, players, 999,
+            target.fighterIds[0], false, RoundResolutionReason.PLAYED))
+        assertEquals(1, schedule.qualifiersCompleted)
+        assertEquals(2, players.sumOf { it.qualifierMatchesPlayed })
+        assertEquals(3, players.sumOf { it.qualifierPoints })
+    }
+
+    @Test
     fun testQualifierVoidAdvancesCompletionWithoutMutatingFighterStats() {
         val p1 = RoomEngine.createFreshPlayer("P1", "⚡")
         val p2 = RoomEngine.createFreshPlayer("P2", "🦊")
@@ -388,7 +407,7 @@ class TournamentParityTest {
         RoomEngine.applyQualifierMatchResolution(
             schedule = schedule,
             players = listOf(p1, p2, p3),
-            fighterIds = listOf(p1.id, p2.id),
+            roundNumber = schedule.matches[0].roundNumber,
             winnerId = null,
             isTie = false,
             reason = RoundResolutionReason.VOID

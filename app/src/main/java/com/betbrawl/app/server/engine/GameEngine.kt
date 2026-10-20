@@ -43,6 +43,20 @@ data class GameActionResult(
 
 object GameEngine {
 
+    fun toStrictNonNegativeInteger(value: Any?): Int? {
+        if (value !is Number) return null
+        val d = value.toDouble()
+        if (!d.isFinite() || d < 0.0 || d % 1.0 != 0.0 || d > Int.MAX_VALUE.toDouble()) return null
+        return d.toInt()
+    }
+
+    fun toStrictInteger(value: Any?): Int? {
+        if (value !is Number) return null
+        val d = value.toDouble()
+        if (!d.isFinite() || d % 1.0 != 0.0 || d < Int.MIN_VALUE.toDouble() || d > Int.MAX_VALUE.toDouble()) return null
+        return d.toInt()
+    }
+
     fun initMiniGameServerState(
         miniGameId: String,
         fighterIds: List<String>,
@@ -213,20 +227,6 @@ object GameEngine {
 
                 return GameActionResult(resolved = false, winnerId = null, isTie = false, scoreUpdate = fighterScores)
             }
-
-    fun toStrictNonNegativeInteger(value: Any?): Int? {
-        if (value !is Number) return null
-        val d = value.toDouble()
-        if (!d.isFinite() || d < 0.0 || d % 1.0 != 0.0 || d > Int.MAX_VALUE.toDouble()) return null
-        return d.toInt()
-    }
-
-    fun toStrictInteger(value: Any?): Int? {
-        if (value !is Number) return null
-        val d = value.toDouble()
-        if (!d.isFinite() || d % 1.0 != 0.0 || d < Int.MIN_VALUE.toDouble() || d > Int.MAX_VALUE.toDouble()) return null
-        return d.toInt()
-    }
 
             "speed_math" -> {
                 if (actionType != "ANSWER") {

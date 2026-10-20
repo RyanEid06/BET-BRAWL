@@ -17,6 +17,8 @@ class LanDiscovery(private val context: Context) {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var udpBroadcastJob: Job? = null
     private var udpListenJob: Job? = null
+    @Volatile private var udpListenSocket: DatagramSocket? = null
+    private val nsdRooms = ConcurrentHashMap.newKeySet<String>()
     private var ttlPruneJob: Job? = null
     private var registrationListener: NsdManager.RegistrationListener? = null
     private var discoveryListener: NsdManager.DiscoveryListener? = null
@@ -87,15 +89,14 @@ class LanDiscovery(private val context: Context) {
             val broadcastAddr = InetAddress.getByName("255.255.255.255")
             val packet = DatagramPacket(beaconJson, beaconJson.size, broadcastAddr, UDP_BEACON_PORT)
 
-            while (isActive) {
+            try { while (isActive) {
                 try {
                     socket.send(packet)
                 } catch (e: Exception) {
                     // Ignore broadcast send errors
                 }
                 delay(2000L)
-            }
-            socket.close()
+            } } finally { socket.close() }
         }
     }
 
@@ -105,18 +106,24 @@ class LanDiscovery(private val context: Context) {
 
         // 2. UDP Beacon Listener fallback
         udpListenJob?.cancel()
+        udpListenSocket?.close()
         udpListenJob = scope.launch {
             val socket = try {
-                DatagramSocket(UDP_BEACON_PORT).apply { reuseAddress = true }
+                DatagramSocket(null).apply {
+                    reuseAddress = true
+                    bind(java.net.InetSocketAddress(UDP_BEACON_PORT))
+                }
             } catch (e: Exception) {
                 null
             } ?: return@launch
+            udpListenSocket = socket
 
             val buffer = ByteArray(1024)
             val packet = DatagramPacket(buffer, buffer.size)
 
-            while (isActive) {
+            try { while (isActive) {
                 try {
+                    packet.length = buffer.size
                     socket.receive(packet)
                     val text = String(packet.data, 0, packet.length)
                     val json = JSONObject(text)
@@ -124,7 +131,7 @@ class LanDiscovery(private val context: Context) {
                         val ip = json.optString("ip").ifEmpty { packet.address.hostAddress }
                         val port = json.optInt("port", 8080)
                         val roomCode = json.optString("roomCode").trim().uppercase()
-                        if (ip != null && isPrivateIPv4(ip) && roomCode.isNotEmpty()) {
+                        if (ip != null && isPrivateIPv4(ip) && port in 1024..65535 && roomCode.matches(Regex("^[A-Z0-9]{3,12}$"))) {
                             val host = DiscoveredHost(ip, port, roomCode, System.currentTimeMillis())
                             discoveredRooms[roomCode] = host
                             onRoomDiscovered?.invoke(host)
@@ -133,8 +140,10 @@ class LanDiscovery(private val context: Context) {
                 } catch (e: Exception) {
                     // Ignore packet errors
                 }
+            } } finally {
+                socket.close()
+                if (udpListenSocket === socket) udpListenSocket = null
             }
-            socket.close()
         }
 
         // 3. Stale room TTL pruning (15s TTL)
@@ -143,7 +152,7 @@ class LanDiscovery(private val context: Context) {
             while (isActive) {
                 delay(5000L)
                 val now = System.currentTimeMillis()
-                val stale = discoveredRooms.entries.filter { now - it.value.timestamp > ROOM_TTL_MS }
+                val stale = discoveredRooms.entries.filter { it.key !in nsdRooms && now - it.value.timestamp > ROOM_TTL_MS }
                 for (entry in stale) {
                     discoveredRooms.remove(entry.key)
                 }
@@ -172,8 +181,9 @@ class LanDiscovery(private val context: Context) {
                                         name.trim().uppercase()
                                     }
 
-                                    if (hostAddress != null && isPrivateIPv4(hostAddress) && roomCode.isNotEmpty()) {
+                                    if (hostAddress != null && isPrivateIPv4(hostAddress) && port in 1024..65535 && roomCode.matches(Regex("^[A-Z0-9]{3,12}$"))) {
                                         val host = DiscoveredHost(hostAddress, port, roomCode, System.currentTimeMillis())
+                                        nsdRooms.add(roomCode)
                                         discoveredRooms[roomCode] = host
                                         onRoomDiscovered?.invoke(host)
                                     }
@@ -192,7 +202,10 @@ class LanDiscovery(private val context: Context) {
                     } else {
                         name.trim().uppercase()
                     }
-                    discoveredRooms.remove(roomCode)
+                    nsdRooms.remove(roomCode)
+                    if (discoveredRooms[roomCode]?.let { System.currentTimeMillis() - it.timestamp > ROOM_TTL_MS } == true) {
+                        discoveredRooms.remove(roomCode)
+                    }
                 }
 
                 override fun onDiscoveryStopped(serviceType: String) {}
@@ -209,6 +222,8 @@ class LanDiscovery(private val context: Context) {
     fun stop() {
         stopAdvertising()
         udpListenJob?.cancel()
+        udpListenSocket?.close()
+        udpListenSocket = null
         udpListenJob = null
         ttlPruneJob?.cancel()
         ttlPruneJob = null
@@ -219,6 +234,8 @@ class LanDiscovery(private val context: Context) {
             // Ignore
         }
         discoveryListener = null
+        nsdRooms.clear()
+        discoveredRooms.clear()
         scope.cancel()
     }
 
@@ -227,8 +244,9 @@ class LanDiscovery(private val context: Context) {
         const val ROOM_TTL_MS = 15000L
 
         fun isPrivateIPv4(ip: String): Boolean {
-            val parts = ip.split('.').mapNotNull { it.toIntOrNull() }
-            if (parts.size != 4) return false
+            val octets = ip.split('.')
+            if (octets.size != 4 || octets.any { !it.matches(Regex("^[0-9]{1,3}$")) }) return false
+            val parts = octets.map { it.toIntOrNull() ?: return false }
             val (p0, p1, p2, p3) = parts
             if (p0 !in 0..255 || p1 !in 0..255 || p2 !in 0..255 || p3 !in 0..255) return false
 

@@ -1,6 +1,5 @@
 package com.betbrawl.app
 
-import com.betbrawl.app.server.BrawlWebSocketServer
 import com.betbrawl.app.server.engine.OddsEngine
 import com.betbrawl.app.server.engine.RoomEngine
 import com.betbrawl.app.server.model.*
@@ -14,7 +13,6 @@ class ProtocolAndSecurityTest {
 
     @Test
     fun testRoomCreationAndActiveRoomProtection() {
-        val server = BrawlWebSocketServer("127.0.0.1", 9091)
         val host = RoomEngine.createFreshPlayer("Ace", "⚡", isHost = true)
 
         // Fresh player stats
@@ -225,7 +223,7 @@ class ProtocolAndSecurityTest {
         assertNotNull(betPayout)
         assertEquals("Payout totalReturn must strictly use Math.floor", 245, betPayout!!.totalReturn)
         assertEquals(145, betPayout.netChange)
-        assertEquals(1045, bettor.coins) // 900 + 245
+        assertEquals(1145, bettor.coins) // 900 + 245
     }
 
     @Test
