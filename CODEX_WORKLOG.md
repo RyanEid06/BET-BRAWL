@@ -6,7 +6,7 @@
 - Keep `v1-web-final` untouched until separate explicit deletion approval. Never expose signing/auth secrets, lose unique work or rewrite shared history.
 
 ## Current stage
-Implementation and fresh review fixes complete; final local gates running/observed below. Next: commit source changes, push both maintained branches, inspect exact CI jobs, resolve any real lint/build failure, finish evidence/docs and clean temporary worktree.
+Final CI closure. Main source833a67d and Cloud9b72160 pushed. Cloud CI39481028480 passed all gates. Android CI39480706652 compiled production but failed nullable smart casts in separately compiled unit tests; fixed and reproduced with separate local compiler modules (51/51 PASS, artifacts/android-separated-final.log). Shared recap now correctly describes VOID, championship ties and first wins; two SSR regressions passed on both targets. Main full verify66/66 +typecheck/build/sync PASS (artifacts/android-final-verify.log). Cloud full rerun includes60 TS +14 Worker tests; fixed frozenRoster fixture accepting a vacuous early readiness snapshot. Next: commit/push these final fixes, observe exact-head CI/lint/APKs, close docs and archive temporary worktree.
 
 ## Repository / Git topology
 - Canonical: `C:/Users/Administrator/Desktop/Projects/BET-BRAWL`, branch `main`, base `origin/main=9ac170b`; local infrastructure commit `6c727fb` plus current source/docs changes.
