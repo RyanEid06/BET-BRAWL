@@ -79,6 +79,7 @@ export function useBrawlClient() {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const heartbeatIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const wsRoomCodeRef = useRef<string | null>(null);
 
   // Keep refs for latest values to prevent stale closures in WebSocket event listeners
   const phaseRef = useRef<GamePhase>(state.phase);
@@ -93,7 +94,7 @@ export function useBrawlClient() {
     fetch('/api/network-info')
       .then(res => res.json())
       .then(info => {
-        const fullUrl = `http://${info.localIp}:${info.port}`;
+        const fullUrl = info.fullJoinUrl || `${window.location.protocol}//${info.localIp}${info.port ? `:${info.port}` : ''}`;
         setState(prev => ({
           ...prev,
           networkInfo: {
@@ -132,14 +133,24 @@ export function useBrawlClient() {
   }, []);
 
   // Connect WebSocket with immediate callback if already open
-  const connectWs = useCallback((onConnected?: () => void) => {
-    // If socket is already OPEN, invoke the callback immediately!
+  const connectWs = useCallback((onConnected?: () => void, routeRoomCode?: string) => {
+    const normalizedRouteCode = routeRoomCode?.trim().toUpperCase() || null;
+
+    // Cloudflare routes each room to a dedicated Durable Object by room code.
+    // The Node reference server ignores the query string, so this stays backward-compatible.
+    const routeChanged = !!normalizedRouteCode && !!wsRoomCodeRef.current && wsRoomCodeRef.current !== normalizedRouteCode;
+    if (routeChanged && wsRef.current) {
+      try { wsRef.current.close(1000, 'Switching rooms'); } catch { /* ignore */ }
+      wsRef.current = null;
+    }
+
+    // If socket is already OPEN on the requested room route, invoke the callback immediately.
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       if (onConnected) onConnected();
       return;
     }
 
-    // If socket is CONNECTING, wait for it
+    // If socket is CONNECTING, wait for it.
     if (wsRef.current && wsRef.current.readyState === WebSocket.CONNECTING) {
       const checkInterval = setInterval(() => {
         if (wsRef.current?.readyState === WebSocket.OPEN) {
@@ -155,9 +166,11 @@ export function useBrawlClient() {
     setState(prev => ({ ...prev, status: 'CONNECTING', errorMessage: null }));
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws`;
+    const roomQuery = normalizedRouteCode ? `?room=${encodeURIComponent(normalizedRouteCode)}` : '';
+    const wsUrl = `${protocol}//${window.location.host}/ws${roomQuery}`;
 
     const ws = new WebSocket(wsUrl);
+    wsRoomCodeRef.current = normalizedRouteCode;
     wsRef.current = ws;
 
     ws.onopen = () => {
@@ -304,6 +317,10 @@ export function useBrawlClient() {
     };
 
     ws.onclose = () => {
+      // Ignore a stale socket finishing its close after we already switched this
+      // client to a different room route/socket.
+      if (wsRef.current !== ws) return;
+      wsRef.current = null;
       if (heartbeatIntervalRef.current) clearInterval(heartbeatIntervalRef.current);
       const wasInRoom = phaseRef.current !== 'ENTRY';
 
@@ -324,16 +341,28 @@ export function useBrawlClient() {
                 type: 'JOIN_ROOM',
                 payload: { roomCode: currentCode, sessionToken: savedToken },
               });
-            });
+            }, currentCode);
           }
         }, 2000);
       }
     };
 
     ws.onerror = () => {
+      if (wsRef.current !== ws) return;
       setState(prev => ({ ...prev, status: 'ERROR', errorMessage: "Couldn’t connect to the game." }));
     };
   }, [send]);
+
+  const generateOnlineRouteCode = useCallback(() => {
+    const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+    const bytes = new Uint8Array(6);
+    if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+      crypto.getRandomValues(bytes);
+    } else {
+      for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+    }
+    return Array.from(bytes, value => alphabet[value % alphabet.length]).join('');
+  }, []);
 
   // Actions
   const hostGame = useCallback((playerName: string, avatar: string) => {
@@ -341,13 +370,16 @@ export function useBrawlClient() {
     localStorage.setItem(PLAYER_AVATAR_KEY, avatar);
     setState(prev => ({ ...prev, errorMessage: null }));
 
+    // The online Worker needs a route before the CREATE_ROOM message reaches the
+    // Durable Object. Node ignores this route and still generates its legacy code.
+    const routeCode = generateOnlineRouteCode();
     connectWs(() => {
       send({
         type: 'CREATE_ROOM',
         payload: { playerName, avatar, debugMode: state.isDebug },
       });
-    });
-  }, [connectWs, send, state.isDebug]);
+    }, routeCode);
+  }, [connectWs, generateOnlineRouteCode, send, state.isDebug]);
 
   const joinGame = useCallback((roomCode: string, playerName: string, avatar: string) => {
     const cleanCode = roomCode.trim().toUpperCase();
@@ -361,7 +393,7 @@ export function useBrawlClient() {
         type: 'JOIN_ROOM',
         payload: { roomCode: cleanCode, playerName, avatar, sessionToken: savedToken },
       });
-    });
+    }, cleanCode);
   }, [connectWs, send]);
 
   const toggleReady = useCallback(() => {

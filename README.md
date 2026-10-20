@@ -124,3 +124,11 @@ This executes:
 
 ## Assets & Attribution
 - Equirectangular world map coastline geometries in Blind Pinpoint are derived from [Natural Earth](https://www.naturalearthdata.com/) vector data (Public Domain).
+
+---
+
+## Cloudflare Online Backend (migration prepared, not deployed)
+
+Web V1's original Node backend remains available through `server.ts` and the existing `npm run dev` / `npm start` workflow. A separate Cloudflare Workers + Durable Objects backend has been added for full online rooms without changing the authoritative game protocol or tournament/betting engines.
+
+See `CLOUDFLARE_MIGRATION.md` for architecture and commands, and `CLOUDFLARE_VERIFICATION.md` for the verification record. No Cloudflare deployment is included in this source package.
