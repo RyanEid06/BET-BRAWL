@@ -24,7 +24,19 @@ captures/
 *.ap_
 *.dex
 *.keystore
-!debug.keystore
+*.jks
+*.p12
+*.pem
+*.key
+*.zip
+.dev.vars
+.dev.vars.*
+.wrangler/
+.wrangler-dry-run/
+artifacts/
+test-results/
+playwright-report/
+app/src/main/assets/web/
 
 # System files
 .DS_Store
