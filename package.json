@@ -14,7 +14,7 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit",
-    "test": "tsx --test src/engine/odds.test.ts src/engine/roomEngine.test.ts src/engine/gameEngine.test.ts src/engine/networkDiscovery.test.ts src/engine/multiplayer.test.ts",
+    "test": "tsx --test src/engine/odds.test.ts src/engine/roomEngine.test.ts src/engine/gameEngine.test.ts src/engine/networkDiscovery.test.ts src/engine/multiplayer.test.ts src/components/PayoutRecapModal.test.tsx",
     "verify": "npm run typecheck && npm test && npm run test:worker-core && npm run build && npm run cf:typecheck",
     "cf:typecheck": "tsc -p tsconfig.worker.json --noEmit",
     "cf:dry-run": "npm run build && wrangler deploy --dry-run --outdir .wrangler-dry-run",

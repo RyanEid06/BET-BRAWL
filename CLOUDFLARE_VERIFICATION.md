@@ -6,7 +6,7 @@ This is the maintained online web target. Node 24/Windows local evidence is sepa
 |---|---|
 | npm ci | PASS: 213 packages, zero reported vulnerabilities |
 | npm run typecheck | PASS |
-| npm test | PASS: 58/58 TS/Node protocol tests |
+| npm test | PASS: 60/60 TS/Node protocol tests |
 | npm run test:worker-core | PASS: 14/14 Worker tests |
 | npm run build | PASS |
 | npm run cf:typecheck | PASS |

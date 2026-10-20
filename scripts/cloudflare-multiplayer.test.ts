@@ -252,7 +252,10 @@ async function frozenRoster() {
   const guests = [await join('ROSTER', 'P2'), await join('ROSTER', 'P3')];
   await close(absent.client);
   for (const guest of guests) guest.client.send({ type: 'TOGGLE_READY' });
-  await host.client.state(s => s.players.filter(p => p.connected && !p.isHost).every(p => p.isReady));
+  // Ignore earlier join snapshots: every intended participant must be present and ready.
+  await host.client.state(s => s.players.length === 4
+    && s.players.find(p => p.id === absent.seat.player.id)?.connected === false
+    && guests.every(guest => s.players.some(p => p.id === guest.seat.player.id && p.connected && p.isReady)));
   host.client.send({ type: 'START_GAME' });
   for (let q = 1; q <= 3; q++) {
     const reveal = await host.client.state(s => s.phase === 'FIGHTER_REVEAL' && s.currentRound?.roundNumber === q);

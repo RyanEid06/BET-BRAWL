@@ -10,11 +10,11 @@ Canonical Git root: `C:/Users/Administrator/Desktop/Projects/BET-BRAWL`. The nes
 
 Branch: `v1-web-cloudflare-ready`, initial 9aa66f1. One authoritative SQLite Durable Object per room behind Worker HTTPS/WSS remains the production architecture. Fixed exact qualifier resolution, closing-socket authority/handshake, duplicate seats, disconnected next-round fighters, frozen-roster qualification, strict deadlines, debug minimum 3 and restarted-lobby expiry. Online copy/QR/loading/socket guards and public page metadata corrected. Shared TS helper serves Worker and the local Node reference.
 
-Clean install, typecheck, 58/58 TS tests, 14/14 Worker tests, build, Worker typecheck, dry-run, full actual local Wrangler tournament/restart/pending-deadline-and-bet recovery, and complete cf:verify all PASS. Exact commands/evidence are in CLOUDFLARE_VERIFICATION.md. No public deployment performed or URL invented; README documents `npm exec wrangler whoami`, interactive login if needed, and `npm run cf:deploy` after verification.
+Clean install, typecheck, 60/60 TS tests, 14/14 Worker tests, build, Worker typecheck, dry-run, full actual local Wrangler tournament/restart/pending-deadline-and-bet recovery, and complete cf:verify all PASS. Exact commands/evidence are in CLOUDFLARE_VERIFICATION.md. No public deployment performed or URL invented; README documents `npm exec wrangler whoami`, interactive login if needed, and `npm run cf:deploy` after verification.
 
 ## 3. Android
 
-Partner branch: `main`, source commit 833a67d. Exact-round ownership fixes Q1/Q2 double completion. Kotlin state/timers/socket authority, offline fighter grace/roster ranking, Higher/Lower reveals and disconnected kick/restart cleanup corrected; HostService readiness/error lifecycle, Activity restore and strict join targets repaired. Observed main 64/64 TS tests/typecheck/build/sync and 51/51 Kotlin tests via existing compiler/JUnit. No device/transport acceptance claimed.
+Partner branch: `main`, source commit 833a67d. Exact-round ownership fixes Q1/Q2 double completion. Kotlin state/timers/socket authority, offline fighter grace/roster ranking, Higher/Lower reveals and disconnected kick/restart cleanup corrected; HostService readiness/error lifecycle, Activity restore and strict join targets repaired. Observed main 66/66 TS tests/typecheck/build/sync and 51/51 Kotlin tests via existing compiler/JUnit. No device/transport acceptance claimed.
 
 Local SDK 35 absent; existing Gradle daemon loopback unavailable, so local lint/APKs are not claimed. CI checks unit/lint/debug/release. No signing secrets available, no replacement identity created. Device/LAN/QR/deep-link acceptance is owner follow-up.
 

@@ -72,10 +72,15 @@ export const PayoutRecapModal: React.FC<Props> = ({
             : `QUALIFIER ${round.qualifierIndex ?? round.roundNumber} RESULT`}
         </span>
 
-        {round.tieResult ? (
+        {round.resolutionReason === 'VOID' ? (
+          <div className="py-2">
+            <h2 className="text-2xl font-black font-display text-amber-300">ROUND VOID</h2>
+            <p className="text-xs font-mono text-slate-300">No fighter statistics added · Wagers refunded</p>
+          </div>
+        ) : round.tieResult ? (
           <div className="py-2">
             <h2 className="text-2xl font-black font-display text-amber-300">
-              {round.isChampionship ? `SERIES STILL TIED · ${winsA} – ${winsB}` : "IT'S A DRAW!"}
+              {round.isChampionship ? `CHAMPIONSHIP GAME TIED · ${winsA} – ${winsB}` : "IT'S A DRAW!"}
             </h2>
             <p className="text-xs font-mono text-slate-300">
               {round.isChampionship
@@ -108,7 +113,7 @@ export const PayoutRecapModal: React.FC<Props> = ({
             <div className="text-left">
               <div className="text-[11px] font-mono text-amber-400 font-bold uppercase">
                 {round.isChampionship
-                  ? (tournamentSchedule?.championId ? 'TOURNAMENT CHAMPION 🏆' : `SERIES LEAD (${winsA} – ${winsB})`)
+                  ? (tournamentSchedule?.championId ? 'TOURNAMENT CHAMPION 🏆' : `SERIES SCORE (${winsA} – ${winsB})`)
                   : '+3 BRAWL POINTS'}
               </div>
               <h2 className="text-2xl font-black font-display text-white">{winner?.name}</h2>
@@ -140,17 +145,21 @@ export const PayoutRecapModal: React.FC<Props> = ({
         <div className="bg-slate-900/90 border border-slate-700 rounded-2xl p-3.5 shadow-lg text-center">
           <div className="text-[11px] font-mono text-slate-400 uppercase mb-1">YOUR ROUND OUTCOME</div>
           {isFighter ? (
-            round.winnerId === myPlayer.id ? (
+            round.resolutionReason === 'VOID' ? (
+              <div className="text-amber-400 font-bold text-base font-display">Your fighter statistics are unchanged.</div>
+            ) : round.winnerId === myPlayer.id ? (
               <div className="text-emerald-400 font-black text-xl font-display">
-                VICTORY! You earned {round.isChampionship ? 'the Championship Title and ' : '+3 Brawl Points and '} +{round.matchPot}c pot!
+                VICTORY! You earned {round.isChampionship
+                  ? (tournamentSchedule?.championId === myPlayer.id ? 'the Championship Title and ' : 'a championship win and ')
+                  : '+3 Brawl Points and '} +{round.matchPot}c pot!
               </div>
             ) : round.tieResult ? (
               <div className="text-amber-400 font-bold text-base font-display">
-                TIE! You earned +1 Brawl Point and a +{Math.floor(round.matchPot / 2)}c split bounty.
+                {round.isChampionship ? 'TIE! No championship win awarded.' : 'TIE! You earned +1 Brawl Point.'} +{Math.floor(round.matchPot / 2)}c split bounty.
               </div>
             ) : (
               <div className="text-rose-400 font-bold text-base font-display">
-                DEFEAT! (0 Brawl Points) Better luck in the next match.
+                {round.isChampionship ? 'DEFEAT! The championship series score is shown above.' : 'DEFEAT! (0 Brawl Points) Better luck in the next match.'}
               </div>
             )
           ) : myPayout ? (
@@ -169,7 +178,9 @@ export const PayoutRecapModal: React.FC<Props> = ({
                   {myPayout.totalReturn} COINS REFUNDED · 0 NET
                 </div>
                 <div className="text-xs font-mono text-slate-300">
-                  Brawl ended in a tie — your full stake was returned.
+                  {round.resolutionReason === 'VOID' ? 'Round void — your full stake was returned.'
+                    : round.resolutionReason === 'DISCONNECT_FORFEIT' ? 'Fighter disconnected — your full stake was returned.'
+                    : 'Brawl ended in a tie — your full stake was returned.'}
                 </div>
               </div>
             ) : (
