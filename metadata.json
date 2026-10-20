@@ -1,6 +1,6 @@
 {
   "name": "Bet & BRAWL",
-  "description": "Local Wi-Fi party game engine with dynamic spectator betting, 3-9 player rooms, real-time mini-games, and arcade podiums.",
+  "description": "Online party game for 3-9 players on different networks, hosted by Cloudflare Workers and SQLite Durable Objects. Internet required.",
   "requestFramePermissions": [],
   "majorCapabilities": []
 }

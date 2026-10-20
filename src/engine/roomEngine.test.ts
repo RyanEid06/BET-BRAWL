@@ -7,6 +7,7 @@ import {
   computeSessionAwards,
   generateTournamentSchedule,
   computeTournamentRankings,
+  applyQualifierMatchResolution,
   getFinalTournamentStandings,
   selectMiniGame,
   MIN_PLAYERS_TO_START,
@@ -21,6 +22,38 @@ function createMockRoster(count: number): Player[] {
   }
   return players;
 }
+
+test('qualifier resolution owns exactly the requested match and ignores replay', () => {
+  const players = createMockRoster(3);
+  const schedule = generateTournamentSchedule(players);
+  const apply = applyQualifierMatchResolution;
+  const q2 = schedule.matches[1];
+  assert.equal(apply(schedule, players, q2.roundNumber, q2.fighterIds, q2.fighterIds[0], false, 'PLAYED'), true);
+  assert.deepEqual(schedule.matches.map(m => m.completed), [false, true, false]);
+  assert.equal(schedule.qualifiersCompleted, 1);
+  assert.equal(players.find(p => p.id === q2.fighterIds[0])!.qualifierPoints, 3);
+  assert.equal(players.find(p => p.id === q2.fighterIds[1])!.qualifierLosses, 1);
+  const snapshot = structuredClone({ schedule, players });
+  assert.equal(apply(schedule, players, q2.roundNumber, q2.fighterIds, q2.fighterIds[1], false, 'PLAYED'), false);
+  assert.deepEqual({ schedule, players }, snapshot);
+  assert.equal(apply(schedule, players, 99, q2.fighterIds, null, false, 'VOID'), false);
+  assert.deepEqual({ schedule, players }, snapshot);
+});
+
+test('qualifier VOID completes one exact match without changing fighter statistics', () => {
+  const players = createMockRoster(3);
+  const schedule = generateTournamentSchedule(players);
+  const apply = applyQualifierMatchResolution;
+  const q1 = schedule.matches[0];
+  assert.equal(apply(schedule, players, q1.roundNumber, q1.fighterIds, null, false, 'VOID'), true);
+  assert.deepEqual(schedule.matches.map(m => m.completed), [true, false, false]);
+  assert.equal(schedule.qualifiersCompleted, 1);
+  for (const p of players) {
+    assert.equal(p.qualifierPoints, 0);
+    assert.equal(p.qualifierMatchesPlayed, 0);
+    assert.equal(p.qualifierWins + p.qualifierTies + p.qualifierLosses, 0);
+  }
+});
 
 test('Fresh player starts with clean statistics and 1000 coins', () => {
   const p = createFreshPlayer('Ace', '⚡', true);

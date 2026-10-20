@@ -246,7 +246,50 @@ export type ServerMessage =
   | { type: 'PONG'; timestamp: number; payload: { clientSentAt?: number; serverNow: number } }
   | { type: 'ACTION_RESULT'; timestamp: number; payload: { fighterId?: string; questionIndex: number; isCorrect: boolean; challengerStat: string } };
 
+export type DeploymentMode = 'cloud' | 'lan';
+
+function isPublicJoinHost(hostname: string): boolean {
+  const host = hostname.replace(/^\[|\]$/g, '').toLowerCase().replace(/\.$/, '');
+  if (!host || host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || host.endsWith('.internal')) return false;
+
+  const octets = host.split('.');
+  if (octets.length === 4 && octets.every(part => /^\d{1,3}$/.test(part) && Number(part) <= 255)) {
+    const [a, b, c] = octets.map(Number);
+    return !(a === 0 || a === 10 || a === 127 || (a === 100 && b >= 64 && b <= 127) ||
+      (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) || (a === 192 && b === 0 && c === 0) ||
+      (a === 192 && b === 0 && c === 2) || (a === 192 && b === 88 && c === 99) ||
+      (a === 198 && (b === 18 || b === 19)) || (a === 198 && b === 51 && c === 100) ||
+      (a === 203 && b === 0 && c === 113) || a >= 224);
+  }
+
+  if (host.includes(':')) {
+    return /^[23][0-9a-f]:/i.test(host) && !host.startsWith('2001:db8:');
+  }
+
+  return host.includes('.') && !/\.(test|example|invalid)$/.test(host);
+}
+
+export function buildRoomJoinUrl(source: string | undefined, roomCode: string, deploymentMode: DeploymentMode): string | null {
+  if (!source || !roomCode.trim()) return null;
+  try {
+    const url = new URL(source);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+    const host = url.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+    if (host === 'localhost' || host.endsWith('.localhost') || host === '::' || host === '::1' ||
+      /^127\./.test(host) || host === '0.0.0.0') return null;
+    if (deploymentMode === 'cloud' && !isPublicJoinHost(url.hostname)) return null;
+    if (deploymentMode === 'lan' && !isPublicJoinHost(url.hostname) && !url.hostname.includes(':') &&
+      !/^\d{1,3}(\.\d{1,3}){3}$/.test(url.hostname)) return null;
+    url.searchParams.set('room', roomCode.trim().toUpperCase());
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
 export interface RoomNetworkInfo {
+  deploymentMode: DeploymentMode;
   localIp: string;
   port: number;
   roomCode: string;

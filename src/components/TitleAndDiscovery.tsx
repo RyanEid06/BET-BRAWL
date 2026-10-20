@@ -35,6 +35,8 @@ export const TitleAndDiscovery: React.FC<Props> = ({
   errorMessage,
   status,
 }) => {
+  const isCloud = networkInfo?.deploymentMode === 'cloud';
+  const isLan = networkInfo?.deploymentMode === 'lan';
   const [mode, setMode] = useState<'SELECT' | 'JOIN_INPUT'>(() => {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
@@ -154,7 +156,7 @@ export const TitleAndDiscovery: React.FC<Props> = ({
                   <div>
                     <div className="text-[10px] font-mono text-emerald-400 font-bold uppercase tracking-wider flex items-center gap-1.5">
                       <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping inline-block" />
-                      ACTIVE ROOM ON THIS WI-FI
+                      {isCloud ? 'ONLINE ROOM' : 'ACTIVE ROOM ON THIS WI-FI'}
                     </div>
                     <div className="font-display font-black text-lg text-white">
                       JOIN ROOM <span className="text-amber-400 font-mono">{networkInfo.roomCode}</span>
@@ -226,7 +228,9 @@ export const TitleAndDiscovery: React.FC<Props> = ({
 
       {/* Footer */}
       <footer className="w-full max-w-md text-center text-xs text-slate-400 font-mono pt-4">
-        <span>3–9 players · Same Wi-Fi · No internet needed</span>
+        <span>{isCloud
+          ? '3–9 players · Join from different networks · Internet connection required · Share room code or QR'
+          : isLan ? '3–9 players · Same Wi-Fi · No internet needed' : '3–9 players'}</span>
       </footer>
     </div>
   );

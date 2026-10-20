@@ -27,6 +27,7 @@ import { toPublicPlayer } from '../src/engine/types.ts';
 import {
   computeSessionAwards,
   computeTournamentRankings,
+  applyQualifierMatchResolution,
   createFreshPlayer,
   generateTournamentSchedule,
   initAuthoritativeRound,
@@ -77,7 +78,7 @@ const FAST_TEST_TIMING: TimingConfig = {
   bettingDurationSeconds: 1,
   countdownDurationMs: 150,
   fighterGraceMs: 500,
-  hostGraceMs: 800,
+  hostGraceMs: 5000, // Allows local workerd restart/reconnect; production remains 60 seconds.
   staleSeatGraceMs: 500,
   gameDurationMs: 1200,
 };
@@ -134,6 +135,7 @@ interface SocketAttachment {
   connectionId: string;
   sessionToken: string | null;
   routeRoomCode: string;
+  revoked?: boolean;
 }
 
 const STORAGE_KEY = 'activeRoom';
@@ -239,7 +241,7 @@ export class BrawlRoomCore {
     }
 
     const attachment = this.getAttachment(ws);
-    if (!attachment) return;
+    if (!attachment || attachment.revoked) return;
 
     if (msg.type === 'CREATE_ROOM') {
       await this.handleCreateRoom(ws, attachment, msg);
@@ -296,6 +298,7 @@ export class BrawlRoomCore {
     if (msg.type === 'RESTART_GAME') {
       if (!player.isHost || this.room.phase !== 'FINAL_PODIUM') return;
       this.clearRoundEvents();
+      this.removeEvents(e => e.kind === 'STALE_SEAT');
       for (const p of Object.values(this.room.players)) {
         p.coins = 1000;
         p.matchesWon = 0;
@@ -313,6 +316,8 @@ export class BrawlRoomCore {
         p.qualifierMatchesPlayed = 0;
         p.tournamentRank = undefined;
         p.isReady = false;
+        if (!p.connected && !p.isHost) this.schedule('STALE_SEAT', Date.now() + this.timing.staleSeatGraceMs,
+          { sessionToken: p.sessionToken });
       }
       this.room.phase = 'LOBBY';
       this.room.currentRound = null;
@@ -379,10 +384,13 @@ export class BrawlRoomCore {
   }
 
   async webSocketClose(ws: WebSocket): Promise<void> {
+    // Explicitly finish the handshake; local workerd may still report CLOSING.
+    try { ws.close(); } catch { /* already closed */ }
     await this.handleSocketDisconnect(ws);
   }
 
   async webSocketError(ws: WebSocket): Promise<void> {
+    try { ws.close(1011, 'Connection error'); } catch { /* already closed */ }
     await this.handleSocketDisconnect(ws);
   }
 
@@ -453,6 +461,12 @@ export class BrawlRoomCore {
   ): Promise<void> {
     const { roomCode, playerName, avatar, sessionToken } = msg.payload || ({} as never);
 
+    if (attachment.sessionToken && attachment.sessionToken !== sessionToken) {
+      this.send(ws, { type: 'JOIN_ERROR', timestamp: Date.now(),
+        payload: { code: 'ALREADY_JOINED', message: 'This connection already has a player seat.' } });
+      return;
+    }
+
     if (!this.room) {
       this.send(ws, {
         type: 'JOIN_ERROR',
@@ -491,6 +505,8 @@ export class BrawlRoomCore {
         if (oldSocket === ws) continue;
         const oldAttachment = this.getAttachment(oldSocket);
         if (oldAttachment?.sessionToken === sessionToken) {
+          // Closing sockets can still deliver messages and appear in getWebSockets().
+          oldSocket.serializeAttachment({ ...oldAttachment, sessionToken: null, revoked: true });
           try { oldSocket.close(1000, 'Replaced by new connection'); } catch { /* ignore */ }
         }
       }
@@ -564,7 +580,7 @@ export class BrawlRoomCore {
     const playerList = Object.values(this.room.players);
     const connectedPlayers = playerList.filter(p => p.connected);
 
-    if (connectedPlayers.length < MIN_PLAYERS_TO_START && !this.room.debugMode) {
+    if (connectedPlayers.length < MIN_PLAYERS_TO_START) {
       this.send(ws, {
         type: 'JOIN_ERROR',
         timestamp: Date.now(),
@@ -586,34 +602,7 @@ export class BrawlRoomCore {
       return;
     }
 
-    let schedule: TournamentSchedule;
-    if (connectedPlayers.length < 3 && this.room.debugMode) {
-      const pA = connectedPlayers[0];
-      const pB = connectedPlayers[1] || connectedPlayers[0];
-      schedule = {
-        stage: 'QUALIFIERS',
-        totalPlayers: connectedPlayers.length,
-        qualifierCount: 1,
-        qualifiersCompleted: 0,
-        totalRounds: 3,
-        matches: [{
-          matchIndex: 0,
-          roundNumber: 1,
-          fighterIds: [pA.id, pB.id],
-          isChampionship: false,
-          completed: false,
-          winnerId: null,
-        }],
-        championshipWins: {},
-        championshipGamesPlayed: 0,
-        championId: null,
-        runnerUpId: null,
-        thirdPlaceId: null,
-        stableRosterOrder: [pA.id, pB.id],
-      };
-    } else {
-      schedule = generateTournamentSchedule(connectedPlayers);
-    }
+    const schedule = generateTournamentSchedule(connectedPlayers);
 
     this.room.tournamentSchedule = schedule;
     this.room.totalRounds = schedule.totalRounds;
@@ -625,7 +614,7 @@ export class BrawlRoomCore {
       p.qualifierMatchesPlayed = 0;
       p.tournamentRank = undefined;
     }
-    computeTournamentRankings(Object.values(this.room.players), [], schedule.stableRosterOrder);
+    computeTournamentRankings(connectedPlayers, [], schedule.stableRosterOrder);
     this.startRound(1);
     await this.commitAndBroadcast();
   }
@@ -686,6 +675,7 @@ export class BrawlRoomCore {
   private async handleFighterAction(ws: WebSocket, player: Player, action: FighterAction): Promise<void> {
     if (!this.room?.currentRound || !this.room.internalGameState || this.room.phase !== 'MINIGAME_ACTIVE') return;
     const now = Date.now();
+    if (this.room.currentRound.gameStartsAt && now < this.room.currentRound.gameStartsAt) return;
     if (this.room.currentRound.gameEndsAt && now >= this.room.currentRound.gameEndsAt) return;
 
     const result = processFighterAction(
@@ -743,7 +733,7 @@ export class BrawlRoomCore {
 
         if (!sched.finalists || sched.finalists.length !== 2) {
           const completedQualifiers = sched.matches.filter(m => !m.isChampionship && m.completed);
-          const ranked = computeTournamentRankings(playerList, completedQualifiers, sched.stableRosterOrder);
+          const ranked = computeTournamentRankings(playerList.filter(p => sched.stableRosterOrder.includes(p.id)), completedQualifiers, sched.stableRosterOrder);
           const finalists: [string, string] = [ranked[0].id, ranked[1].id];
           sched.finalists = finalists;
           sched.championshipWins = { [finalists[0]]: 0, [finalists[1]]: 0 };
@@ -782,6 +772,13 @@ export class BrawlRoomCore {
     this.room.lastPairing = round.fighterIds;
     this.room.phase = 'FIGHTER_REVEAL';
     this.schedule('OPEN_BETTING', round.revealEndsAt, { roundNumber: roundNum });
+    for (const playerId of round.fighterIds) {
+      const player = this.findPlayerById(playerId);
+      if (player && !player.connected) this.schedule('FIGHTER_GRACE', now + this.timing.fighterGraceMs, {
+        sessionToken: player.sessionToken, playerId,
+        otherFighterId: round.fighterIds.find(id => id !== playerId), roundNumber: roundNum,
+      });
+    }
   }
 
   private openBettingWindow(): void {
@@ -908,36 +905,9 @@ export class BrawlRoomCore {
 
     if (this.room.tournamentSchedule) {
       const sched = this.room.tournamentSchedule;
-      const [f1Id, f2Id] = round.fighterIds;
-      const f1 = this.findPlayerById(f1Id);
-      const f2 = this.findPlayerById(f2Id);
-
       if (!round.isChampionship) {
-        sched.qualifiersCompleted += 1;
-        const matchIndex = sched.matches.findIndex(m => !m.completed && !m.isChampionship);
-        if (matchIndex !== -1) {
-          sched.matches[matchIndex].completed = true;
-          sched.matches[matchIndex].winnerId = winnerId;
-          sched.matches[matchIndex].tieResult = isTie;
-          sched.matches[matchIndex].resolutionReason = resolutionReason;
-        }
-
-        if (resolutionReason === 'PLAYED' || resolutionReason === 'DISCONNECT_FORFEIT') {
-          if (f1) f1.qualifierMatchesPlayed += 1;
-          if (f2) f2.qualifierMatchesPlayed += 1;
-          if (winnerId) {
-            const winner = f1?.id === winnerId ? f1 : f2;
-            const loser = f1?.id === winnerId ? f2 : f1;
-            if (winner) { winner.qualifierPoints += 3; winner.qualifierWins += 1; }
-            if (loser) loser.qualifierLosses += 1;
-          }
-        } else if (isTie) {
-          if (f1) { f1.qualifierMatchesPlayed += 1; f1.qualifierPoints += 1; f1.qualifierTies += 1; }
-          if (f2) { f2.qualifierMatchesPlayed += 1; f2.qualifierPoints += 1; f2.qualifierTies += 1; }
-        }
-
-        const completedQualifiers = sched.matches.filter(m => !m.isChampionship && m.completed);
-        computeTournamentRankings(Object.values(this.room.players), completedQualifiers, sched.stableRosterOrder);
+        applyQualifierMatchResolution(sched, Object.values(this.room.players), round.roundNumber,
+          round.fighterIds, winnerId, isTie, resolutionReason);
       } else {
         sched.championshipGamesPlayed += 1;
         const champMatch: TournamentMatch = {
@@ -992,7 +962,7 @@ export class BrawlRoomCore {
     while (this.room?.scheduledEvents.length) {
       this.room.scheduledEvents.sort((a, b) => a.at - b.at);
       const next = this.room.scheduledEvents[0];
-      if (next.at > Date.now() + 10) break;
+      if (next.at > Date.now()) break;
       this.room.scheduledEvents.shift();
       processedAny = true;
       await this.handleScheduledEvent(next);
@@ -1197,8 +1167,9 @@ export class BrawlRoomCore {
 
     // Stale socket protection: a reconnect socket with the same token already exists.
     const replacementExists = this.ctx.getWebSockets().some(other => {
-      if (other === ws) return false;
-      return this.getAttachment(other)?.sessionToken === token;
+      if (other === ws || other.readyState !== 1) return false;
+      const otherAttachment = this.getAttachment(other);
+      return !otherAttachment?.revoked && otherAttachment?.sessionToken === token;
     });
     if (replacementExists) return;
 

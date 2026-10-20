@@ -36,6 +36,7 @@ import {
   computeSessionAwards,
   generateTournamentSchedule,
   computeTournamentRankings,
+  applyQualifierMatchResolution,
   MIN_PLAYERS_TO_START,
   MAX_PLAYERS_CAPACITY,
   sanitizePlayerName,
@@ -340,7 +341,7 @@ export function createBrawlServer(options: CreateServerOptions = {}) {
         // Select and lock top-two finalists if not already locked
         if (!sched.finalists || sched.finalists.length !== 2) {
           const completedQualifiers = sched.matches.filter(m => !m.isChampionship && m.completed);
-          const ranked = computeTournamentRankings(playerList, completedQualifiers, sched.stableRosterOrder);
+          const ranked = computeTournamentRankings(playerList.filter(p => sched.stableRosterOrder.includes(p.id)), completedQualifiers, sched.stableRosterOrder);
           const finalists: [string, string] = [ranked[0].id, ranked[1].id];
           sched.finalists = finalists;
           sched.championshipWins = { [finalists[0]]: 0, [finalists[1]]: 0 };
@@ -662,45 +663,9 @@ export function createBrawlServer(options: CreateServerOptions = {}) {
     // Update Tournament Schedule and Brawl Points
     if (activeRoom.tournamentSchedule) {
       const sched = activeRoom.tournamentSchedule;
-      const [f1Id, f2Id] = round.fighterIds;
-      const f1 = Array.from(activeRoom.players.values()).find(p => p.id === f1Id);
-      const f2 = Array.from(activeRoom.players.values()).find(p => p.id === f2Id);
-
       if (!round.isChampionship) {
-        // QUALIFIER BRAWL:
-        sched.qualifiersCompleted += 1;
-        const matchIndex = sched.matches.findIndex(m => !m.completed && !m.isChampionship);
-        if (matchIndex !== -1) {
-          sched.matches[matchIndex].completed = true;
-          sched.matches[matchIndex].winnerId = winnerId;
-          sched.matches[matchIndex].tieResult = isTie;
-          sched.matches[matchIndex].resolutionReason = resolutionReason;
-        }
-
-        // Win = 3 Brawl Points, Tie = 1 Brawl Point each, Loss = 0 Brawl Points
-        if (resolutionReason === 'PLAYED' || resolutionReason === 'DISCONNECT_FORFEIT') {
-          if (f1) f1.qualifierMatchesPlayed += 1;
-          if (f2) f2.qualifierMatchesPlayed += 1;
-
-          if (winnerId) {
-            const winnerFighter = f1?.id === winnerId ? f1 : f2;
-            const loserFighter = f1?.id === winnerId ? f2 : f1;
-            if (winnerFighter) {
-              winnerFighter.qualifierPoints += 3;
-              winnerFighter.qualifierWins += 1;
-            }
-            if (loserFighter) {
-              loserFighter.qualifierLosses += 1;
-            }
-          }
-        } else if (isTie) {
-          if (f1) { f1.qualifierMatchesPlayed += 1; f1.qualifierPoints += 1; f1.qualifierTies += 1; }
-          if (f2) { f2.qualifierMatchesPlayed += 1; f2.qualifierPoints += 1; f2.qualifierTies += 1; }
-        }
-
-        // Recompute current tournament rankings after qualifier match using pure 5-layer tiebreaker
-        const completedQualifiers = sched.matches.filter(m => !m.isChampionship && m.completed);
-        computeTournamentRankings(Array.from(activeRoom.players.values()), completedQualifiers, sched.stableRosterOrder);
+        applyQualifierMatchResolution(sched, Array.from(activeRoom.players.values()), round.roundNumber,
+          round.fighterIds, winnerId, isTie, resolutionReason);
       } else {
         // CHAMPIONSHIP SERIES (First to 2 Decisive Wins):
         sched.championshipGamesPlayed += 1;
@@ -983,7 +948,7 @@ export function createBrawlServer(options: CreateServerOptions = {}) {
           const connectedPlayers = playerList.filter(p => p.connected);
 
           // Use authoritative room debugMode property — do NOT allow arbitrary payload bypass!
-          if (connectedPlayers.length < MIN_PLAYERS_TO_START && !activeRoom.debugMode) {
+          if (connectedPlayers.length < MIN_PLAYERS_TO_START) {
             ws.send(JSON.stringify({
               type: 'JOIN_ERROR',
               timestamp: Date.now(),
@@ -1007,36 +972,7 @@ export function createBrawlServer(options: CreateServerOptions = {}) {
 
           // Authoritative Tournament Schedule Generation:
           // Freeze session roster, shuffle once, generate N circular qualifiers + Championship Series (First to 2 Decisive Wins)
-          let schedule: TournamentSchedule;
-          if (connectedPlayers.length < 3 && activeRoom.debugMode) {
-            const pA = connectedPlayers[0];
-            const pB = connectedPlayers[1] || connectedPlayers[0];
-            schedule = {
-              stage: 'QUALIFIERS',
-              totalPlayers: connectedPlayers.length,
-              qualifierCount: 1,
-              qualifiersCompleted: 0,
-              totalRounds: 3,
-              matches: [
-                {
-                  matchIndex: 0,
-                  roundNumber: 1,
-                  fighterIds: [pA.id, pB.id],
-                  isChampionship: false,
-                  completed: false,
-                  winnerId: null,
-                },
-              ],
-              championshipWins: {},
-              championshipGamesPlayed: 0,
-              championId: null,
-              runnerUpId: null,
-              thirdPlaceId: null,
-              stableRosterOrder: [pA.id, pB.id],
-            };
-          } else {
-            schedule = generateTournamentSchedule(connectedPlayers);
-          }
+          const schedule = generateTournamentSchedule(connectedPlayers);
           activeRoom.tournamentSchedule = schedule;
           activeRoom.totalRounds = schedule.totalRounds;
 
@@ -1051,7 +987,7 @@ export function createBrawlServer(options: CreateServerOptions = {}) {
           }
 
           // Initialize authoritative initial tournament rankings based on frozen roster seed
-          computeTournamentRankings(Array.from(activeRoom.players.values()), [], schedule.stableRosterOrder);
+          computeTournamentRankings(connectedPlayers, [], schedule.stableRosterOrder);
 
           startRound(1);
           return;

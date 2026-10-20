@@ -9,3 +9,17 @@ coverage/
 .aistudio/
 .wrangler/
 .wrangler-dry-run/
+
+# Local tests, snapshots and secrets
+.dev.vars
+.dev.vars.*
+*.zip
+*.apk
+*.aab
+*.jks
+*.keystore
+*.pem
+*.key
+artifacts/
+test-results/
+playwright-report/

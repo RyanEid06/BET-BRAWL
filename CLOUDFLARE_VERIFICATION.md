@@ -1,46 +1,29 @@
-# Cloudflare migration verification
+# Cloudflare V1 verification — 2026-10-20
 
-Status: **implemented, not deployed**.
+This is the maintained online web target. Node 24/Windows local evidence is separate from GitHub CI and public deployment.
 
-## Preserved V1 reference
+| Executed command | Observed result |
+|---|---|
+| npm ci | PASS: 213 packages, zero reported vulnerabilities |
+| npm run typecheck | PASS |
+| npm test | PASS: 58/58 TS/Node protocol tests |
+| npm run test:worker-core | PASS: 14/14 Worker tests |
+| npm run build | PASS |
+| npm run cf:typecheck | PASS |
+| npm run cf:dry-run | PASS: Wrangler 4.151.1, SQLite BrawlRoom +ASSETS |
+| npm run test:cloudflare | PASS: actual local Wrangler/SQLite runtime |
+| npm run cf:verify | PASS: complete pipeline |
 
-The original source bundle included a duplicate release ZIP containing the V1 source. The following important files in the migrated tree are byte-for-byte identical to that embedded V1 reference:
+The real-runtime suite checks min/max/ready/host authority, seat cleanup/replacement, all three qualifiers, secret bets/reveal/deadlines, locked finalists and a 2–1 championship with an intervening tie, podium, VOID/refund/stat invariance, offline-next-round forfeit, pre-start nonparticipant exclusion, room isolation, authenticated close, and process restart recovering SQLite room/podium plus an active bet and pending deadline. It uses isolated temporary storage and test-only timing. Production timings remain unchanged.
 
-- `server.ts` — SHA-256 `ab276ead5d822ef12544084f956bac2e92635833fe786afa78f5aba9cf450e02`
-- `src/engine/types.ts` — SHA-256 `c22b3bc3794ce13f7b0c1104fab1eded875504fd4d4a1db37be7b1b012ea661c`
-- `src/engine/roomEngine.ts` — SHA-256 `4663119094df5ea3d5986661a81c4aa58a55b40e0f3d6c6503fa66c2ccafd20f`
-- `src/engine/odds.ts` — SHA-256 `7b9660c881bc9a3881e6416bbdcb500f1698720a3618fdaeecd78bc85b7bd39d`
-- `src/engine/gameEngine.ts` — SHA-256 `fb7e2656fc50766b7a28ee8d27ff72857712d128be172e8b9001afcc76aa6283`
+Worker regressions additionally reject old closing-socket commands, repeated joins, early alarm transitions/actions, solo/two-player debug starts, and stale seats after returning to lobby. Exact-round shared qualifier tests reject replay/incorrect identity.
 
-The duplicate `BET-BRAWL-v1.0.0.zip` is intentionally omitted from the final source ZIP because it is not needed at runtime or for the preserved Node reference; `server.ts` and the original source files remain directly in the repository.
+Local evidence: `artifacts/cloud-final-verify.log` (ignored diagnostics). CI runs the same complete gate from clean dependencies; inspect the current branch's Actions result separately. No workflow deploys automatically.
 
-## Tests executed in this workspace
+## Preserved history
 
-- Existing pure V1 engine/network tests: **46/46 passed**.
-- Durable Object core suite: **4/4 passed**.
-  - independent room isolation
-  - persistent room state across object re-instantiation
-  - ready/start authorization and gating
-  - secret betting visibility before/after recap
-  - alarm-driven phase progression and payout resolution
-  - reconnect seat reuse / stale socket protection
-  - disconnected lobby-seat expiry
-  - active fighter disconnect forfeit
-- Worker/core strict TypeScript check using sandbox runtime stubs: **passed**.
-- Parse/emit check across `server.ts`, all `src/**/*.ts(x)`, `worker/**/*.ts`, and `scripts/**/*.ts`: **passed**.
-- `package.json` dependency/devDependency/engine declarations still match the existing `package-lock.json`: **passed**.
+Frozen `v1-web-final` is `e1f948c6c6e46355435fd70ea9ab8ee63031ebea`, tagged `v1.0.0-web-final`. Its untouched source passed typecheck, 52/52 tests and build using repaired installed dependencies; its original lock lacks optional-platform entries. Earlier migration-only reports/hashes remain recoverable in Git at `9aa66f1`; their 46-test/4-test counts and unexecuted-Wrangler statements no longer describe current verification.
 
-## Runtime integration test included but not executed here
+## Owner follow-up
 
-`scripts/cloudflare-multiplayer.test.ts` starts Wrangler locally and exercises the actual Worker + Durable Object runtime with multiple WebSocket clients, two simultaneous isolated rooms, host authorization, ready gating, betting privacy, payout, reconnect and room closure.
-
-This sandbox could not download npm packages from `registry.npmjs.org` (DNS/network access was unavailable), so `npm ci`, the Vite production build, `wrangler dev`, and `wrangler deploy --dry-run` could not be run here. No production deployment was attempted.
-
-Before the real deployment, run:
-
-```bash
-npm ci
-npm run cf:verify
-```
-
-A passing `cf:verify` is the final local runtime gate before `wrangler deploy`.
+Authenticate/deploy using README commands, then test public HTTPS/WSS/QR and multiple clients on different networks. No production deployment URL or success is claimed. These manual steps are USER FOLLOW-UP under the owner's corrected scope.

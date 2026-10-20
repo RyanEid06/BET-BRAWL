@@ -6,7 +6,7 @@
  */
 
 import crypto from 'crypto';
-import type { Player, PublicPlayer, RoundState, Award, MiniGameId, TournamentMatch, TournamentSchedule, TournamentStage } from './types.ts';
+import type { Player, PublicPlayer, RoundState, Award, MiniGameId, TournamentMatch, TournamentSchedule, TournamentStage, RoundResolutionReason } from './types.ts';
 import { calculateDynamicOdds } from './odds.ts';
 import { MINI_GAMES } from './miniGamesCatalog.ts';
 import { initMiniGameServerState, InternalGameState } from './gameEngine.ts';
@@ -355,6 +355,40 @@ export function computeTournamentRankings(
   });
 
   return finalRanked;
+}
+
+/** Complete the exact qualifier once; callers never pre-mark its schedule entry. */
+export function applyQualifierMatchResolution(
+  sched: TournamentSchedule,
+  players: Player[],
+  roundNumber: number,
+  fighterIds: [string, string],
+  winnerId: string | null,
+  isTie: boolean,
+  resolutionReason: RoundResolutionReason,
+): boolean {
+  const match = sched.matches.find(m => !m.isChampionship && m.roundNumber === roundNumber
+    && m.fighterIds[0] === fighterIds[0] && m.fighterIds[1] === fighterIds[1]);
+  if (!match || match.completed) return false;
+  match.completed = true;
+  match.winnerId = winnerId;
+  match.tieResult = isTie;
+  match.resolutionReason = resolutionReason;
+  sched.qualifiersCompleted += 1;
+
+  if (resolutionReason !== 'VOID') {
+    for (const id of fighterIds) {
+      const player = players.find(p => p.id === id);
+      if (!player) continue;
+      player.qualifierMatchesPlayed += 1;
+      if (isTie) { player.qualifierPoints += 1; player.qualifierTies += 1; }
+      else if (id === winnerId) { player.qualifierPoints += 3; player.qualifierWins += 1; }
+      else player.qualifierLosses += 1;
+    }
+  }
+  const roster = players.filter(p => sched.stableRosterOrder.includes(p.id));
+  computeTournamentRankings(roster, sched.matches.filter(m => !m.isChampionship && m.completed), sched.stableRosterOrder);
+  return true;
 }
 
 /**

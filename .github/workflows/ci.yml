@@ -6,7 +6,7 @@ on:
       - v1-web-cloudflare-ready
   pull_request:
     branches:
-      - v1-web-final
+      - v1-web-cloudflare-ready
 
 permissions:
   contents: read

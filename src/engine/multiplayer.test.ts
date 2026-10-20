@@ -314,7 +314,8 @@ test('Production Server: host reconnect grace timer survives mini-game resolutio
       bettingDurationSeconds: 1,
       countdownDurationMs: 100,
       fighterGraceMs: 200,
-      hostGraceMs: 600,
+      hostGraceMs: 1500,
+      gameDurationMs: 250,
     },
   });
 
@@ -323,10 +324,10 @@ test('Production Server: host reconnect grace timer survives mini-game resolutio
   const clients: Array<Awaited<ReturnType<typeof createTestWsClient>>> = [];
 
   try {
-    // Create debug room so we can test with 2 players
+    // Use a real three-player room; debug never bypasses the minimum.
     const host = await createTestWsClient(wsUrl);
     clients.push(host);
-    host.ws.send(JSON.stringify({ type: 'CREATE_ROOM', payload: { playerName: 'Host', debugMode: true } }));
+    host.ws.send(JSON.stringify({ type: 'CREATE_ROOM', payload: { playerName: 'Host' } }));
     const hostJoin = await host.waitForType('JOIN_SUCCESS');
     const hostToken = hostJoin.payload.sessionToken;
     const roomCode = hostJoin.payload.roomCode;
@@ -335,6 +336,13 @@ test('Production Server: host reconnect grace timer survives mini-game resolutio
     clients.push(p2);
     p2.ws.send(JSON.stringify({ type: 'JOIN_ROOM', payload: { roomCode, playerName: 'P2' } }));
     await p2.waitForType('JOIN_SUCCESS');
+    const p3 = await createTestWsClient(wsUrl);
+    clients.push(p3);
+    p3.ws.send(JSON.stringify({ type: 'JOIN_ROOM', payload: { roomCode, playerName: 'P3' } }));
+    await p3.waitForType('JOIN_SUCCESS');
+    p2.ws.send(JSON.stringify({ type: 'TOGGLE_READY' }));
+    p3.ws.send(JSON.stringify({ type: 'TOGGLE_READY' }));
+    await host.waitForRoomState(s => s.players.length === 3 && s.players.every(p => p.isHost || p.isReady));
 
     // Host starts game
     host.ws.send(JSON.stringify({ type: 'START_GAME' }));
@@ -344,13 +352,12 @@ test('Production Server: host reconnect grace timer survives mini-game resolutio
 
     // Host disconnects DURING active mini-game!
     host.close();
-    await new Promise(r => setTimeout(r, 50));
+    await p2.waitForRoomState(s => s.players.some(p => p.isHost && !p.connected));
 
     const room = server.getActiveRoom()!;
     assert.ok(room.connectionTimers.hostGraceTimer, 'Host grace timer must be scheduled');
 
-    // End mini-game by having P2 stop / resolve
-    p2.ws.send(JSON.stringify({ type: 'FIGHTER_ACTION', payload: { type: 'STOP' } }));
+    // The test-only game deadline resolves whether the host was a fighter or spectator.
 
     // Wait for PAYOUT_RECAP
     await p2.waitForRoomState(s => s.phase === 'PAYOUT_RECAP');
@@ -421,7 +428,8 @@ test('Production Server: disconnected lobby seats free capacity after grace expi
   }
 });
 
-test('Production Server: rejects starting game with fewer than 3 connected players in normal mode', async () => {
+for (const debugMode of [false, true]) {
+test(`Production Server: rejects fewer than 3 connected players (debug=${debugMode})`, async () => {
   const server = createBrawlServer();
   const { port } = await server.listen(0, '127.0.0.1');
   const wsUrl = `ws://127.0.0.1:${port}/ws`;
@@ -430,7 +438,7 @@ test('Production Server: rejects starting game with fewer than 3 connected playe
   try {
     const host = await createTestWsClient(wsUrl);
     clients.push(host);
-    host.ws.send(JSON.stringify({ type: 'CREATE_ROOM', payload: { playerName: 'Host' } }));
+    host.ws.send(JSON.stringify({ type: 'CREATE_ROOM', payload: { playerName: 'Host', debugMode } }));
     const hostJoin = await host.waitForType('JOIN_SUCCESS');
     const roomCode = hostJoin.payload.roomCode;
 
@@ -443,7 +451,7 @@ test('Production Server: rejects starting game with fewer than 3 connected playe
     p2.ws.send(JSON.stringify({ type: 'TOGGLE_READY' }));
     await host.waitForRoomState(s => s.players?.find(p => p.name === 'P2')?.isReady === true);
 
-    // Host attempts to start with 2 players in normal mode (not debug)
+    // Host attempts to start with 2 players in either room mode
     host.ws.send(JSON.stringify({ type: 'START_GAME' }));
     const err = await host.waitForType('JOIN_ERROR');
     assert.equal(err.payload.code, 'NOT_ENOUGH_PLAYERS');
@@ -453,6 +461,8 @@ test('Production Server: rejects starting game with fewer than 3 connected playe
     await server.close();
   }
 });
+
+}
 
 test('Production Server: full 3-player Tournament Lifecycle (3 Qualifiers -> Championship Series [2-1 with tie] -> Podium)', async () => {
   const server = createBrawlServer({

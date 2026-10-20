@@ -6,6 +6,7 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { buildRoomJoinUrl } from './types.ts';
 import type {
   PublicPlayer,
   RoundState,
@@ -98,6 +99,7 @@ export function useBrawlClient() {
         setState(prev => ({
           ...prev,
           networkInfo: {
+            deploymentMode: info.online === true ? 'cloud' : 'lan',
             localIp: info.localIp,
             port: info.port,
             roomCode: info.roomCode || '',
@@ -111,9 +113,11 @@ export function useBrawlClient() {
       .catch(() => {
         // Fallback to window.location
         const port = window.location.port ? parseInt(window.location.port, 10) : 3000;
+        const deploymentMode = buildRoomJoinUrl(window.location.origin, 'BRAWL', 'cloud') ? 'cloud' : 'lan';
         setState(prev => ({
           ...prev,
           networkInfo: {
+            deploymentMode,
             localIp: window.location.hostname || '127.0.0.1',
             port,
             roomCode: '',
@@ -190,6 +194,7 @@ export function useBrawlClient() {
     };
 
     ws.onmessage = (event) => {
+      if (wsRef.current !== ws) return;
       try {
         const msg: ServerMessage = JSON.parse(event.data);
 
