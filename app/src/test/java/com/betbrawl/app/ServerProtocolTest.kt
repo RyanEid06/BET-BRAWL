@@ -41,12 +41,16 @@ class ServerProtocolTest {
         var clockOffset = 0L
         val now: Long get() = 1_000_000L + scheduler.currentTime + clockOffset
         val server = BrawlWebSocketServer("127.0.0.1", 0,
-            dispatcher = StandardTestDispatcher(scheduler), nowMs = { now })
+            dispatcher = StandardTestDispatcher(scheduler), nowMs = { now },
+            testGameSequence = listOf("millisecond_stop", "rapid_red_green", "speed_math", "millisecond_stop", "rapid_red_green", "speed_math", "higher_lower", "blind_pinpoint", "quick_draw"))
         val host = Peer()
         val peers = mutableListOf(host)
         init { send(host, "CREATE_ROOM", mapOf("playerName" to "Host")) }
         fun send(peer: Peer, type: String, payload: Any = emptyMap<String, Any>()) {
-            server.onMessage(peer.socket, gson.toJson(mapOf("type" to type, "payload" to payload)))
+            @Suppress("UNCHECKED_CAST")
+            val versioned = if (type == "CREATE_ROOM" || type == "JOIN_ROOM")
+                (payload as Map<String, Any?>) + ("protocolVersion" to 2) else payload
+            server.onMessage(peer.socket, gson.toJson(mapOf("type" to type, "payload" to versioned)))
             scheduler.runCurrent()
         }
         fun join(): Peer = Peer().also {

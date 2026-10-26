@@ -24,8 +24,24 @@ object RoomEngine {
         "speed_math",
         "higher_lower",
         "blind_pinpoint",
-        "quick_draw"
+        "quick_draw",
+        "memory_heist", "crowd_count", "mirror_trouble", "safecracker",
+        "circuit_sprint", "split_decision", "treasure_tug", "pocket_territory"
     )
+
+    /** The server retains this bag across qualifier and championship matches. */
+    fun drawMiniGame(bag: MutableList<String>, lastMiniGameId: String? = null): String {
+        if (bag.isEmpty()) {
+            bag.addAll(MINI_GAME_ROTATION.shuffled())
+            if (bag.last() == lastMiniGameId) {
+                val other = bag.indexOfFirst { it != lastMiniGameId }
+                val swap = bag[other]
+                bag[other] = bag.last()
+                bag[bag.lastIndex] = swap
+            }
+        }
+        return bag.removeAt(bag.lastIndex)
+    }
 
     fun getRandomPlayerColor(): String = PLAYER_COLORS.random()
 

@@ -19,6 +19,7 @@ import {
   HigherLowerTrivia,
 } from './miniGamesCatalog.ts';
 import { fisherYatesShuffle } from './roomEngine.ts';
+import { V2_GAME_IDS, initV2Game, processV2Action, advanceV2Game, type V2Action, type V2GameId, type V2State } from './v2Games.ts';
 
 export interface LightScheduleStep {
   light: 'GREEN' | 'RED';
@@ -29,6 +30,7 @@ export interface InternalGameState {
   miniGameId: MiniGameId;
   fighterIds: [string, string];
   gameStartsAt: number;
+  v2?: V2State;
   // Mini-game specific private variables
   millisecondStop?: {
     stopped: Record<string, boolean>;
@@ -100,6 +102,11 @@ export function initMiniGameServerState(
     gameStartsAt,
   };
   const publicConfig: Record<string, unknown> = {};
+
+  if (V2_GAME_IDS.includes(miniGameId as V2GameId)) {
+    internal.v2 = initV2Game(miniGameId as V2GameId, fighterIds, gameStartsAt);
+    return { internal, publicConfig };
+  }
 
   if (miniGameId === 'millisecond_stop') {
     internal.millisecondStop = {
@@ -206,6 +213,18 @@ export function processFighterAction(
   }
 
   const otherFighterId = fighterId === f1 ? f2 : f1;
+
+  if (internal.v2) {
+    advanceV2Game(internal.v2, nowMs);
+    if (!('stageIndex' in action) || action.stageIndex !== internal.v2.stageIndex) {
+      return { resolved: false, winnerId: null, isTie: false, rejectionReason: 'Stale stage' };
+    }
+    const outcome = processV2Action(internal.v2, fighterId, action as V2Action, nowMs);
+    if (!outcome.accepted) return { resolved: false, winnerId: null, isTie: false, rejectionReason: outcome.reason };
+    if (internal.v2.finished) Object.assign(fighterScores, internal.v2.scores);
+    return { resolved: internal.v2.finished, winnerId: internal.v2.winnerId, isTie: internal.v2.finished && !internal.v2.winnerId,
+      scoreUpdate: internal.v2.finished ? { ...fighterScores } : undefined };
+  }
 
   // 1. MILLISECOND STOP
   if (internal.miniGameId === 'millisecond_stop') {
@@ -548,6 +567,11 @@ export function resolveGameTimeout(
   internal: InternalGameState,
   fighterScores: Record<string, number>
 ): { winnerId: string | null; isTie: boolean; gameStatePatch?: Record<string, unknown> } {
+  if (internal.v2) {
+    advanceV2Game(internal.v2, internal.v2.endsAt);
+    Object.assign(fighterScores, internal.v2.scores);
+    return { winnerId: internal.v2.winnerId, isTie: !internal.v2.winnerId };
+  }
   const [f1, f2] = internal.fighterIds;
   const s1 = fighterScores[f1];
   const s2 = fighterScores[f2];

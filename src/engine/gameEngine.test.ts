@@ -8,6 +8,29 @@ import {
   LightScheduleStep,
 } from './gameEngine.ts';
 
+test('V2 action stage is checked after overdue stages advance', () => {
+  const { internal } = initMiniGameServerState('split_decision', ['f1', 'f2'], 0);
+  const scores = { f1: 0, f2: 0 };
+  const result = processFighterAction(internal, scores, 'f1', {
+    type: 'DUEL_COMMIT', choice: 'ATTACK', matchId: 'm', stageIndex: 0, actionId: 'late',
+  }, 5000);
+  assert.ok(result.rejectionReason);
+  assert.equal(internal.v2!.stageIndex, 1);
+  assert.equal(internal.v2!.data.kind === 'split_decision' && internal.v2!.data.commits.f1, undefined);
+});
+
+test('V2 actions resolve through the shared authoritative engine', () => {
+  const { internal } = initMiniGameServerState('memory_heist', ['f1', 'f2'], 1000);
+  assert.ok(internal.v2);
+  const answer = internal.v2.data.kind === 'memory_heist' ? internal.v2.data.answer : [];
+  const scores = { f1: 0, f2: 0 };
+  const result = processFighterAction(internal, scores, 'f1', { type: 'MEMORY_DRAFT', board: answer, lock: true, matchId: 'm', stageIndex: 0, actionId: 'a1' }, 6000);
+  assert.equal(result.rejectionReason, undefined);
+  assert.equal(result.resolved, false);
+  const timeout = resolveGameTimeout(internal, scores);
+  assert.equal(timeout.winnerId, 'f1');
+});
+
 // ---------------------------------------------------------------------------
 // 1. MILLISECOND STOP TESTS
 // ---------------------------------------------------------------------------

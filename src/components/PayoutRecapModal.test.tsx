@@ -5,6 +5,8 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { PayoutRecapModal } from './PayoutRecapModal.tsx';
 import { createFreshPlayer, generateTournamentSchedule, initAuthoritativeRound } from '../engine/roomEngine.ts';
 import { toPublicPlayer } from '../engine/types.ts';
+import { initV2Game, advanceV2Game, projectV2Game } from '../engine/v2Games.ts';
+import { MINI_GAMES } from '../engine/miniGamesCatalog.ts';
 
 function recap() {
   const roster = ['A', 'B', 'C'].map(name => createFreshPlayer(name, '⚡'));
@@ -40,6 +42,18 @@ test('championship recap awards a series win, reserves title for the clincher, a
   const tied = render();
   assert.doesNotMatch(tied, /earned \+1 Brawl Point|SERIES STILL TIED/);
   assert.match(tied, /No championship win awarded/);
+});
+
+test('V2 payout includes the final game explanation and revealed answers', () => {
+  const { round, players, render } = recap();
+  round.miniGame = MINI_GAMES.safecracker;
+  const state = initV2Game('safecracker', [players[0].id, players[1].id], 0);
+  advanceV2Game(state, state.endsAt);
+  const view = projectV2Game(state, null, state.endsAt);
+  round.gameConfig = view.config;
+  round.gameState = view.state;
+  assert.match(render(), /Secret code:/);
+  assert.match(render(), /Unsolved/);
 });
 
 test('VOID recap adds no fighter outcome and explains the actual wager refund reason', () => {

@@ -5,13 +5,25 @@
  * Bet & BRAWL: Network & Game Protocol Type Definitions (v2.1 Authoritative Hardened)
  */
 
+import type { V2Action } from './v2Games.ts';
+
+export const BRAWL_PROTOCOL_VERSION = 2;
+
 export type MiniGameId = 
   | 'millisecond_stop' 
   | 'rapid_red_green' 
   | 'speed_math' 
   | 'higher_lower' 
   | 'blind_pinpoint' 
-  | 'quick_draw';
+  | 'quick_draw'
+  | 'memory_heist'
+  | 'crowd_count'
+  | 'mirror_trouble'
+  | 'safecracker'
+  | 'circuit_sprint'
+  | 'split_decision'
+  | 'treasure_tug'
+  | 'pocket_territory';
 
 export interface MiniGameMeta {
   id: MiniGameId;
@@ -144,6 +156,7 @@ export interface TournamentSchedule {
 }
 
 export interface RoundState {
+  matchId?: string;
   roundNumber: number;
   maxRounds: number;
   stage?: TournamentStage;
@@ -195,7 +208,8 @@ export type FighterAction =
   | { type: 'ANSWER'; questionIndex: number; answer: number }
   | { type: 'GUESS'; questionIndex: number; guess: 'HIGHER' | 'LOWER' }
   | { type: 'PIN'; normX: number; normY: number }
-  | { type: 'DRAW_TAP' };
+  | { type: 'DRAW_TAP' }
+  | (V2Action & { matchId: string; stageIndex: number; actionId: string });
 
 // -------------------------------------------------------------
 // DISCRIMINATED UNION PROTOCOL SCHEMAS
@@ -223,8 +237,8 @@ export interface PublicRoomState {
 }
 
 export type ClientMessage =
-  | { type: 'CREATE_ROOM'; payload?: { playerName?: string; avatar?: string; debugMode?: boolean } }
-  | { type: 'JOIN_ROOM'; payload: { roomCode: string; playerName?: string; avatar?: string; sessionToken?: string } }
+  | { type: 'CREATE_ROOM'; payload?: { playerName?: string; avatar?: string; debugMode?: boolean; protocolVersion?: number } }
+  | { type: 'JOIN_ROOM'; payload: { roomCode: string; playerName?: string; avatar?: string; sessionToken?: string; protocolVersion?: number } }
   | { type: 'TOGGLE_READY' }
   | { type: 'START_GAME'; payload?: { debug?: boolean } }
   | { type: 'PLACE_BET'; payload: { fighterId: string; amount: number } }
@@ -237,14 +251,15 @@ export type ClientMessage =
   | { type: 'PING'; payload?: { clientSentAt: number } };
 
 export type ServerMessage =
-  | { type: 'JOIN_SUCCESS'; timestamp: number; payload: { player: PublicPlayer; sessionToken: string; roomCode: string; isHost: boolean } }
+  | { type: 'JOIN_SUCCESS'; timestamp: number; payload: { player: PublicPlayer; sessionToken: string; roomCode: string; isHost: boolean; protocolVersion: number } }
   | { type: 'JOIN_ERROR'; timestamp: number; payload: { code: string; message: string } }
   | { type: 'ROOM_STATE'; timestamp: number; payload: PublicRoomState }
   | { type: 'BET_ACCEPTED'; timestamp: number; payload: { bet: SecretBet; myBankroll: number } }
   | { type: 'BET_REJECTED'; timestamp: number; payload: { reason: string } }
   | { type: 'ROOM_CLOSED'; timestamp: number; payload: { reason: string } }
   | { type: 'PONG'; timestamp: number; payload: { clientSentAt?: number; serverNow: number } }
-  | { type: 'ACTION_RESULT'; timestamp: number; payload: { fighterId?: string; questionIndex: number; isCorrect: boolean; challengerStat: string } };
+  | { type: 'ACTION_RESULT'; timestamp: number; payload: { fighterId?: string; questionIndex: number; isCorrect: boolean; challengerStat: string } }
+  | { type: 'GAME_ACTION_RESULT'; timestamp: number; payload: { matchId: string; stageIndex: number; actionId: string; accepted: boolean; reason?: string } };
 
 export interface RoomNetworkInfo {
   localIp: string;

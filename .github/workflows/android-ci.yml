@@ -1,10 +1,10 @@
-name: Android V1 verification
+name: Android candidate verification
 
 on:
   push:
-    branches: [main]
+    branches: [main, codex/v2-games-android]
   pull_request:
-    branches: [main]
+    branches: [main, codex/v2-games-android]
   workflow_dispatch:
 
 permissions:
@@ -66,7 +66,7 @@ jobs:
             -Pandroid.injected.signing.key.password="$ANDROID_KEY_PASSWORD"
       - uses: actions/upload-artifact@v4
         with:
-          name: android-v1-apks
+          name: android-candidate-apks
           path: app/build/outputs/apk/**/*.apk
           if-no-files-found: error
           retention-days: 14

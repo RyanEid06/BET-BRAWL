@@ -1,0 +1,1806 @@
+{
+  "version": 1,
+  "note": "Absolute millisecond times. Initial states are fixed, portable authority snapshots. Replay actions, then advance to finalAt. Expected outcomes are explicitly specified by mechanics.",
+  "cases": [
+    {
+      "name": "memory_heist",
+      "initialState": {
+        "id": "memory_heist",
+        "fighterIds": [
+          "a",
+          "b"
+        ],
+        "startsAt": 1000,
+        "endsAt": 25000,
+        "stageIndex": 0,
+        "phase": "waiting",
+        "phaseEndsAt": 1000,
+        "finished": false,
+        "winnerId": null,
+        "scores": {
+          "a": 0,
+          "b": 0
+        },
+        "data": {
+          "kind": "memory_heist",
+          "answer": [
+            3,
+            null,
+            0,
+            4,
+            5,
+            1,
+            null,
+            null,
+            2
+          ],
+          "players": {
+            "a": {
+              "board": [
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null
+              ],
+              "locked": false
+            },
+            "b": {
+              "board": [
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null
+              ],
+              "locked": false
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "fighterId": "a",
+          "action": {
+            "type": "MEMORY_DRAFT",
+            "board": [
+              3,
+              null,
+              0,
+              4,
+              5,
+              1,
+              null,
+              null,
+              2
+            ],
+            "lock": true
+          },
+          "nowMs": 5000
+        },
+        {
+          "fighterId": "b",
+          "action": {
+            "type": "MEMORY_DRAFT",
+            "board": [
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null
+            ],
+            "lock": true
+          },
+          "nowMs": 5000
+        }
+      ],
+      "finalAt": 25000,
+      "expected": {
+        "finished": true,
+        "winnerId": "a",
+        "scores": {
+          "a": 6,
+          "b": 0
+        },
+        "stageIndex": 0,
+        "phase": "finished"
+      }
+    },
+    {
+      "name": "crowd_count",
+      "initialState": {
+        "id": "crowd_count",
+        "fighterIds": [
+          "a",
+          "b"
+        ],
+        "startsAt": 1000,
+        "endsAt": 25000,
+        "stageIndex": 0,
+        "phase": "waiting",
+        "phaseEndsAt": 1000,
+        "finished": false,
+        "winnerId": null,
+        "scores": {
+          "a": 0,
+          "b": 0
+        },
+        "data": {
+          "kind": "crowd_count",
+          "scenes": [
+            {
+              "count": 11,
+              "objects": [
+                {
+                  "target": false,
+                  "x": 0.8783333333333334,
+                  "y": 0.7116666666666668,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.21166666666666667,
+                  "y": 0.545,
+                  "rotation": 111
+                },
+                {
+                  "target": true,
+                  "x": 0.045000000000000005,
+                  "y": 0.045000000000000005,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.045000000000000005,
+                  "y": 0.37833333333333335,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.7116666666666668,
+                  "y": 0.37833333333333335,
+                  "rotation": 111
+                },
+                {
+                  "target": true,
+                  "x": 0.21166666666666667,
+                  "y": 0.045000000000000005,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.7116666666666668,
+                  "y": 0.545,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.21166666666666667,
+                  "y": 0.7116666666666668,
+                  "rotation": 111
+                },
+                {
+                  "target": true,
+                  "x": 0.37833333333333335,
+                  "y": 0.045000000000000005,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.37833333333333335,
+                  "y": 0.8783333333333334,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.8783333333333334,
+                  "y": 0.8783333333333334,
+                  "rotation": 111
+                },
+                {
+                  "target": true,
+                  "x": 0.545,
+                  "y": 0.045000000000000005,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.21166666666666667,
+                  "y": 0.37833333333333335,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.37833333333333335,
+                  "y": 0.37833333333333335,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.545,
+                  "y": 0.37833333333333335,
+                  "rotation": 111
+                },
+                {
+                  "target": true,
+                  "x": 0.7116666666666668,
+                  "y": 0.045000000000000005,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.8783333333333334,
+                  "y": 0.37833333333333335,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.045000000000000005,
+                  "y": 0.545,
+                  "rotation": 111
+                },
+                {
+                  "target": true,
+                  "x": 0.8783333333333334,
+                  "y": 0.045000000000000005,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.37833333333333335,
+                  "y": 0.545,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.545,
+                  "y": 0.545,
+                  "rotation": 111
+                },
+                {
+                  "target": true,
+                  "x": 0.045000000000000005,
+                  "y": 0.21166666666666667,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.8783333333333334,
+                  "y": 0.545,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.045000000000000005,
+                  "y": 0.7116666666666668,
+                  "rotation": 111
+                },
+                {
+                  "target": true,
+                  "x": 0.21166666666666667,
+                  "y": 0.21166666666666667,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.37833333333333335,
+                  "y": 0.7116666666666668,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.545,
+                  "y": 0.7116666666666668,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.7116666666666668,
+                  "y": 0.7116666666666668,
+                  "rotation": 111
+                },
+                {
+                  "target": true,
+                  "x": 0.37833333333333335,
+                  "y": 0.21166666666666667,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.045000000000000005,
+                  "y": 0.8783333333333334,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.21166666666666667,
+                  "y": 0.8783333333333334,
+                  "rotation": 111
+                },
+                {
+                  "target": true,
+                  "x": 0.545,
+                  "y": 0.21166666666666667,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.545,
+                  "y": 0.8783333333333334,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.7116666666666668,
+                  "y": 0.8783333333333334,
+                  "rotation": 111
+                },
+                {
+                  "target": true,
+                  "x": 0.7116666666666668,
+                  "y": 0.21166666666666667,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.8783333333333334,
+                  "y": 0.21166666666666667,
+                  "rotation": 111
+                }
+              ]
+            },
+            {
+              "count": 11,
+              "objects": [
+                {
+                  "target": false,
+                  "x": 0.8783333333333334,
+                  "y": 0.7116666666666668,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.21166666666666667,
+                  "y": 0.545,
+                  "rotation": 111
+                },
+                {
+                  "target": true,
+                  "x": 0.045000000000000005,
+                  "y": 0.045000000000000005,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.045000000000000005,
+                  "y": 0.37833333333333335,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.7116666666666668,
+                  "y": 0.37833333333333335,
+                  "rotation": 111
+                },
+                {
+                  "target": true,
+                  "x": 0.21166666666666667,
+                  "y": 0.045000000000000005,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.7116666666666668,
+                  "y": 0.545,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.21166666666666667,
+                  "y": 0.7116666666666668,
+                  "rotation": 111
+                },
+                {
+                  "target": true,
+                  "x": 0.37833333333333335,
+                  "y": 0.045000000000000005,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.37833333333333335,
+                  "y": 0.8783333333333334,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.8783333333333334,
+                  "y": 0.8783333333333334,
+                  "rotation": 111
+                },
+                {
+                  "target": true,
+                  "x": 0.545,
+                  "y": 0.045000000000000005,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.21166666666666667,
+                  "y": 0.37833333333333335,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.37833333333333335,
+                  "y": 0.37833333333333335,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.545,
+                  "y": 0.37833333333333335,
+                  "rotation": 111
+                },
+                {
+                  "target": true,
+                  "x": 0.7116666666666668,
+                  "y": 0.045000000000000005,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.8783333333333334,
+                  "y": 0.37833333333333335,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.045000000000000005,
+                  "y": 0.545,
+                  "rotation": 111
+                },
+                {
+                  "target": true,
+                  "x": 0.8783333333333334,
+                  "y": 0.045000000000000005,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.37833333333333335,
+                  "y": 0.545,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.545,
+                  "y": 0.545,
+                  "rotation": 111
+                },
+                {
+                  "target": true,
+                  "x": 0.045000000000000005,
+                  "y": 0.21166666666666667,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.8783333333333334,
+                  "y": 0.545,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.045000000000000005,
+                  "y": 0.7116666666666668,
+                  "rotation": 111
+                },
+                {
+                  "target": true,
+                  "x": 0.21166666666666667,
+                  "y": 0.21166666666666667,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.37833333333333335,
+                  "y": 0.7116666666666668,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.545,
+                  "y": 0.7116666666666668,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.7116666666666668,
+                  "y": 0.7116666666666668,
+                  "rotation": 111
+                },
+                {
+                  "target": true,
+                  "x": 0.37833333333333335,
+                  "y": 0.21166666666666667,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.045000000000000005,
+                  "y": 0.8783333333333334,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.21166666666666667,
+                  "y": 0.8783333333333334,
+                  "rotation": 111
+                },
+                {
+                  "target": true,
+                  "x": 0.545,
+                  "y": 0.21166666666666667,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.545,
+                  "y": 0.8783333333333334,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.7116666666666668,
+                  "y": 0.8783333333333334,
+                  "rotation": 111
+                },
+                {
+                  "target": true,
+                  "x": 0.7116666666666668,
+                  "y": 0.21166666666666667,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.8783333333333334,
+                  "y": 0.21166666666666667,
+                  "rotation": 111
+                }
+              ]
+            },
+            {
+              "count": 11,
+              "objects": [
+                {
+                  "target": false,
+                  "x": 0.8783333333333334,
+                  "y": 0.7116666666666668,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.21166666666666667,
+                  "y": 0.545,
+                  "rotation": 111
+                },
+                {
+                  "target": true,
+                  "x": 0.045000000000000005,
+                  "y": 0.045000000000000005,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.045000000000000005,
+                  "y": 0.37833333333333335,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.7116666666666668,
+                  "y": 0.37833333333333335,
+                  "rotation": 111
+                },
+                {
+                  "target": true,
+                  "x": 0.21166666666666667,
+                  "y": 0.045000000000000005,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.7116666666666668,
+                  "y": 0.545,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.21166666666666667,
+                  "y": 0.7116666666666668,
+                  "rotation": 111
+                },
+                {
+                  "target": true,
+                  "x": 0.37833333333333335,
+                  "y": 0.045000000000000005,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.37833333333333335,
+                  "y": 0.8783333333333334,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.8783333333333334,
+                  "y": 0.8783333333333334,
+                  "rotation": 111
+                },
+                {
+                  "target": true,
+                  "x": 0.545,
+                  "y": 0.045000000000000005,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.21166666666666667,
+                  "y": 0.37833333333333335,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.37833333333333335,
+                  "y": 0.37833333333333335,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.545,
+                  "y": 0.37833333333333335,
+                  "rotation": 111
+                },
+                {
+                  "target": true,
+                  "x": 0.7116666666666668,
+                  "y": 0.045000000000000005,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.8783333333333334,
+                  "y": 0.37833333333333335,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.045000000000000005,
+                  "y": 0.545,
+                  "rotation": 111
+                },
+                {
+                  "target": true,
+                  "x": 0.8783333333333334,
+                  "y": 0.045000000000000005,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.37833333333333335,
+                  "y": 0.545,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.545,
+                  "y": 0.545,
+                  "rotation": 111
+                },
+                {
+                  "target": true,
+                  "x": 0.045000000000000005,
+                  "y": 0.21166666666666667,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.8783333333333334,
+                  "y": 0.545,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.045000000000000005,
+                  "y": 0.7116666666666668,
+                  "rotation": 111
+                },
+                {
+                  "target": true,
+                  "x": 0.21166666666666667,
+                  "y": 0.21166666666666667,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.37833333333333335,
+                  "y": 0.7116666666666668,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.545,
+                  "y": 0.7116666666666668,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.7116666666666668,
+                  "y": 0.7116666666666668,
+                  "rotation": 111
+                },
+                {
+                  "target": true,
+                  "x": 0.37833333333333335,
+                  "y": 0.21166666666666667,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.045000000000000005,
+                  "y": 0.8783333333333334,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.21166666666666667,
+                  "y": 0.8783333333333334,
+                  "rotation": 111
+                },
+                {
+                  "target": true,
+                  "x": 0.545,
+                  "y": 0.21166666666666667,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.545,
+                  "y": 0.8783333333333334,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.7116666666666668,
+                  "y": 0.8783333333333334,
+                  "rotation": 111
+                },
+                {
+                  "target": true,
+                  "x": 0.7116666666666668,
+                  "y": 0.21166666666666667,
+                  "rotation": 111
+                },
+                {
+                  "target": false,
+                  "x": 0.8783333333333334,
+                  "y": 0.21166666666666667,
+                  "rotation": 111
+                }
+              ]
+            }
+          ],
+          "commits": {},
+          "outcomes": []
+        }
+      },
+      "steps": [
+        {
+          "fighterId": "a",
+          "action": {
+            "type": "COUNT_GUESS",
+            "value": 11
+          },
+          "nowMs": 3000
+        },
+        {
+          "fighterId": "a",
+          "action": {
+            "type": "COUNT_GUESS",
+            "value": 11
+          },
+          "nowMs": 11000
+        },
+        {
+          "fighterId": "a",
+          "action": {
+            "type": "COUNT_GUESS",
+            "value": 11
+          },
+          "nowMs": 19000
+        }
+      ],
+      "finalAt": 25000,
+      "expected": {
+        "finished": true,
+        "winnerId": "a",
+        "scores": {
+          "a": 0,
+          "b": 111
+        },
+        "stageIndex": 2,
+        "phase": "finished"
+      }
+    },
+    {
+      "name": "mirror_trouble",
+      "initialState": {
+        "id": "mirror_trouble",
+        "fighterIds": [
+          "a",
+          "b"
+        ],
+        "startsAt": 1000,
+        "endsAt": 21000,
+        "stageIndex": 0,
+        "phase": "waiting",
+        "phaseEndsAt": 1000,
+        "finished": false,
+        "winnerId": null,
+        "scores": {
+          "a": 0,
+          "b": 0
+        },
+        "data": {
+          "kind": "mirror_trouble",
+          "puzzles": [
+            {
+              "target": [
+                0,
+                5,
+                10,
+                15,
+                16,
+                17
+              ],
+              "choices": [
+                [
+                  4,
+                  9,
+                  14,
+                  19,
+                  18,
+                  17
+                ],
+                [
+                  4,
+                  3,
+                  2,
+                  1,
+                  6,
+                  11
+                ],
+                [
+                  0,
+                  1,
+                  5,
+                  6,
+                  10,
+                  15
+                ],
+                [
+                  0,
+                  5,
+                  10,
+                  11,
+                  16,
+                  17
+                ]
+              ],
+              "correct": 1
+            },
+            {
+              "target": [
+                0,
+                5,
+                10,
+                15,
+                16,
+                17
+              ],
+              "choices": [
+                [
+                  4,
+                  9,
+                  14,
+                  19,
+                  18,
+                  17
+                ],
+                [
+                  4,
+                  3,
+                  2,
+                  1,
+                  6,
+                  11
+                ],
+                [
+                  0,
+                  1,
+                  5,
+                  6,
+                  10,
+                  15
+                ],
+                [
+                  0,
+                  5,
+                  10,
+                  11,
+                  16,
+                  17
+                ]
+              ],
+              "correct": 1
+            },
+            {
+              "target": [
+                0,
+                5,
+                10,
+                15,
+                16,
+                17
+              ],
+              "choices": [
+                [
+                  4,
+                  9,
+                  14,
+                  19,
+                  18,
+                  17
+                ],
+                [
+                  4,
+                  3,
+                  2,
+                  1,
+                  6,
+                  11
+                ],
+                [
+                  0,
+                  1,
+                  5,
+                  6,
+                  10,
+                  15
+                ],
+                [
+                  0,
+                  5,
+                  10,
+                  11,
+                  16,
+                  17
+                ]
+              ],
+              "correct": 1
+            },
+            {
+              "target": [
+                0,
+                5,
+                10,
+                15,
+                16,
+                17
+              ],
+              "choices": [
+                [
+                  4,
+                  9,
+                  14,
+                  19,
+                  18,
+                  17
+                ],
+                [
+                  4,
+                  3,
+                  2,
+                  1,
+                  6,
+                  11
+                ],
+                [
+                  0,
+                  1,
+                  5,
+                  6,
+                  10,
+                  15
+                ],
+                [
+                  0,
+                  5,
+                  10,
+                  11,
+                  16,
+                  17
+                ]
+              ],
+              "correct": 1
+            },
+            {
+              "target": [
+                0,
+                5,
+                10,
+                15,
+                16,
+                17
+              ],
+              "choices": [
+                [
+                  4,
+                  9,
+                  14,
+                  19,
+                  18,
+                  17
+                ],
+                [
+                  4,
+                  3,
+                  2,
+                  1,
+                  6,
+                  11
+                ],
+                [
+                  0,
+                  1,
+                  5,
+                  6,
+                  10,
+                  15
+                ],
+                [
+                  0,
+                  5,
+                  10,
+                  11,
+                  16,
+                  17
+                ]
+              ],
+              "correct": 1
+            }
+          ],
+          "commits": {},
+          "outcomes": []
+        }
+      },
+      "steps": [
+        {
+          "fighterId": "a",
+          "action": {
+            "type": "MIRROR_PICK",
+            "choice": 1
+          },
+          "nowMs": 1000
+        },
+        {
+          "fighterId": "a",
+          "action": {
+            "type": "MIRROR_PICK",
+            "choice": 1
+          },
+          "nowMs": 5000
+        },
+        {
+          "fighterId": "a",
+          "action": {
+            "type": "MIRROR_PICK",
+            "choice": 1
+          },
+          "nowMs": 9000
+        },
+        {
+          "fighterId": "a",
+          "action": {
+            "type": "MIRROR_PICK",
+            "choice": 1
+          },
+          "nowMs": 13000
+        },
+        {
+          "fighterId": "a",
+          "action": {
+            "type": "MIRROR_PICK",
+            "choice": 1
+          },
+          "nowMs": 17000
+        }
+      ],
+      "finalAt": 21000,
+      "expected": {
+        "finished": true,
+        "winnerId": "a",
+        "scores": {
+          "a": 5,
+          "b": 0
+        },
+        "stageIndex": 4,
+        "phase": "finished"
+      }
+    },
+    {
+      "name": "safecracker",
+      "initialState": {
+        "id": "safecracker",
+        "fighterIds": [
+          "a",
+          "b"
+        ],
+        "startsAt": 1000,
+        "endsAt": 31000,
+        "stageIndex": 0,
+        "phase": "waiting",
+        "phaseEndsAt": 1000,
+        "finished": false,
+        "winnerId": null,
+        "scores": {
+          "a": 0,
+          "b": 0
+        },
+        "data": {
+          "kind": "safecracker",
+          "secret": [
+            1,
+            1,
+            1
+          ],
+          "players": {
+            "a": {
+              "history": [],
+              "solved": false
+            },
+            "b": {
+              "history": [],
+              "solved": false
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "fighterId": "a",
+          "action": {
+            "type": "CODE_GUESS",
+            "symbols": [
+              1,
+              1,
+              1
+            ]
+          },
+          "nowMs": 1000
+        },
+        {
+          "fighterId": "b",
+          "action": {
+            "type": "CODE_GUESS",
+            "symbols": [
+              2,
+              2,
+              2
+            ]
+          },
+          "nowMs": 1000
+        },
+        {
+          "fighterId": "b",
+          "action": {
+            "type": "CODE_GUESS",
+            "symbols": [
+              1,
+              1,
+              1
+            ]
+          },
+          "nowMs": 2000
+        }
+      ],
+      "finalAt": 31000,
+      "expected": {
+        "finished": true,
+        "winnerId": "a",
+        "scores": {
+          "a": 99,
+          "b": 98
+        },
+        "stageIndex": 0,
+        "phase": "finished"
+      }
+    },
+    {
+      "name": "circuit_sprint",
+      "initialState": {
+        "id": "circuit_sprint",
+        "fighterIds": [
+          "a",
+          "b"
+        ],
+        "startsAt": 1000,
+        "endsAt": 31000,
+        "stageIndex": 0,
+        "phase": "waiting",
+        "phaseEndsAt": 1000,
+        "finished": false,
+        "winnerId": null,
+        "scores": {
+          "a": 0,
+          "b": 0
+        },
+        "data": {
+          "kind": "circuit_sprint",
+          "pipeKinds": [
+            "straight",
+            "straight",
+            "straight",
+            "straight",
+            "straight",
+            "elbow",
+            "straight",
+            "straight",
+            "straight",
+            "elbow",
+            "straight",
+            "straight",
+            "straight",
+            "straight",
+            "straight",
+            "straight"
+          ],
+          "initialRotations": [
+            1,
+            1,
+            1,
+            1,
+            2,
+            3,
+            1,
+            1,
+            1,
+            1,
+            2,
+            2,
+            1,
+            1,
+            1,
+            1
+          ],
+          "solutionRotations": [
+            1,
+            1,
+            1,
+            1,
+            1,
+            2,
+            1,
+            1,
+            1,
+            0,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1
+          ],
+          "players": {
+            "a": {
+              "rotations": [
+                1,
+                1,
+                1,
+                1,
+                2,
+                3,
+                1,
+                1,
+                1,
+                1,
+                2,
+                2,
+                1,
+                1,
+                1,
+                1
+              ],
+              "moves": 0,
+              "solved": false,
+              "powered": []
+            },
+            "b": {
+              "rotations": [
+                1,
+                1,
+                1,
+                1,
+                2,
+                3,
+                1,
+                1,
+                1,
+                1,
+                2,
+                2,
+                1,
+                1,
+                1,
+                1
+              ],
+              "moves": 0,
+              "solved": false,
+              "powered": []
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "fighterId": "a",
+          "action": {
+            "type": "PIPE_ROTATE",
+            "cell": 4
+          },
+          "nowMs": 1000
+        },
+        {
+          "fighterId": "a",
+          "action": {
+            "type": "PIPE_ROTATE",
+            "cell": 4
+          },
+          "nowMs": 1000
+        },
+        {
+          "fighterId": "a",
+          "action": {
+            "type": "PIPE_ROTATE",
+            "cell": 4
+          },
+          "nowMs": 1000
+        },
+        {
+          "fighterId": "a",
+          "action": {
+            "type": "PIPE_ROTATE",
+            "cell": 5
+          },
+          "nowMs": 1000
+        },
+        {
+          "fighterId": "a",
+          "action": {
+            "type": "PIPE_ROTATE",
+            "cell": 5
+          },
+          "nowMs": 1000
+        },
+        {
+          "fighterId": "a",
+          "action": {
+            "type": "PIPE_ROTATE",
+            "cell": 5
+          },
+          "nowMs": 1000
+        },
+        {
+          "fighterId": "a",
+          "action": {
+            "type": "PIPE_ROTATE",
+            "cell": 9
+          },
+          "nowMs": 1000
+        },
+        {
+          "fighterId": "a",
+          "action": {
+            "type": "PIPE_ROTATE",
+            "cell": 9
+          },
+          "nowMs": 1000
+        },
+        {
+          "fighterId": "a",
+          "action": {
+            "type": "PIPE_ROTATE",
+            "cell": 9
+          },
+          "nowMs": 1000
+        },
+        {
+          "fighterId": "a",
+          "action": {
+            "type": "PIPE_ROTATE",
+            "cell": 10
+          },
+          "nowMs": 1000
+        },
+        {
+          "fighterId": "a",
+          "action": {
+            "type": "PIPE_ROTATE",
+            "cell": 10
+          },
+          "nowMs": 1000
+        },
+        {
+          "fighterId": "a",
+          "action": {
+            "type": "PIPE_ROTATE",
+            "cell": 10
+          },
+          "nowMs": 1000
+        },
+        {
+          "fighterId": "a",
+          "action": {
+            "type": "PIPE_ROTATE",
+            "cell": 11
+          },
+          "nowMs": 1000
+        }
+      ],
+      "finalAt": 31000,
+      "expected": {
+        "finished": true,
+        "winnerId": "a",
+        "scores": {
+          "a": 999987,
+          "b": 0
+        },
+        "stageIndex": 0,
+        "phase": "finished"
+      }
+    },
+    {
+      "name": "split_decision",
+      "initialState": {
+        "id": "split_decision",
+        "fighterIds": [
+          "a",
+          "b"
+        ],
+        "startsAt": 1000,
+        "endsAt": 26000,
+        "stageIndex": 0,
+        "phase": "waiting",
+        "phaseEndsAt": 1000,
+        "finished": false,
+        "winnerId": null,
+        "scores": {
+          "a": 0,
+          "b": 0
+        },
+        "data": {
+          "kind": "split_decision",
+          "players": {
+            "a": {
+              "hp": 3,
+              "energy": 1
+            },
+            "b": {
+              "hp": 3,
+              "energy": 1
+            }
+          },
+          "commits": {},
+          "outcomes": [],
+          "knockout": false
+        }
+      },
+      "steps": [
+        {
+          "fighterId": "a",
+          "action": {
+            "type": "DUEL_COMMIT",
+            "choice": "ATTACK"
+          },
+          "nowMs": 1000
+        },
+        {
+          "fighterId": "b",
+          "action": {
+            "type": "DUEL_COMMIT",
+            "choice": "CHARGE"
+          },
+          "nowMs": 1000
+        },
+        {
+          "fighterId": "a",
+          "action": {
+            "type": "DUEL_COMMIT",
+            "choice": "CHARGE"
+          },
+          "nowMs": 6000
+        },
+        {
+          "fighterId": "b",
+          "action": {
+            "type": "DUEL_COMMIT",
+            "choice": "CHARGE"
+          },
+          "nowMs": 6000
+        },
+        {
+          "fighterId": "a",
+          "action": {
+            "type": "DUEL_COMMIT",
+            "choice": "ATTACK"
+          },
+          "nowMs": 11000
+        },
+        {
+          "fighterId": "b",
+          "action": {
+            "type": "DUEL_COMMIT",
+            "choice": "CHARGE"
+          },
+          "nowMs": 11000
+        },
+        {
+          "fighterId": "a",
+          "action": {
+            "type": "DUEL_COMMIT",
+            "choice": "CHARGE"
+          },
+          "nowMs": 16000
+        },
+        {
+          "fighterId": "b",
+          "action": {
+            "type": "DUEL_COMMIT",
+            "choice": "CHARGE"
+          },
+          "nowMs": 16000
+        },
+        {
+          "fighterId": "a",
+          "action": {
+            "type": "DUEL_COMMIT",
+            "choice": "ATTACK"
+          },
+          "nowMs": 21000
+        },
+        {
+          "fighterId": "b",
+          "action": {
+            "type": "DUEL_COMMIT",
+            "choice": "CHARGE"
+          },
+          "nowMs": 21000
+        }
+      ],
+      "finalAt": 26000,
+      "expected": {
+        "finished": true,
+        "winnerId": "a",
+        "scores": {
+          "a": 12,
+          "b": 3
+        },
+        "stageIndex": 4,
+        "phase": "finished"
+      }
+    },
+    {
+      "name": "treasure_tug",
+      "initialState": {
+        "id": "treasure_tug",
+        "fighterIds": [
+          "a",
+          "b"
+        ],
+        "startsAt": 1000,
+        "endsAt": 25000,
+        "stageIndex": 0,
+        "phase": "waiting",
+        "phaseEndsAt": 1000,
+        "finished": false,
+        "winnerId": null,
+        "scores": {
+          "a": 0,
+          "b": 0
+        },
+        "data": {
+          "kind": "treasure_tug",
+          "commits": {},
+          "outcomes": []
+        }
+      },
+      "steps": [
+        {
+          "fighterId": "a",
+          "action": {
+            "type": "TREASURE_COMMIT",
+            "allocation": [
+              1,
+              2,
+              7
+            ]
+          },
+          "nowMs": 1000
+        },
+        {
+          "fighterId": "a",
+          "action": {
+            "type": "TREASURE_COMMIT",
+            "allocation": [
+              1,
+              2,
+              7
+            ]
+          },
+          "nowMs": 9000
+        },
+        {
+          "fighterId": "a",
+          "action": {
+            "type": "TREASURE_COMMIT",
+            "allocation": [
+              1,
+              2,
+              7
+            ]
+          },
+          "nowMs": 17000
+        }
+      ],
+      "finalAt": 25000,
+      "expected": {
+        "finished": true,
+        "winnerId": "a",
+        "scores": {
+          "a": 18,
+          "b": 0
+        },
+        "stageIndex": 2,
+        "phase": "finished"
+      }
+    },
+    {
+      "name": "pocket_territory",
+      "initialState": {
+        "id": "pocket_territory",
+        "fighterIds": [
+          "a",
+          "b"
+        ],
+        "startsAt": 1000,
+        "endsAt": 31000,
+        "stageIndex": 0,
+        "phase": "waiting",
+        "phaseEndsAt": 1000,
+        "finished": false,
+        "winnerId": null,
+        "scores": {
+          "a": 0,
+          "b": 0
+        },
+        "data": {
+          "kind": "pocket_territory",
+          "board": [
+            "a",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            "b"
+          ],
+          "commits": {},
+          "outcomes": []
+        }
+      },
+      "steps": [
+        {
+          "fighterId": "a",
+          "action": {
+            "type": "TERRITORY_COMMIT",
+            "cell": 1
+          },
+          "nowMs": 1000
+        },
+        {
+          "fighterId": "a",
+          "action": {
+            "type": "TERRITORY_COMMIT",
+            "cell": 2
+          },
+          "nowMs": 6000
+        },
+        {
+          "fighterId": "a",
+          "action": {
+            "type": "TERRITORY_COMMIT",
+            "cell": 3
+          },
+          "nowMs": 11000
+        },
+        {
+          "fighterId": "a",
+          "action": {
+            "type": "TERRITORY_COMMIT",
+            "cell": 4
+          },
+          "nowMs": 16000
+        },
+        {
+          "fighterId": "a",
+          "action": {
+            "type": "TERRITORY_COMMIT",
+            "cell": 9
+          },
+          "nowMs": 21000
+        },
+        {
+          "fighterId": "a",
+          "action": {
+            "type": "TERRITORY_COMMIT",
+            "cell": 14
+          },
+          "nowMs": 26000
+        }
+      ],
+      "finalAt": 31000,
+      "expected": {
+        "finished": true,
+        "winnerId": "a",
+        "scores": {
+          "a": 7,
+          "b": 1
+        },
+        "stageIndex": 5,
+        "phase": "finished"
+      }
+    }
+  ]
+}

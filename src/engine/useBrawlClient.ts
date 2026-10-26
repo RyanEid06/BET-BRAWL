@@ -6,6 +6,8 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { BRAWL_PROTOCOL_VERSION } from './types.ts';
+import { V2_GAME_IDS, type V2Action, type V2GameId } from './v2Games.ts';
 import type {
   PublicPlayer,
   RoundState,
@@ -48,6 +50,7 @@ export interface BrawlClientState {
   awards: Award[];
   lastRejectedBetReason: string | null;
   lastActionFeedback: { questionIndex: number; isCorrect: boolean; challengerStat: string } | null;
+  lastGameActionError: string | null;
   serverTimeOffset: number; // in ms
   isDebug: boolean;
 }
@@ -72,6 +75,7 @@ export function useBrawlClient() {
       awards: [],
       lastRejectedBetReason: null,
       lastActionFeedback: null,
+      lastGameActionError: null,
       serverTimeOffset: 0,
       isDebug,
     };
@@ -419,6 +423,13 @@ export function useBrawlClient() {
 
         // 2. JOIN_SUCCESS
         if (msg.type === 'JOIN_SUCCESS') {
+          if (msg.payload.protocolVersion !== BRAWL_PROTOCOL_VERSION) {
+            wsRef.current = null;
+            try { ws.close(); } catch { /* ignore */ }
+            setState(prev => ({ ...prev, status: 'ERROR', phase: 'ENTRY',
+              errorMessage: 'This host uses an older BET-BRAWL version. Update the host to V2.' }));
+            return;
+          }
           const { player, sessionToken, roomCode, isHost } = msg.payload;
           localStorage.setItem(SESSION_TOKEN_KEY, sessionToken);
           sessionTokenRef.current = sessionToken;
@@ -467,6 +478,7 @@ export function useBrawlClient() {
               myPlayer: myUpdated,
               myBet: preservedBet,
               lastActionFeedback: isBettingOrPlaying ? prev.lastActionFeedback : null,
+              lastGameActionError: payload.currentRound?.matchId === prev.currentRound?.matchId ? prev.lastGameActionError : null,
             };
           });
           return;
@@ -478,6 +490,11 @@ export function useBrawlClient() {
             ...prev,
             lastActionFeedback: msg.payload,
           }));
+          return;
+        }
+
+        if (msg.type === 'GAME_ACTION_RESULT') {
+          setState(prev => ({ ...prev, lastGameActionError: msg.payload.accepted ? null : (msg.payload.reason || 'Action rejected') }));
           return;
         }
 
@@ -540,7 +557,7 @@ export function useBrawlClient() {
             connectWs(() => {
               send({
                 type: 'JOIN_ROOM',
-                payload: { roomCode: currentCode, sessionToken: savedToken },
+                  payload: { roomCode: currentCode, sessionToken: savedToken, protocolVersion: BRAWL_PROTOCOL_VERSION },
               });
             });
           }
@@ -587,7 +604,7 @@ const hostGame = useCallback((playerName: string, avatar: string) => {
     connectWs('ws://127.0.0.1:8080/ws', () => {
       send({
         type: 'CREATE_ROOM',
-        payload: { playerName, avatar, debugMode: state.isDebug },
+        payload: { playerName, avatar, debugMode: state.isDebug, protocolVersion: BRAWL_PROTOCOL_VERSION },
       });
     }, {
       maxRetries: 15,
@@ -599,7 +616,7 @@ const hostGame = useCallback((playerName: string, avatar: string) => {
     connectWs(undefined, () => {
       send({
         type: 'CREATE_ROOM',
-        payload: { playerName, avatar, debugMode: state.isDebug },
+        payload: { playerName, avatar, debugMode: state.isDebug, protocolVersion: BRAWL_PROTOCOL_VERSION },
       });
     });
   }
@@ -637,7 +654,7 @@ const hostGame = useCallback((playerName: string, avatar: string) => {
     connectWs(hostToConnect, () => {
       send({
         type: 'JOIN_ROOM',
-        payload: { roomCode: cleanCode, playerName, avatar, sessionToken: savedToken },
+        payload: { roomCode: cleanCode, playerName, avatar, sessionToken: savedToken, protocolVersion: BRAWL_PROTOCOL_VERSION },
       });
     });
   }, [connectWs, send]);
@@ -660,12 +677,24 @@ const hostGame = useCallback((playerName: string, avatar: string) => {
     });
   }, [send]);
 
-  const sendFighterAction = useCallback((action: FighterAction) => {
+  const sendFighterAction = useCallback((action: FighterAction | V2Action) => {
+    const round = state.currentRound;
+    if (round && V2_GAME_IDS.includes(round.miniGame.id as V2GameId)) {
+      const stageIndex = round.gameState?.stageIndex;
+      if (!round.matchId || !Number.isInteger(stageIndex)) {
+        setState(prev => ({ ...prev, lastGameActionError: 'Game state is not ready yet.' }));
+        return;
+      }
+      send({ type: 'FIGHTER_ACTION', payload: { ...action, matchId: round.matchId,
+          stageIndex: stageIndex as number,
+          actionId: Array.from(crypto.getRandomValues(new Uint32Array(4)), value => value.toString(16).padStart(8, '0')).join('') } as FighterAction });
+      return;
+    }
     send({
       type: 'FIGHTER_ACTION',
-      payload: action,
+      payload: action as FighterAction,
     });
-  }, [send]);
+  }, [send, state.currentRound]);
 
   const nextRound = useCallback(() => {
     send({ type: 'NEXT_ROUND' });

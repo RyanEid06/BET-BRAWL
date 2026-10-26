@@ -29,6 +29,14 @@ data class CityLocation(
 object MiniGamesCatalog {
 
     val MINI_GAMES: Map<String, MiniGameMeta> = mapOf(
+        "memory_heist" to MiniGameMeta("memory_heist", "Memory Heist", "Remember the loot", 24, "Study six symbols, then rebuild their positions.", listOf("Study the 3Ã—3 board for four seconds", "Place the six symbols in their original cells", "Most correct positions wins")),
+        "crowd_count" to MiniGameMeta("crowd_count", "Crowd Count", "Count through the chaos", 24, "Estimate the number of targets in three fast scenes.", listOf("Study each scene for two seconds", "Submit one estimate for each scene", "Lowest total error wins")),
+        "mirror_trouble" to MiniGameMeta("mirror_trouble", "Mirror Trouble", "Spot the real match", 20, "Find the true rotated match among lookalikes.", listOf("Inspect the target shape", "Choose the matching rotated shape", "Most correct picks across five puzzles wins")),
+        "safecracker" to MiniGameMeta("safecracker", "Safecracker", "Crack the code", 30, "Use five guesses and position clues to deduce a secret code.", listOf("Guess a three-symbol code", "Use exact and misplaced clues", "Solve in the fewest guesses")),
+        "circuit_sprint" to MiniGameMeta("circuit_sprint", "Circuit Sprint", "Power the path", 30, "Rotate pipes to connect the source to the sink.", listOf("Tap tiles to rotate them clockwise", "Connect the left source to the right sink", "Solved boards beat unfinished boards; fewer moves wins")),
+        "split_decision" to MiniGameMeta("split_decision", "Split Decision", "Read your rival", 25, "Secretly attack, guard or charge across five exchanges.", listOf("Pick one secret move each exchange", "Attack spends energy; guard blocks; charge gains energy", "Knock out your rival or finish with more health")),
+        "treasure_tug" to MiniGameMeta("treasure_tug", "Treasure Tug", "Spend energy wisely", 24, "Allocate energy across three treasure lanes.", listOf("Secretly split ten energy across three lanes", "Outbid your opponent to capture lane points", "Most points after three skirmishes wins")),
+        "pocket_territory" to MiniGameMeta("pocket_territory", "Pocket Territory", "Claim the board", 30, "Expand from your corner while anticipating your opponent.", listOf("Choose an adjacent free square each turn", "Contested squares become blocked", "Claim the highest-value territory")),
         "millisecond_stop" to MiniGameMeta(
             id = "millisecond_stop",
             name = "Millisecond Stop",

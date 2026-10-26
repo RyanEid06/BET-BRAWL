@@ -4,8 +4,10 @@ import com.betbrawl.app.server.engine.GameEngine
 import com.betbrawl.app.server.engine.InternalGameState
 import com.betbrawl.app.server.engine.OddsEngine
 import com.betbrawl.app.server.engine.RoomEngine
+import com.betbrawl.app.server.engine.V2Games
+import java.util.UUID
 import com.betbrawl.app.server.model.*
-import com.google.gson.Gson
+import com.google.gson.GsonBuilder
 import kotlinx.coroutines.*
 import org.java_websocket.WebSocket
 import org.java_websocket.handshake.ClientHandshake
@@ -30,10 +32,11 @@ class BrawlWebSocketServer(
     private val nowMs: () -> Long = System::currentTimeMillis,
     private val onServerReady: (() -> Unit)? = null,
     private val onServerFailure: ((Exception) -> Unit)? = null,
+    private val testGameSequence: List<String> = emptyList(),
     private val onRoomStateChanged: ((PublicRoomState) -> Unit)? = null
 ) : WebSocketServer(InetSocketAddress(host, serverPort)) {
 
-    private val gson = Gson()
+    private val gson = GsonBuilder().serializeNulls().create()
     private val scope = CoroutineScope(dispatcher + SupervisorJob())
 
     // Round countdown & game loop jobs
@@ -41,6 +44,12 @@ class BrawlWebSocketServer(
     private var bettingTimerJob: Job? = null
     private var countdownTimerJob: Job? = null
     private var minigameTimerJob: Job? = null
+    private var v2PhaseTimerJob: Job? = null
+    private val v2BotJobs = mutableListOf<Job>()
+    private val v2ActionIds = mutableMapOf<String, MutableSet<String>>()
+    private val gameBag = mutableListOf<String>()
+    var tournamentId: String? = null
+        private set
 
     // Grace timers
     private val fighterGraceTimers = ConcurrentHashMap<String, Job>()
@@ -188,6 +197,12 @@ class BrawlWebSocketServer(
             @Suppress("UNCHECKED_CAST")
             val payload = rawMsg["payload"] as? Map<String, Any?>
 
+            if ((type == "CREATE_ROOM" || type == "JOIN_ROOM") && payload?.get("protocolVersion") != BRAWL_PROTOCOL_VERSION.toDouble()) {
+                sendToSocket(conn, "JOIN_ERROR", mapOf("code" to "CLIENT_UPDATE_REQUIRED",
+                    "message" to "This room uses BET-BRAWL V2. Reload or update the game to join."))
+                return
+            }
+
             when (type) {
                 "CREATE_ROOM" -> handleCreateRoom(conn, payload)
                 "JOIN_ROOM" -> handleJoinRoom(conn, payload)
@@ -236,6 +251,9 @@ class BrawlWebSocketServer(
         roundHistory.clear()
         awards.clear()
         tournamentSchedule = null
+        tournamentId = null
+        gameBag.clear()
+        v2ActionIds.clear()
         currentRound = null
         internalGameState = null
         phase = GamePhase.LOBBY
@@ -250,7 +268,8 @@ class BrawlWebSocketServer(
             "player" to hostPlayer.toPublicPlayer(),
             "sessionToken" to hostPlayer.sessionToken,
             "roomCode" to roomCode,
-            "isHost" to true
+            "isHost" to true,
+            "protocolVersion" to BRAWL_PROTOCOL_VERSION
         ))
 
         broadcastRoomState()
@@ -301,7 +320,8 @@ class BrawlWebSocketServer(
                 "player" to existing.toPublicPlayer(),
                 "sessionToken" to existing.sessionToken,
                 "roomCode" to roomCode,
-                "isHost" to existing.isHost
+                "isHost" to existing.isHost,
+                "protocolVersion" to BRAWL_PROTOCOL_VERSION
             ))
             broadcastRoomState()
             return
@@ -329,7 +349,8 @@ class BrawlWebSocketServer(
             "player" to newPlayer.toPublicPlayer(),
             "sessionToken" to newPlayer.sessionToken,
             "roomCode" to roomCode,
-            "isHost" to false
+            "isHost" to false,
+            "protocolVersion" to BRAWL_PROTOCOL_VERSION
         ))
 
         broadcastRoomState()
@@ -371,6 +392,8 @@ class BrawlWebSocketServer(
 
         val schedule = RoomEngine.generateTournamentSchedule(connectedPlayers)
         tournamentSchedule = schedule
+        tournamentId = UUID.randomUUID().toString()
+        gameBag.clear()
         totalRounds = schedule.totalRounds
 
         // Reset all players' tournament stats for fresh tournament
@@ -484,12 +507,9 @@ class BrawlWebSocketServer(
 
     private fun initMatchRound(match: TournamentMatch, isChampionship: Boolean) {
         val schedule = tournamentSchedule!!
-        val miniGameId = RoomEngine.selectMiniGame(
-            roundIndex = match.roundNumber - 1,
-            lastMiniGameId = currentRound?.miniGame?.id,
-            isChampionship = isChampionship,
-            championshipGameNumber = match.championshipGameNumber ?: 1
-        )
+        val drawnGame = RoomEngine.drawMiniGame(gameBag, currentRound?.miniGame?.id)
+        val miniGameId = testGameSequence.getOrNull(match.roundNumber - 1)
+            ?.takeIf { it in RoomEngine.MINI_GAME_ROTATION } ?: drawnGame
         val miniGame = MiniGamesCatalog.MINI_GAMES[miniGameId]!!
 
         val (f1, f2) = match.fighterIds
@@ -531,6 +551,7 @@ class BrawlWebSocketServer(
         round.fighterScores[f1] = 0
         round.fighterScores[f2] = 0
         currentRound = round
+        v2ActionIds.clear()
 
         // Phase 1: FIGHTER_REVEAL
         phase = GamePhase.FIGHTER_REVEAL
@@ -581,6 +602,27 @@ class BrawlWebSocketServer(
 
     private fun startActiveMiniGame(round: RoundState) {
         phase = GamePhase.MINIGAME_ACTIVE
+        if (internalGameState?.v2 != null) {
+            if (advanceV2Round(round, nowMs())) return
+            broadcastRoomState()
+            v2PhaseTimerJob = scope.launch {
+                while (isActive) {
+                    val deadline = synchronized(this@BrawlWebSocketServer) {
+                        if (currentRound !== round || phase != GamePhase.MINIGAME_ACTIVE) null
+                        else internalGameState?.v2?.let { V2Games.nextDeadline(it) }
+                    } ?: break
+                    delay((deadline - nowMs()).coerceAtLeast(0))
+                    val finished = synchronized(this@BrawlWebSocketServer) {
+                        if (!isActive || currentRound !== round || phase != GamePhase.MINIGAME_ACTIVE) true
+                        else if (advanceV2Round(round, nowMs())) true
+                        else { broadcastRoomState(); false }
+                    }
+                    if (finished) break
+                }
+            }
+            startV2Bots(round)
+            return
+        }
         broadcastRoomState()
         minigameTimerJob = scope.launch {
             while (isActive) {
@@ -676,38 +718,85 @@ class BrawlWebSocketServer(
         val player = players[token] ?: return
         val round = currentRound ?: return
         val internal = internalGameState ?: return
-
-        // Authoritative phase and deadline boundaries
         val now = nowMs()
-        if (phase != GamePhase.MINIGAME_ACTIVE || now < round.gameStartsAt || now >= round.gameEndsAt) {
+        val v2 = internal.v2
+        if (v2 != null) {
+            // The stage may have expired while its coroutine was delayed.
+            if (phase == GamePhase.MINIGAME_ACTIVE) advanceV2Round(round, now)
+            fun ack(accepted: Boolean, reason: String? = null) = sendToSocket(conn, "GAME_ACTION_RESULT", mapOf(
+                "matchId" to round.matchId, "stageIndex" to v2["stageIndex"].asInt,
+                "actionId" to (payload?.get("actionId") as? String ?: ""), "accepted" to accepted, "reason" to reason))
+            if (phase != GamePhase.MINIGAME_ACTIVE || now < round.gameStartsAt || now >= round.gameEndsAt) {
+                ack(false, "Not accepting actions"); return
+            }
+            if (player.id !in round.fighterIds) { ack(false, "Not an active fighter"); return }
+            val actionId = payload?.get("actionId") as? String
+            if (payload?.get("matchId") != round.matchId ||
+                GameEngine.toStrictNonNegativeInteger(payload?.get("stageIndex")) != v2["stageIndex"].asInt ||
+                actionId == null || !actionId.matches(Regex("^[a-zA-Z0-9_-]{1,64}$"))) {
+                ack(false, "Stale or invalid action"); broadcastRoomState(); return
+            }
+            val ids = v2ActionIds.getOrPut(player.id) { mutableSetOf() }
+            if (actionId in ids) { ack(true); return }
+            if (ids.size >= 4096) { ack(false, "Too many actions"); return }
+            val result = GameEngine.processFighterAction(internal, round.fighterScores, player.id, payload, now)
+            if (result.rejectionReason != null) { ack(false, result.rejectionReason); return }
+            ids.add(actionId)
+            ack(true)
+            if (result.resolved) resolveCurrentGame(result.winnerId, result.isTie,
+                if (result.isTie) RoundResolutionReason.TIE else RoundResolutionReason.PLAYED)
+            else broadcastRoomState()
             return
         }
-        if (player.id !in round.fighterIds) {
-            return
-        }
 
-        val result = GameEngine.processFighterAction(
-            internal = internal,
-            fighterScores = round.fighterScores,
-            fighterId = player.id,
-            action = payload ?: emptyMap(),
-            nowMs = now
-        )
-
-        if (result.scoreUpdate != null) {
-            round.fighterScores.putAll(result.scoreUpdate)
-        }
-        if (result.gameStatePatch != null) {
-            round.gameState = (round.gameState ?: emptyMap()) + result.gameStatePatch
-        }
-        if (result.actionFeedback != null) {
-            sendToSocket(conn, "ACTION_RESULT", result.actionFeedback)
-        }
-
+        if (phase != GamePhase.MINIGAME_ACTIVE || now < round.gameStartsAt || now >= round.gameEndsAt || player.id !in round.fighterIds) return
+        val result = GameEngine.processFighterAction(internal, round.fighterScores, player.id, payload ?: emptyMap(), now)
+        result.scoreUpdate?.let { round.fighterScores.putAll(it) }
+        result.gameStatePatch?.let { round.gameState = (round.gameState ?: emptyMap()) + it }
+        result.actionFeedback?.let { sendToSocket(conn, "ACTION_RESULT", it) }
         broadcastRoomState()
+        if (result.resolved) resolveCurrentGame(result.winnerId, result.isTie,
+            if (result.isTie) RoundResolutionReason.TIE else RoundResolutionReason.PLAYED)
+    }
 
-        if (result.resolved) {
-            resolveCurrentGame(result.winnerId, result.isTie, if (result.isTie) RoundResolutionReason.TIE else RoundResolutionReason.PLAYED)
+    /** Returns true once authority has finished, settling only an active current match. */
+    private fun advanceV2Round(round: RoundState, now: Long): Boolean {
+        val state = internalGameState?.v2 ?: return false
+        V2Games.advance(state, now)
+        if (!state["finished"].asBoolean) return false
+        state.getAsJsonObject("scores").entrySet().forEach { round.fighterScores[it.key] = it.value.asInt }
+        val winner = state["winnerId"].takeUnless { it.isJsonNull }?.asString
+        if (currentRound === round && phase == GamePhase.MINIGAME_ACTIVE) resolveCurrentGame(winner, winner == null,
+            if (winner == null) RoundResolutionReason.TIE else RoundResolutionReason.PLAYED)
+        return true
+    }
+
+    private fun startV2Bots(round: RoundState) {
+        for (bot in players.values.filter { it.isBot && it.id in round.fighterIds }) {
+            v2BotJobs.add(scope.launch {
+                while (isActive) {
+                    delay(500)
+                    val finished = synchronized(this@BrawlWebSocketServer) {
+                        val internal = internalGameState
+                        val state = internal?.v2
+                        if (!isActive || currentRound !== round || phase != GamePhase.MINIGAME_ACTIVE || state == null) true
+                        else if (advanceV2Round(round, nowMs())) true
+                        else {
+                            val action = V2Games.botAction(V2Games.project(state, bot.id, nowMs()))
+                            if (action != null) {
+                                val scoped = action + mapOf("matchId" to round.matchId,
+                                    "stageIndex" to state["stageIndex"].asInt, "actionId" to UUID.randomUUID().toString())
+                                val result = GameEngine.processFighterAction(internal, round.fighterScores, bot.id, scoped, nowMs())
+                                if (result.resolved) resolveCurrentGame(result.winnerId, result.isTie,
+                                    if (result.isTie) RoundResolutionReason.TIE else RoundResolutionReason.PLAYED)
+                                else broadcastRoomState()
+                            }
+                            phase != GamePhase.MINIGAME_ACTIVE
+                        }
+                    }
+                    if (finished) break
+                }
+            })
         }
     }
 
@@ -811,7 +900,11 @@ class BrawlWebSocketServer(
         roundHistory.clear()
         awards.clear()
         tournamentSchedule = null
+        tournamentId = null
+        gameBag.clear()
+        v2ActionIds.clear()
         currentRound = null
+        internalGameState = null
         phase = GamePhase.LOBBY
 
         for (p in players.values) {
@@ -892,6 +985,9 @@ class BrawlWebSocketServer(
         roundHistory.clear()
         awards.clear()
         tournamentSchedule = null
+        tournamentId = null
+        gameBag.clear()
+        v2ActionIds.clear()
         currentRound = null
         internalGameState = null
         roomCode = ""
@@ -926,7 +1022,7 @@ class BrawlWebSocketServer(
             phase = phase,
             players = publicPlayers,
             totalRounds = totalRounds,
-            currentRound = scrubbedRound,
+            currentRound = scrubbedRound?.let { projectV2Round(it, null) },
             tournamentSchedule = tournamentSchedule?.let { sched ->
                 sched.copy(
                     matches = sched.matches.toMutableList(),
@@ -943,7 +1039,7 @@ class BrawlWebSocketServer(
             if (!ws.isOpen) continue
             val player = players[token]
 
-            var clientRound = scrubbedRound
+            var clientRound = scrubbedRound?.let { projectV2Round(it, player?.id) }
             // Per-client Higher/Lower answer security during MINIGAME_ACTIVE
             if (scrubbedRound != null && scrubbedRound.miniGame.id == "higher_lower" && phase == GamePhase.MINIGAME_ACTIVE) {
                 val origState = scrubbedRound.gameState ?: emptyMap()
@@ -985,6 +1081,18 @@ class BrawlWebSocketServer(
         onRoomStateChanged?.invoke(baseRoomState)
     }
 
+    @Suppress("UNCHECKED_CAST")
+    private fun projectV2Round(round: RoundState, viewerId: String?): RoundState {
+        val state = internalGameState?.v2 ?: return round
+        val viewTime = if (phase == GamePhase.MINIGAME_ACTIVE || phase == GamePhase.PAYOUT_RECAP || phase == GamePhase.FINAL_PODIUM)
+            nowMs() else minOf(nowMs(), state["startsAt"].asLong - 1)
+        val view = V2Games.project(state, viewerId, viewTime, phase == GamePhase.PAYOUT_RECAP)
+        val config = gson.fromJson(view["config"], Map::class.java) as Map<String, Any?>
+        val publicState = gson.fromJson(view["state"], Map::class.java) as Map<String, Any?>
+        val scores = view.getAsJsonObject("scores").entrySet().associate { it.key to (it.value.asInt as Number) }.toMutableMap()
+        return round.copy(gameConfig = config, gameState = publicState, fighterScores = scores)
+    }
+
     private fun sendToSocket(conn: WebSocket, type: String, payload: Any) {
         if (!conn.isOpen) return
         val json = gson.toJson(mapOf(
@@ -1019,6 +1127,10 @@ class BrawlWebSocketServer(
         countdownTimerJob = null
         minigameTimerJob?.cancel()
         minigameTimerJob = null
+        v2PhaseTimerJob?.cancel()
+        v2PhaseTimerJob = null
+        v2BotJobs.forEach { it.cancel() }
+        v2BotJobs.clear()
         for (job in fighterGraceTimers.values) job.cancel()
         fighterGraceTimers.clear()
     }

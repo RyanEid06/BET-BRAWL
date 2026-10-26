@@ -23,5 +23,6 @@
     },
     "allowImportingTsExtensions": true,
     "noEmit": true
-  }
+  },
+  "exclude": ["node_modules", "artifacts", "dist", "build", "app/build", ".wrangler", ".wrangler-dry-run"]
 }

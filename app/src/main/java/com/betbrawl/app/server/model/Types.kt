@@ -2,6 +2,8 @@ package com.betbrawl.app.server.model
 
 import com.google.gson.annotations.SerializedName
 
+const val BRAWL_PROTOCOL_VERSION = 2
+
 enum class GamePhase {
     ENTRY,
     LOBBY,
@@ -172,6 +174,7 @@ data class TournamentSchedule(
 )
 
 data class RoundState(
+    val matchId: String = java.util.UUID.randomUUID().toString(),
     val roundNumber: Int,
     val maxRounds: Int,
     var stage: TournamentStage = TournamentStage.QUALIFIERS,

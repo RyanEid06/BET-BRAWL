@@ -15,7 +15,10 @@ kotlin {
                 "com/betbrawl/app/server/model/**", "com/betbrawl/app/server/LanDiscovery.kt",
                 "com/betbrawl/app/webview/DeepLinkParser.kt")
         }
-        named("test") { kotlin.srcDir("../../app/src/test/java") }
+        named("test") {
+            kotlin.srcDir("../../app/src/test/java")
+            resources.srcDir("../../src/engine/fixtures")
+        }
     }
 }
 

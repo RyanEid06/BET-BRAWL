@@ -1,6 +1,7 @@
 package com.betbrawl.app.server.engine
 
 import com.betbrawl.app.server.model.*
+import com.google.gson.JsonObject
 import kotlin.math.abs
 import kotlin.math.round
 import kotlin.random.Random
@@ -14,6 +15,7 @@ data class InternalGameState(
     val miniGameId: String,
     val fighterIds: List<String>,
     val gameStartsAt: Long,
+    var v2: JsonObject? = null,
     var millisecondStopStopped: MutableMap<String, Boolean> = mutableMapOf(),
     var redGreenSchedule: List<LightScheduleStep> = emptyList(),
     var redGreenLastTapAt: MutableMap<String, Long> = mutableMapOf(),
@@ -70,6 +72,11 @@ object GameEngine {
             gameStartsAt = gameStartsAt
         )
         val publicConfig = mutableMapOf<String, Any?>()
+
+        if (miniGameId in V2Games.ids) {
+            internal.v2 = V2Games.init(miniGameId, fighterIds, gameStartsAt)
+            return Pair(internal, publicConfig)
+        }
 
         when (miniGameId) {
             "millisecond_stop" -> {
@@ -159,6 +166,20 @@ object GameEngine {
         val otherFighterId = if (fighterId == f1) f2 else f1
         val actionType = action["type"] as? String
             ?: return GameActionResult(resolved = false, winnerId = null, rejectionReason = "Malformed action")
+
+        internal.v2?.let { state ->
+            V2Games.advance(state, nowMs)
+            if (toStrictNonNegativeInteger(action["stageIndex"]) != state["stageIndex"].asInt) {
+                return GameActionResult(false, null, rejectionReason = "Stale stage")
+            }
+            val result = V2Games.process(state, fighterId, action, nowMs)
+            if (!result.accepted) return GameActionResult(false, null, rejectionReason = result.reason)
+            val finished = state["finished"].asBoolean
+            val winner = state["winnerId"].takeUnless { it.isJsonNull }?.asString
+            if (finished) state.getAsJsonObject("scores").entrySet().forEach { fighterScores[it.key] = it.value.asInt }
+            return GameActionResult(finished, winner, finished && winner == null,
+                scoreUpdate = if (finished) fighterScores.toMap() else null)
+        }
 
         when (internal.miniGameId) {
             "millisecond_stop" -> {
@@ -510,8 +531,14 @@ object GameEngine {
 
     fun resolveGameTimeout(
         internal: InternalGameState,
-        fighterScores: Map<String, Number>
+        fighterScores: MutableMap<String, Number>
     ): Triple<String?, Boolean, Map<String, Any?>?> {
+        internal.v2?.let { state ->
+            V2Games.advance(state, state["endsAt"].asLong)
+            state.getAsJsonObject("scores").entrySet().forEach { fighterScores[it.key] = it.value.asInt }
+            val winner = state["winnerId"].takeUnless { it.isJsonNull }?.asString
+            return Triple(winner, winner == null, null)
+        }
         val (f1, f2) = internal.fighterIds
         val s1 = fighterScores[f1]
         val s2 = fighterScores[f2]

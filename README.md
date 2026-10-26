@@ -1,9 +1,15 @@
-# BET & BRAWL — Android V1
+# BET & BRAWL — Android/LAN V2 candidate
+
+V2 adds eight games to V1's six: **Memory Heist, Crowd Count, Mirror Trouble, Safecracker, Circuit Sprint, Split Decision, Treasure Tug, and Pocket Territory**. Phone touch and PC mouse/keyboard clients share the same tournament, bets and championship rules. Private drafts/guesses/choices remain on the host until their permitted reveal; all 14 games rotate through a shuffled bag.
+
+This branch is the reviewable `codex/v2-games-android` candidate, version **2.0.0 / code 2**, protocol **2**. Use the same V2 version on all clients; older clients/hosts receive an update message. No merge or public release has occurred. See the [approved plan](docs/superpowers/plans/2026-10-26-v2-games.md), [candidate evidence](docs/V2_CANDIDATE.md), and [worklog](CODEX_WORKLOG.md).
 
 A local party game for 3–9 players. The host Android phone runs the authoritative Kotlin `BrawlWebSocketServer` inside `HostService`. The React/Vite interface is bundled in the APK and displayed in a WebView. Guests use the same Wi-Fi/LAN; gameplay needs no internet, laptop, Node server, Render, or Cloudflare.
 
 ## Maintained targets
 
+- `codex/v2-games-android`: Android/LAN V2 candidate, application ID `com.betbrawl.app`, version `2.0.0` / code `2`.
+- `codex/v2-games-web`: separate online V2 candidate; exact-source Cloudflare CI passes at `c1e03cf`.
 - `main`: Android local/LAN V1, application ID `com.betbrawl.app`, version `1.0.0` / code `1`.
 - `v1-web-cloudflare-ready`: online web V1, Cloudflare Worker and one SQLite Durable Object per room. Internet required.
 - `v1-web-final`: preserved Node/LAN behavioral reference at `e1f948c`, tagged `v1.0.0-web-final`. Do not modify or delete without separate owner approval.

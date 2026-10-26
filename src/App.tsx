@@ -25,6 +25,10 @@ import { SpeedMathGame } from './components/games/SpeedMathGame.tsx';
 import { HigherLowerGame } from './components/games/HigherLowerGame.tsx';
 import { BlindPinpointGame } from './components/games/BlindPinpointGame.tsx';
 import { QuickDrawGame } from './components/games/QuickDrawGame.tsx';
+import { V2GameView } from './components/games/V2GameView.tsx';
+import './components/games/V2GameView.css';
+import { V2_GAME_IDS } from './engine/v2Games.ts';
+import type { V2GameId } from './engine/v2Games.ts';
 import { SynchronizedCountdown } from './components/SynchronizedCountdown.tsx';
 
 export default function App() {
@@ -249,6 +253,22 @@ export default function App() {
               serverTimeOffset={client.serverTimeOffset}
               onSendAction={client.sendFighterAction}
             />
+          )}
+          {V2_GAME_IDS.includes(client.currentRound.miniGame.id as V2GameId) && (
+            <>
+              <V2GameView
+                key={client.currentRound.matchId}
+                gameId={client.currentRound.miniGame.id as V2GameId}
+                gameConfig={client.currentRound.gameConfig || {}}
+                gameState={client.currentRound.gameState || {}}
+                fighterA={activeFighterA}
+                fighterB={activeFighterB}
+                myPlayerId={client.myPlayer?.id || null}
+                serverTimeOffset={client.serverTimeOffset}
+                onSendAction={client.sendFighterAction}
+              />
+              {client.lastGameActionError && <p role="alert" className="mt-2 text-rose-300">{client.lastGameActionError}</p>}
+            </>
           )}
         </div>
       )}

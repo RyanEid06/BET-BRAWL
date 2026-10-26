@@ -8,6 +8,14 @@
 import type { MiniGameMeta, MiniGameId } from './types.ts';
 
 export const MINI_GAMES: Record<MiniGameId, MiniGameMeta> = {
+  memory_heist: { id: 'memory_heist', name: 'Memory Heist', tagline: 'Remember the loot', durationSeconds: 24, description: 'Study six symbols, then rebuild their positions.', rules: ['Study the 3×3 board for four seconds', 'Place the six symbols in their original cells', 'Most correct positions wins'] },
+  crowd_count: { id: 'crowd_count', name: 'Crowd Count', tagline: 'Count through the chaos', durationSeconds: 24, description: 'Estimate the number of targets in three fast scenes.', rules: ['Study each scene for two seconds', 'Submit one estimate for each scene', 'Lowest total error wins'] },
+  mirror_trouble: { id: 'mirror_trouble', name: 'Mirror Trouble', tagline: 'Spot the real match', durationSeconds: 20, description: 'Find the true rotated match among lookalikes.', rules: ['Inspect the target shape', 'Choose the matching rotated shape', 'Most correct picks across five puzzles wins'] },
+  safecracker: { id: 'safecracker', name: 'Safecracker', tagline: 'Crack the code', durationSeconds: 30, description: 'Use five guesses and position clues to deduce a secret code.', rules: ['Guess a three-symbol code', 'Use exact and misplaced clues', 'Solve in the fewest guesses'] },
+  circuit_sprint: { id: 'circuit_sprint', name: 'Circuit Sprint', tagline: 'Power the path', durationSeconds: 30, description: 'Rotate pipes to connect the source to the sink.', rules: ['Tap tiles to rotate them clockwise', 'Connect the left source to the right sink', 'Solved boards beat unfinished boards; fewer moves wins'] },
+  split_decision: { id: 'split_decision', name: 'Split Decision', tagline: 'Read your rival', durationSeconds: 25, description: 'Secretly attack, guard or charge across five exchanges.', rules: ['Pick one secret move each exchange', 'Attack spends energy; guard blocks; charge gains energy', 'Knock out your rival or finish with more health'] },
+  treasure_tug: { id: 'treasure_tug', name: 'Treasure Tug', tagline: 'Spend energy wisely', durationSeconds: 24, description: 'Allocate energy across three treasure lanes.', rules: ['Secretly split ten energy across three lanes', 'Outbid your opponent to capture lane points', 'Most points after three skirmishes wins'] },
+  pocket_territory: { id: 'pocket_territory', name: 'Pocket Territory', tagline: 'Claim the board', durationSeconds: 30, description: 'Expand from your corner while anticipating your opponent.', rules: ['Choose an adjacent free square each turn', 'Contested squares become blocked', 'Claim the highest-value territory'] },
   millisecond_stop: {
     id: 'millisecond_stop',
     name: 'Millisecond Stop',

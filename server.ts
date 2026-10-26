@@ -27,8 +27,9 @@ import type {
   TournamentMatch,
   RoundResolutionReason,
   TournamentStage,
+  MiniGameId,
 } from './src/engine/types.ts';
-import { toPublicPlayer } from './src/engine/types.ts';
+import { toPublicPlayer, BRAWL_PROTOCOL_VERSION } from './src/engine/types.ts';
 import {
   generateRoomCode,
   createFreshPlayer,
@@ -41,6 +42,7 @@ import {
   MAX_PLAYERS_CAPACITY,
   sanitizePlayerName,
   sanitizePlayerAvatar,
+  drawMiniGame,
 } from './src/engine/roomEngine.ts';
 import {
   calculateDynamicOdds,
@@ -55,6 +57,7 @@ import {
   processFighterAction,
   resolveGameTimeout,
 } from './src/engine/gameEngine.ts';
+import { initV2Game, advanceV2Game, v2NextDeadline, projectV2Game, getV2BotAction, type V2GameId } from './src/engine/v2Games.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -87,6 +90,7 @@ export interface RoundTimers {
   bettingInterval?: ReturnType<typeof setInterval>;
   botBetTimers: Array<ReturnType<typeof setTimeout>>;
   gameTimeoutTimer?: ReturnType<typeof setTimeout>;
+  v2PhaseTimer?: ReturnType<typeof setTimeout>;
   botGameTimers: Array<ReturnType<typeof setTimeout> | ReturnType<typeof setInterval>>;
 }
 
@@ -108,6 +112,9 @@ export interface ServerRoom {
   currentRound: RoundState | null;
   internalGameState: InternalGameState | null;
   tournamentSchedule: TournamentSchedule | null;
+  gameBag: MiniGameId[];
+  tournamentId?: string;
+  v2ActionIds: Record<string, string[]>;
   roundHistory: Array<{
     roundNumber: number;
     miniGameName: string;
@@ -142,6 +149,8 @@ export function clearRoundTimers(timers: RoundTimers) {
 
   if (timers.gameTimeoutTimer) clearTimeout(timers.gameTimeoutTimer);
   timers.gameTimeoutTimer = undefined;
+  if (timers.v2PhaseTimer) clearTimeout(timers.v2PhaseTimer);
+  timers.v2PhaseTimer = undefined;
 
   timers.botGameTimers.forEach(t => {
     clearTimeout(t as any);
@@ -233,6 +242,13 @@ export function createBrawlServer(options: CreateServerOptions = {}) {
       const player = activeRoom.players.get(token);
 
       let tailoredRound = publicRound;
+      const v2 = activeRoom.internalGameState?.v2;
+      if (publicRound && v2) {
+        const viewTime = activeRoom.phase === 'MINIGAME_ACTIVE' || activeRoom.phase === 'PAYOUT_RECAP' || activeRoom.phase === 'FINAL_PODIUM'
+          ? Date.now() : Math.min(Date.now(), v2.startsAt - 1);
+        const view = projectV2Game(v2, player?.id ?? null, viewTime, activeRoom.phase === 'PAYOUT_RECAP');
+        tailoredRound = { ...publicRound, gameConfig: view.config, gameState: view.state, fighterScores: view.scores };
+      }
       // Per-client answer security: in higher_lower during MINIGAME_ACTIVE,
       // never reveal answers/challengerStats of other fighters for questions this player hasn't yet submitted!
       if (publicRound && publicRound.miniGame.id === 'higher_lower' && publicRound.gameState && activeRoom.phase === 'MINIGAME_ACTIVE') {
@@ -356,6 +372,7 @@ export function createBrawlServer(options: CreateServerOptions = {}) {
 
     const lastMiniGameId = activeRoom.currentRound?.miniGame.id;
 
+    const selectedMiniGameId = drawMiniGame(activeRoom.gameBag, Math.random, lastMiniGameId);
     const { round, internalGame } = initAuthoritativeRound(
       roundNum,
       activeRoom.totalRounds,
@@ -367,7 +384,8 @@ export function createBrawlServer(options: CreateServerOptions = {}) {
       qualifierIndex,
       qualifierTotal,
       championshipGameNumber,
-      lastMiniGameId
+      lastMiniGameId,
+      selectedMiniGameId
     );
 
     const now = Date.now();
@@ -378,6 +396,7 @@ export function createBrawlServer(options: CreateServerOptions = {}) {
 
     activeRoom.currentRound = round;
     activeRoom.internalGameState = internalGame;
+    activeRoom.v2ActionIds = {};
     activeRoom.lastPairing = round.fighterIds;
     activeRoom.phase = 'FIGHTER_REVEAL';
     broadcastRoomState();
@@ -499,6 +518,43 @@ export function createBrawlServer(options: CreateServerOptions = {}) {
     round.gameStartsAt = Date.now();
     round.gameEndsAt = round.gameStartsAt + round.miniGame.durationSeconds * 1000;
     internal.gameStartsAt = round.gameStartsAt;
+
+    if (internal.v2) {
+      internal.v2 = initV2Game(round.miniGame.id as V2GameId, round.fighterIds, round.gameStartsAt);
+      advanceV2Game(internal.v2, round.gameStartsAt);
+      const matchId = round.matchId;
+      const progress = () => {
+        if (!activeRoom || activeRoom !== room || room.currentRound?.matchId !== matchId || room.phase !== 'MINIGAME_ACTIVE' || !internal.v2) return;
+        advanceV2Game(internal.v2, Date.now());
+        if (internal.v2.finished) {
+          Object.assign(round.fighterScores, internal.v2.scores);
+          resolveCurrentGame(internal.v2.winnerId, !internal.v2.winnerId);
+          return;
+        }
+        broadcastRoomState();
+        const next = v2NextDeadline(internal.v2);
+        if (next !== null) room.roundTimers.v2PhaseTimer = setTimeout(progress, Math.max(1, next - Date.now()));
+      };
+      const next = v2NextDeadline(internal.v2);
+      if (next !== null) room.roundTimers.v2PhaseTimer = setTimeout(progress, Math.max(1, next - Date.now()));
+      const bots = round.fighterIds.map(id => Array.from(room.players.values()).find(p => p.id === id)).filter(p => p?.isBot);
+      if (bots.length) {
+        const timer = setInterval(() => {
+          if (!activeRoom || activeRoom !== room || room.currentRound?.matchId !== matchId || room.phase !== 'MINIGAME_ACTIVE' || !internal.v2) {
+            clearInterval(timer); return;
+          }
+          for (const bot of bots) {
+            const action = getV2BotAction(projectV2Game(internal.v2, bot!.id, Date.now()));
+            if (!action) continue;
+            const result = processFighterAction(internal, round.fighterScores, bot!.id,
+              { ...action, matchId: matchId!, stageIndex: internal.v2.stageIndex, actionId: crypto.randomUUID() } as FighterAction, Date.now());
+            if (result.resolved) { resolveCurrentGame(result.winnerId, result.isTie); break; }
+          }
+          if (room.phase === 'MINIGAME_ACTIVE') broadcastRoomState();
+        }, 500);
+        room.roundTimers.botGameTimers.push(timer);
+      }
+    }
 
     if (round.miniGame.id === 'quick_draw' && internal.quickDraw) {
       internal.quickDraw.drawAt = round.gameStartsAt + internal.quickDraw.drawDelayMs;
@@ -743,6 +799,13 @@ export function createBrawlServer(options: CreateServerOptions = {}) {
           return;
         }
 
+        if ((msg.type === 'CREATE_ROOM' || msg.type === 'JOIN_ROOM') && msg.payload?.protocolVersion !== BRAWL_PROTOCOL_VERSION) {
+          ws.send(JSON.stringify({ type: 'JOIN_ERROR', timestamp: Date.now(), payload: {
+            code: 'CLIENT_UPDATE_REQUIRED', message: 'This room uses BET-BRAWL V2. Reload or update the game to join.',
+          } } satisfies ServerMessage));
+          return;
+        }
+
         // 1. CREATE_ROOM (Host action)
         if (msg.type === 'CREATE_ROOM') {
           const payload = (msg as any).payload || {};
@@ -783,6 +846,8 @@ export function createBrawlServer(options: CreateServerOptions = {}) {
             currentRound: null,
             internalGameState: null,
             tournamentSchedule: null,
+            gameBag: [],
+            v2ActionIds: {},
             roundHistory: [],
             awards: [],
             roundTimers: createEmptyRoundTimers(),
@@ -799,6 +864,7 @@ export function createBrawlServer(options: CreateServerOptions = {}) {
               sessionToken: hostPlayer.sessionToken,
               roomCode,
               isHost: true,
+              protocolVersion: BRAWL_PROTOCOL_VERSION,
             },
           };
           ws.send(JSON.stringify(successMsg));
@@ -869,6 +935,7 @@ export function createBrawlServer(options: CreateServerOptions = {}) {
                 sessionToken: existing.sessionToken,
                 roomCode: activeRoom.roomCode,
                 isHost: existing.isHost,
+                protocolVersion: BRAWL_PROTOCOL_VERSION,
               },
             }));
             broadcastRoomState();
@@ -910,6 +977,7 @@ export function createBrawlServer(options: CreateServerOptions = {}) {
               sessionToken: newPlayer.sessionToken,
               roomCode: activeRoom.roomCode,
               isHost: false,
+              protocolVersion: BRAWL_PROTOCOL_VERSION,
             },
           }));
           broadcastRoomState();
@@ -974,6 +1042,7 @@ export function createBrawlServer(options: CreateServerOptions = {}) {
           // Freeze session roster, shuffle once, generate N circular qualifiers + Championship Series (First to 2 Decisive Wins)
           const schedule = generateTournamentSchedule(connectedPlayers);
           activeRoom.tournamentSchedule = schedule;
+          activeRoom.tournamentId = crypto.randomUUID();
           activeRoom.totalRounds = schedule.totalRounds;
 
           // Reset all players' tournament stats for fresh tournament
@@ -1063,6 +1132,25 @@ export function createBrawlServer(options: CreateServerOptions = {}) {
           }
 
           const action: FighterAction = (msg as any).payload;
+          const round = activeRoom.currentRound;
+          const v2 = activeRoom.internalGameState.v2;
+          if (v2) {
+            advanceV2Game(v2, now);
+            const envelope = action as FighterAction & { matchId?: unknown; stageIndex?: unknown; actionId?: unknown };
+            const sendResult = (accepted: boolean, reason?: string) => ws.send(JSON.stringify({
+              type: 'GAME_ACTION_RESULT', timestamp: Date.now(), payload: {
+                matchId: round.matchId!, stageIndex: v2.stageIndex,
+                actionId: typeof envelope?.actionId === 'string' ? envelope.actionId : '', accepted, reason,
+              },
+            } satisfies ServerMessage));
+            if (!envelope || envelope.matchId !== round.matchId || envelope.stageIndex !== v2.stageIndex ||
+                typeof envelope.actionId !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(envelope.actionId)) {
+              sendResult(false, 'Stale or invalid action'); return;
+            }
+            const ids = activeRoom.v2ActionIds[player.id] ??= [];
+            if (ids.includes(envelope.actionId)) { sendResult(true); return; }
+            if (ids.length >= 4096) { sendResult(false, 'Too many actions'); return; }
+          }
           const result = processFighterAction(
             activeRoom.internalGameState,
             activeRoom.currentRound.fighterScores,
@@ -1070,6 +1158,18 @@ export function createBrawlServer(options: CreateServerOptions = {}) {
             action,
             now
           );
+          if (v2) {
+            const envelope = action as FighterAction & { actionId: string };
+            if (result.rejectionReason) {
+              ws.send(JSON.stringify({ type: 'GAME_ACTION_RESULT', timestamp: now,
+                payload: { matchId: round.matchId!, stageIndex: v2.stageIndex, actionId: envelope.actionId,
+                  accepted: false, reason: result.rejectionReason } } satisfies ServerMessage));
+              return;
+            }
+            activeRoom.v2ActionIds[player.id].push(envelope.actionId);
+            ws.send(JSON.stringify({ type: 'GAME_ACTION_RESULT', timestamp: now,
+              payload: { matchId: round.matchId!, stageIndex: v2.stageIndex, actionId: envelope.actionId, accepted: true } } satisfies ServerMessage));
+          }
 
           if (result.gameStatePatch) {
             activeRoom.currentRound.gameState = {
@@ -1138,6 +1238,8 @@ export function createBrawlServer(options: CreateServerOptions = {}) {
           activeRoom.currentRound = null;
           activeRoom.internalGameState = null;
           activeRoom.tournamentSchedule = null;
+          activeRoom.tournamentId = undefined;
+          activeRoom.gameBag = [];
           activeRoom.roundHistory = [];
           activeRoom.awards = [];
           broadcastRoomState();
