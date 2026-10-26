@@ -1,28 +1,37 @@
-# BET-BRAWL V2 checkpoint
+# BET-BRAWL V2 candidate checkpoint
 
-## Objective and boundaries
-Deliver the owner-approved [14-game V2 plan](docs/superpowers/plans/2026-10-26-v2-games.md): six V1 plus eight new games, web first then Android/LAN. Preserve tournament/bets/bankroll and V1 refs. Candidate branches only; no merge/deploy/publication, dependencies, new modes/accounts/redesign, device installation or extra Android tooling. User explicitly approved pushing both V2 candidate branches to RyanEid06/BET-BRAWL for CI in this chat.
+## Outcome and boundary
+[Approved 14-game plan](docs/superpowers/plans/2026-10-26-v2-games.md), milestones1–7 COMPLETE as reviewable web and Android/LAN candidates. Version2.0.0/protocol2, Android code2. No merge, deployment, public release, device installation, signing identity creation or Android tooling installation. Physical/public/manual acceptance remains separate. User explicitly approved pushes of both V2 branches to RyanEid06/BET-BRAWL for CI.
 
-## State and architecture
-- Canonical checkout C:/Users/Administrator/Desktop/Projects/BET-BRAWL. Current branch codex/v2-games-android from main 2ee6d66f4ecd49a66bf31530413919d550055f11. V2 changes dirty/staged; shared patch conflicts resolved by preserving Android LAN routing/deep links/native bridge. No wholesale Cloudflare merge.
-- Web candidate codex/v2-games-web at c1e03cfae7078488cc2f44daac0523e34664e84b, pushed; exact-source Cloudflare CI40361090266 SUCCESS. V1 refs unchanged. Same canonical checkout on private branches; no unnecessary worktree/dependency copies.
-- Pure TS V2Games and native Kotlin JsonObject V2Games authority; canonical fixtures src/engine/fixtures consumed by both. UI uses recipient projections. Match/action/stage IDs, private immutable commits, absolute deadlines/catch-up, shuffled 14-game bag; no network arrival tiebreaker.
-- Version2.0.0/protocol2; Android versionCode2. Candidate Worker bet-brawl-v2-candidate isolates future storage. Native host keeps existing discovery/service/WebView behavior.
+## Branch and source provenance
+- Canonical C:/Users/Administrator/Desktop/Projects/BET-BRAWL; current branch codex/v2-games-android. Private candidate branches reused the canonical checkout; no extra worktree/clone.
+- Web verified runtime source c1e03cfae7078488cc2f44daac0523e34664e84b, pushed codex/v2-games-web; exact CI40361090266 SUCCESS.
+- Android verified runtime source b012a74a26d2bcf9c48b787af0d3ebca9b4f324f, pushed codex/v2-games-android; exact CI40362713620 SUCCESS.
+- Final documentation-only commits may follow those sources; verify runtime diff is empty. V1 main2ee6d66, web-ready a60a79d and frozen e1f948c/tag remain unchanged. Never merge Cloudflare routing into LAN or retire frozen refs without fresh authorization.
 
-## Completed and observed verification
-- Full web npm run cf:verify PASS:92 engine/client +18 Worker tests, build/typechecks, dry run, actual local SQLite/WebSocket full tournament and restart/private-action/deadline recovery. artifacts/v2/resumed-cf-verify.log.
-- Independent web review found four important defects, all fixed RED→GREEN: logical deadlines/puzzle recovery, varied Circuit routes, post-catch-up stage checks, and visible V2 finished explanation on payout. Focused suite50/50 pass. No deferred reviewer findings.
-- Browser32 game/viewport cases pass at360x640/390x844/768x1024/1366x768: touch/mouse, roles/results/study transition, focus/reduced motion/orientation, >=44px targets, no horizontal overflow. Compact Mirror fits short phone; longer boards/results scroll.
-- Actual App/browser room smoke passes Memory/Safecracker with three clients plus debug bot, accepted scoped inputs/privacy/payout explanation. Wi-Fi HTTP run passes with getRandomValues IDs (randomUUID unavailable outside secure context). artifacts/v2/browser/REPORT.md; no physical/native acceptance implied.
-- Android shared npm run verify PASS100/100, typecheck/build/asset sync. New TS test validates104 canonical full-state checkpoints and312 projections, also used by Kotlin.
-- Pure Kotlin staging13/13; host staging37/37. Integrated native full suite75/75 PASS, production/test modules compiled separately with JDK17/compiler2.2.10 language/API1.9. Includes explicit PASS null and HostService trailing callback compatibility. artifacts/v2/native-integrated-final.log; runner artifacts/v2/run-integrated.ps1. No native compiler remains active.
+## Architecture and important files
+- src/engine/v2Games.ts + native server/engine/V2Games.kt: eight pure authoritative games; explicit recipient projections, absolute phases/deadlines, immutable choices, simultaneous resolution, no arrival-time tiebreakers.
+- Shared GameEngine/RoomEngine and three hosts: match/action/stage identities, catch-up before stage validation, dedup, shuffled14-game bag spanning qualifiers/finals, fresh tournament reset. Cloud DO persists private state/rotation/schedule; candidate Worker name bet-brawl-v2-candidate isolates future storage.
+- src/components/games/V2GameView.tsx/.css, PayoutRecapModal and App expose phone/PC controls and finished explanations. Client IDs use getRandomValues for ordinary LAN HTTP. Android bridge/deep links/discovery/HostService retained; all create/join paths send protocol2.
+- Canonical src/engine/fixtures/v2-parity.json and v2-projections.json are used by TS and Kotlin (8 traces,104 full-state checkpoints,312 recipient views). Gradle resources point to the canonical fixtures.
 
-## Pending/failures and useful approaches
-- Independent Android review found native hostGame CREATE_ROOM omitted protocolVersion; real bridge-branch browser reproduced rejection RED before fix. Fixed payload; GREEN create/join/bot/start/Memory actions/payout through actual hook with simulated bridge + real Node sockets, zero browser errors. artifacts/v2/browser/bridge-before.json and bridge-after.json. No remaining important review findings; no native Activity/device acceptance implied.
-- Local SDK35 is absent (only37 installed); use existing Android CI for Gradle tests/lint/debug+release assemblies. Do not install tooling or touch physical devices.
-- Sandboxed loopback tests EACCES require approved escalation; GitHub keyring authentication verified with network access. Initial push auto-review rejection was resolved by direct user approval; web push succeeded. CI operations use git/gh, no GitHub plugin.
-- Legacy timing fixtures explicitly pin V1 games; advancing arbitrary +1000ms can skip entire rounds now that deadline catch-up is correct.
-- Staging reports: artifacts/v2/android-port/REPORT.md and artifacts/v2/android-host/REPORT.md. Final host + V2ServerProtocolTest recopied after constructor fix. Source files now integrated; keep staging evidence until integrated CI/artifacts verified.
+## Observed evidence
+- Web full cf:verify PASS:92 engine/client +18 Worker tests, build/typechecks, dry run, actual local SQLite/WebSocket tournament/private-action/restart/deadline recovery. CI40361090266 green.
+- Android shared verify PASS100/100, typecheck/build/asset sync. Separate-module native compile on existing JDK17/compiler2.2.10 language/API1.9 PASS75/75. CI40362713620 confirms75 Gradle tests, lint0errors/14warnings, debug/release assembly.
+- Browser32 game/viewport cases at360x640/390x844/768x1024/1366x768; touch/mouse/roles/results/phase transitions/focus/reduced-motion/orientation, >=44px targets, no horizontal overflow. Compact Mirror fits short phone; longer boards/results scroll.
+- Actual App rooms: three real browser clients +debug bot, Memory/Safecracker actions/privacy/payout. Wi-Fi HTTP confirms insecure-context IDs. Actual Android hostGame hook with simulated bridge RED→GREEN protocol rejection/create/join/start/Memory/payout. No native Activity/service/physical acceptance implied.
+- Independent reviews: four web findings fixed RED→GREEN (logical recovery, varied Circuit route, stale stage, payout explanation); one Android host payload finding fixed via actual hook reproduction. Explicit PASS-null serialization and HostService constructor callback compatibility also regression-tested. No deferred important/minor review findings.
 
-## Exact next action
-Commit/push Android branch, inspect exact failing CI job if any, obtain debug/release APKs and verify version/signature/assets/hashes. Record both candidates and pending physical/public acceptance, clean only disposable task scratch. Update docs/worklog on both branches without product drift. Stop at reviewable candidates, no merge/deploy/publication.
+## APK handoff
+Directory artifacts/v2/android-candidate, source b012a74 /CI40362713620. Both package com.betbrawl.app/version2.0.0/code2/min24/target35; all8new IDs present.
+- BET-BRAWL-V2-2.0.0-debug-b012a74.apk:6482185bytes, SHA256 d63392e5acc6504ba1a9cfc9c3d54141aabcb39bb4281954b0aa6b2899ec8475. Android Debug certificate/APKv2 signature verifies.
+- BET-BRAWL-V2-2.0.0-release-unsigned-b012a74.apk:5194806bytes, SHA256 bf068fa0fea5548aec0dd6854019219e964d3df62a02693ad2bd8b7a3eca6e98. Unsigned; existing release identity needed before installation. Signing CI step skipped, no key created.
+- Debug/release assets3/3 byte-identical. Local JS/CSS byte-identical to CI; HTML differs only by one blank line. Independent aapt/apksigner logs +verification.json retained. artifacts/v2/android-ci-reports contains actual75-test and lint reports. See docs/V2_CANDIDATE.md for links/provenance/manual steps.
+
+## Environment and useful evidence
+- Local SDK35 absent (only37); CI performed required Gradle checks. Existing SDK37 tools verified artifacts. Bundled real Python: C:/Users/Administrator/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe. Windows python alias/py has no installation.
+- Loopback tests need approved escalation; GitHub uses Windows git/gh keyring. Initial push rejection resolved by direct owner approval. Recurring follow-up rejected as persistent actions; no automation was created, handoff completed in-chat.
+- Removed15 task-created staged duplicate/script/patch files and6 staging/compiler directories after absolute-path audit (artifacts/v2/cleanup-manifest.json). Preserved reports/logs/browser evidence/APKs and the integrated native runner/dependency. All artifacts/v1 and other user evidence untouched.
+
+## Next action
+Owner reviews the two candidates and performs physical Android/LAN +public online manual acceptance. Established release signing, merge/deployment/publication and frozen-branch retirement require separate authorization. No further product implementation is scheduled.

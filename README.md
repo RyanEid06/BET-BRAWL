@@ -42,7 +42,7 @@ Bets stay private until payout. VOID refunds bets and adds no qualifier fighter 
 
 Native NSD/mDNS discovery has UDP fallback and stale-entry cleanup. QR invites use `brawl://join?host=<RFC1918-IP>&port=<port>&room=<code>`; invalid addresses, loopback/link-local guest targets, ambiguous parameters and invalid ports are rejected. Cold and warm intents share the parser. HostService publishes hosting readiness only after bind success and keeps serving through Activity recreation.
 
-[Release evidence and user follow-up](V1_RELEASE_REPORT.md) distinguish automated tests/CI from manual Android acceptance. No ADB, emulator, APK installation, physical LAN/QR/deep-link testing, or new signing identity is part of this coding task.
+[V2 candidate evidence and verified APKs](docs/V2_CANDIDATE.md) distinguish automated tests/CI from manual Android acceptance; [V1 release evidence](V1_RELEASE_REPORT.md) remains historical. V2 passes 100 shared tests and 75 Kotlin tests, with both candidate CIs green. The debug APK is verified and available under `artifacts/v2/android-candidate/`; release assembly is unsigned. No ADB, emulator, APK installation, physical LAN/QR/deep-link testing, or new signing identity is part of this coding task.
 
 ## Signing
 
@@ -50,6 +50,6 @@ Release assembly without an established signing configuration produces an unsign
 
 ## Repository
 
-One canonical Git database, with variants represented by branches. External managed worktrees may be used temporarily; never nest a clone/worktree or ZIP pseudo-branch under this root. See [CODEX_WORKLOG.md](CODEX_WORKLOG.md) for the current checkpoint and [release brief](docs/V1_RELEASE_BRIEF.md) for the original scope; the owner's later scope correction in the worklog takes precedence.
+One canonical Git database, with variants represented by branches. External managed worktrees may be used temporarily; never nest a clone/worktree or ZIP pseudo-branch under this root. See [CODEX_WORKLOG.md](CODEX_WORKLOG.md) for the checkpoint and the [V2 plan](docs/superpowers/plans/2026-10-26-v2-games.md) for current scope. Historical V1 release documents remain unchanged.
 
 Natural Earth map geometry used by Blind Pinpoint is public domain.
