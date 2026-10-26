@@ -6,6 +6,8 @@ This is the private `codex/v2-games-web` candidate, version **2.0.0**, using pro
 
 The [approved plan](docs/superpowers/plans/2026-10-26-v2-games.md), [candidate evidence](docs/V2_CANDIDATE.md), and [worklog](CODEX_WORKLOG.md) record implementation and acceptance. New hosts explicitly reject incompatible clients; all participants need the same version. Secret drafts, guesses and choices are projected per viewer, and server deadlines survive reconnect/restart. A shuffled bag exhausts all games before repeating.
 
+Both reviewable candidates are verified: [web CI40361090266](https://github.com/RyanEid06/BET-BRAWL/actions/runs/40361090266) at `c1e03cf`, and [Android CI40362713620](https://github.com/RyanEid06/BET-BRAWL/actions/runs/40362713620) at `b012a74`. The [handoff](docs/V2_CANDIDATE.md) records the verified debug APK, unsigned release APK, hashes and remaining manual acceptance. V1 branches are unchanged; no candidate merge, deployment or publication has occurred.
+
 An online party game for 3–9 players, hosted on Cloudflare. React/Vite assets and a Worker share the HTTPS origin. Each room code routes to exactly one authoritative SQLite Durable Object; clients communicate over WSS. Players can use different networks. Internet is required.
 
 The production web target does not use Express, Render, an Android host, or a laptop server. `server.ts` is a tested local Node/LAN behavioral reference and development option only.
