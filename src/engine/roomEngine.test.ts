@@ -10,6 +10,8 @@ import {
   applyQualifierMatchResolution,
   getFinalTournamentStandings,
   selectMiniGame,
+  drawMiniGame,
+  MINI_GAME_ROTATION,
   MIN_PLAYERS_TO_START,
   MAX_PLAYERS_CAPACITY,
 } from './roomEngine.ts';
@@ -22,6 +24,16 @@ function createMockRoster(count: number): Player[] {
   }
   return players;
 }
+
+test('V2 bag exposes every game before repeating and avoids adjacent refill repeats', () => {
+  const bag: typeof MINI_GAME_ROTATION = [];
+  const drawn: typeof MINI_GAME_ROTATION = [];
+  for (let i = 0; i < MINI_GAME_ROTATION.length * 2; i++) drawn.push(drawMiniGame(bag, () => 0.5, drawn.at(-1)));
+  assert.equal(new Set(drawn.slice(0, 14)).size, 14);
+  assert.equal(new Set(drawn.slice(14, 28)).size, 14);
+  assert.notEqual(drawn[13], drawn[14]);
+  assert.equal(bag.length, 0);
+});
 
 test('qualifier resolution owns exactly the requested match and ignores replay', () => {
   const players = createMockRoster(3);

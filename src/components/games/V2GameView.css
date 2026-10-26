@@ -1,0 +1,108 @@
+.v2-game{width:100%;max-width:36rem;min-width:0;margin:auto;padding:1rem;display:flex;flex-direction:column;gap:1rem;border:1px solid #155e75;border-radius:1.5rem;background:#020617ed;color:#f1f5f9;font-size:.9rem;line-height:1.5;overflow-wrap:anywhere}
+
+.v2-game *{box-sizing:border-box;min-width:0}
+.v2-game h3{font-size:1.5rem;font-weight:900;line-height:1.2}
+.v2-game h4{font-weight:800;font-size:1rem}
+.v2-header{display:flex;justify-content:space-between;align-items:center;gap:.75rem}
+.v2-eyebrow{font-size:.7rem;color:#67e8f9;text-transform:uppercase;letter-spacing:.08em;margin-bottom:.3rem}
+.v2-clock{text-align:center;flex:0 0 auto;background:#172033;border-radius:.8rem;padding:.4rem .65rem}
+.v2-clock strong{display:block;font-size:1.4rem;font-variant-numeric:tabular-nums}
+.v2-clock span{font-size:.65rem;color:#cbd5e1;display:block}
+.v2-rules,.v2-muted{color:#cbd5e1;font-size:.8rem}
+.v2-notice{padding:.7rem .8rem;background:#172033;border-radius:.7rem}
+.v2-feedback{color:#a5f3fc;font-size:.8rem;min-height:1.3rem}
+.v2-watch{padding:2rem .5rem;text-align:center;color:#cbd5e1;border:1px dashed #475569;border-radius:.8rem}
+.v2-watch p{margin-top:.5rem}
+.v2-game button,.v2-game select{min-height:44px;border:1px solid #64748b;border-radius:.65rem;padding:.55rem .65rem;background:#1e293b;color:#f8fafc;font:inherit;font-weight:700;touch-action:manipulation}
+.v2-game button{cursor:pointer}
+.v2-game button:disabled{cursor:default;opacity:.65}
+.v2-game button:focus-visible,.v2-game select:focus-visible,.v2-game input:focus-visible{outline:3px solid #fbbf24;outline-offset:3px}
+.v2-game button:not(:disabled):hover{background:#334155}
+.v2-game button:not(:disabled):active{background:#475569}
+.v2-game button[aria-pressed=true]{border:2px solid #67e8f9;background:#164e63}
+.v2-game .v2-primary{background:#0e7490;border-color:#22d3ee}
+.v2-game .v2-primary:not(:disabled):hover{background:#0891b2}
+.v2-grid{display:grid;gap:.4rem;width:100%;max-width:24rem;align-self:center}
+.v2-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}
+.v2-grid-4{grid-template-columns:repeat(4,minmax(0,1fr))}
+.v2-grid-5{grid-template-columns:repeat(5,minmax(0,1fr));gap:.25rem}
+.v2-tile{aspect-ratio:1;display:flex;align-items:center;justify-content:center;background:#172033;border:1px solid #475569;border-radius:.65rem;position:relative}
+.v2-grid-3 .v2-tile{font-size:1.15rem}
+.v2-palette{display:flex;flex-wrap:wrap;gap:.4rem}
+.v2-palette button{flex:1 0 22%}
+.v2-actions{display:flex;gap:.5rem}
+.v2-actions button{flex:1}
+.v2-scene{aspect-ratio:1;position:relative;width:100%;max-width:24rem;align-self:center;border:1px solid #475569;border-radius:1rem;background:#0f172a;overflow:hidden}
+.v2-object{position:absolute;color:#94a3b8;font-size:clamp(1rem,5vw,1.7rem);line-height:1}
+.v2-target{color:#fbbf24}
+.v2-estimate{display:flex;flex-direction:column;align-items:center;gap:.4rem;font-weight:700}
+.v2-estimate output{font-size:3rem;color:#fbbf24;line-height:1.2;font-variant-numeric:tabular-nums}
+.v2-estimate input{width:100%;min-height:44px;accent-color:#22d3ee;cursor:pointer}
+.v2-reference{display:flex;align-items:center;justify-content:center;gap:1rem;color:#67e8f9;font-weight:700}
+.v2-shape{width:100%;max-width:6rem;aspect-ratio:1;display:block;margin:auto;color:#67e8f9}
+.v2-reference .v2-shape{margin:0;width:5rem}
+.v2-choices{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.6rem}
+.v2-choices button{display:flex;flex-direction:column;gap:.5rem;align-items:center}
+.v2-code{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.5rem}
+.v2-code label{display:flex;flex-direction:column;gap:.3rem;font-size:.8rem}
+.v2-code select{width:100%;padding:.5rem .3rem}
+.v2-history{display:flex;flex-direction:column;gap:.5rem;list-style:decimal inside}
+.v2-history li{padding:.6rem;background:#172033;border-radius:.6rem}
+.v2-history li span{display:block;color:#cbd5e1;font-size:.8rem}
+.v2-game .v2-grid-4 .v2-tile{padding:0}
+.v2-pipe{width:100%;height:100%;color:#cbd5e1;border-radius:.5rem}
+.v2-game .v2-powered{background:#164e63;border-color:#67e8f9}
+.v2-powered .v2-pipe{color:#67e8f9}
+.v2-port{position:absolute;bottom:0;left:0;font-size:.55rem;font-weight:900;background:#0f172a;color:#f8fafc;border-radius:.2rem;padding:0 .2rem}
+.v2-power-mark{position:absolute;right:.15rem;bottom:0;color:#fbbf24;font-size:.65rem}
+.v2-metrics{font-variant-numeric:tabular-nums;color:#67e8f9;font-weight:700}
+.v2-player-pair{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.5rem}
+.v2-player-pair>div{background:#172033;padding:.7rem;border-radius:.7rem;display:flex;flex-direction:column;gap:.15rem}
+.v2-player-pair span{color:#cbd5e1;font-size:.8rem}
+.v2-duel{display:grid;gap:.5rem}
+.v2-duel button{display:flex;justify-content:space-between;align-items:center;gap:.5rem;padding:.8rem}
+.v2-duel button span{font-size:.8rem;font-weight:400}
+.v2-lanes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.4rem}
+.v2-lanes>div{display:flex;flex-direction:column;align-items:center;gap:.25rem;background:#172033;border-radius:.7rem;padding:.5rem .25rem}
+.v2-lanes span{font-size:.75rem;color:#fcd34d}
+.v2-lanes output{font-size:2rem;font-weight:800;font-variant-numeric:tabular-nums}
+.v2-lanes .v2-actions{width:100%;gap:.25rem;flex-direction:column}
+.v2-lanes .v2-actions button{padding:.4rem 0;min-width:0}
+.v2-game .v2-territory{min-height:44px;aspect-ratio:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:.1rem;line-height:1.1}
+.v2-territory strong{font-size:1.2rem}
+.v2-territory span{font-size:.7rem}
+.v2-game .v2-owner-a{background:#164e63;color:#a5f3fc;opacity:1}
+.v2-game .v2-owner-b{background:#78350f;color:#fde68a;opacity:1}
+.v2-territory:not(:disabled){border:2px solid #67e8f9}
+.v2-outcome{background:#172033;border-left:3px solid #fbbf24;border-radius:.5rem;padding:.75rem;font-size:.8rem}
+.v2-outcome h4{margin-bottom:.3rem}
+.v2-result{padding:1rem;border:1px solid #22d3ee;background:#083344;border-radius:.8rem;text-align:center}
+.v2-result h4{font-size:1.4rem}
+.v2-result p{font-size:.8rem;color:#cffafe}
+.v2-recap{display:flex;flex-direction:column;gap:.5rem}
+.v2-recap h4{margin-top:.3rem}
+@media(min-width:480px){.v2-game{padding:1.5rem}
+.v2-duel{grid-template-columns:repeat(3,minmax(0,1fr))}
+.v2-duel button{flex-direction:column;justify-content:center;text-align:center}
+.v2-lanes>div{padding:.75rem}
+.v2-lanes .v2-actions{flex-direction:row}
+.v2-grid-5{gap:.4rem}
+}
+
+
+/* Short phones need all four timed choices visible with room controls. */
+@media(max-width:700px) and (max-height:740px){
+.v2-game{padding:.65rem;gap:.5rem;border-radius:1rem}
+.v2-game h3{font-size:1.3rem}
+.v2-notice{padding:.5rem .6rem}
+.v2-reference .v2-shape{width:3rem}
+.v2-choices{gap:.4rem}
+.v2-choices button{padding:.4rem;gap:.25rem}
+.v2-choices .v2-shape{max-width:3.5rem}
+.v2-game[aria-label="Memory Heist"] .v2-grid-3{max-width:12rem}
+.v2-game .v2-grid-3 .v2-tile{padding:.25rem;font-size:1rem}
+.v2-game[aria-label="Circuit Sprint"] .v2-grid-4{max-width:16rem}
+.v2-game[aria-label="Pocket Territory"] .v2-grid-5{max-width:16rem}
+}
+
+

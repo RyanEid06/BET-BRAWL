@@ -108,7 +108,7 @@ test('Production Server Integration: full 6-player lifecycle on actual server ha
 
     host.ws.send(JSON.stringify({
       type: 'CREATE_ROOM',
-      payload: { playerName: 'Host Ace', avatar: '⚡' },
+      payload: { protocolVersion: 2, playerName: 'Host Ace', avatar: '⚡' },
     }));
 
     const hostJoin = await host.waitForType('JOIN_SUCCESS');
@@ -131,7 +131,7 @@ test('Production Server Integration: full 6-player lifecycle on actual server ha
 
       client.ws.send(JSON.stringify({
         type: 'JOIN_ROOM',
-        payload: { roomCode, playerName: `Player ${i}`, avatar: '🦊' },
+        payload: { protocolVersion: 2, roomCode, playerName: `Player ${i}`, avatar: '🦊' },
       }));
 
       const joinSuccess = await client.waitForType('JOIN_SUCCESS');
@@ -171,6 +171,9 @@ test('Production Server Integration: full 6-player lifecycle on actual server ha
     });
 
     // 6. Host starts game
+    // Keep this V1 lifecycle fixture focused on its original betting/payout behavior.
+    // Shuffled-bag coverage lives in roomEngine.test.ts.
+    server.getActiveRoom()!.gameBag = ['millisecond_stop'];
     host.ws.send(JSON.stringify({ type: 'START_GAME' }));
 
     // Progresses to FIGHTER_REVEAL
@@ -251,7 +254,7 @@ test('Production Server Integration: full 6-player lifecycle on actual server ha
     allClients.push(rogue);
     rogue.ws.send(JSON.stringify({
       type: 'CREATE_ROOM',
-      payload: { playerName: 'Rogue', avatar: '💀' },
+      payload: { protocolVersion: 2, playerName: 'Rogue', avatar: '💀' },
     }));
     const rogueErr = await rogue.waitForType('JOIN_ERROR');
     assert.equal(rogueErr.payload.code, 'ROOM_ALREADY_ACTIVE');
@@ -274,19 +277,19 @@ test('Production Server: old-socket reconnect race safety', async () => {
   try {
     // 1. Host creates room
     const host = await createTestWsClient(wsUrl);
-    host.ws.send(JSON.stringify({ type: 'CREATE_ROOM', payload: { playerName: 'Host' } }));
+    host.ws.send(JSON.stringify({ type: 'CREATE_ROOM', payload: { protocolVersion: 2, playerName: 'Host' } }));
     const hostJoin = await host.waitForType('JOIN_SUCCESS');
     const roomCode = hostJoin.payload.roomCode;
 
     // 2. Player joins on Socket 1
     const socket1 = await createTestWsClient(wsUrl);
-    socket1.ws.send(JSON.stringify({ type: 'JOIN_ROOM', payload: { roomCode, playerName: 'ReconnectTester' } }));
+    socket1.ws.send(JSON.stringify({ type: 'JOIN_ROOM', payload: { protocolVersion: 2, roomCode, playerName: 'ReconnectTester' } }));
     const pJoin = await socket1.waitForType('JOIN_SUCCESS');
     const token = pJoin.payload.sessionToken;
 
     // 3. Socket 2 reconnects using same token BEFORE socket 1 closes
     const socket2 = await createTestWsClient(wsUrl);
-    socket2.ws.send(JSON.stringify({ type: 'JOIN_ROOM', payload: { roomCode, sessionToken: token } }));
+    socket2.ws.send(JSON.stringify({ type: 'JOIN_ROOM', payload: { protocolVersion: 2, roomCode, sessionToken: token } }));
     const reconSuccess = await socket2.waitForType('JOIN_SUCCESS');
     assert.equal(reconSuccess.payload.sessionToken, token);
 
@@ -327,18 +330,18 @@ test('Production Server: host reconnect grace timer survives mini-game resolutio
     // Use a real three-player room; debug never bypasses the minimum.
     const host = await createTestWsClient(wsUrl);
     clients.push(host);
-    host.ws.send(JSON.stringify({ type: 'CREATE_ROOM', payload: { playerName: 'Host' } }));
+    host.ws.send(JSON.stringify({ type: 'CREATE_ROOM', payload: { protocolVersion: 2, playerName: 'Host' } }));
     const hostJoin = await host.waitForType('JOIN_SUCCESS');
     const hostToken = hostJoin.payload.sessionToken;
     const roomCode = hostJoin.payload.roomCode;
 
     const p2 = await createTestWsClient(wsUrl);
     clients.push(p2);
-    p2.ws.send(JSON.stringify({ type: 'JOIN_ROOM', payload: { roomCode, playerName: 'P2' } }));
+    p2.ws.send(JSON.stringify({ type: 'JOIN_ROOM', payload: { protocolVersion: 2, roomCode, playerName: 'P2' } }));
     await p2.waitForType('JOIN_SUCCESS');
     const p3 = await createTestWsClient(wsUrl);
     clients.push(p3);
-    p3.ws.send(JSON.stringify({ type: 'JOIN_ROOM', payload: { roomCode, playerName: 'P3' } }));
+    p3.ws.send(JSON.stringify({ type: 'JOIN_ROOM', payload: { protocolVersion: 2, roomCode, playerName: 'P3' } }));
     await p3.waitForType('JOIN_SUCCESS');
     p2.ws.send(JSON.stringify({ type: 'TOGGLE_READY' }));
     p3.ws.send(JSON.stringify({ type: 'TOGGLE_READY' }));
@@ -371,7 +374,7 @@ test('Production Server: host reconnect grace timer survives mini-game resolutio
     // Host reconnects before grace timer expires
     const newHostSocket = await createTestWsClient(wsUrl);
     clients.push(newHostSocket);
-    newHostSocket.ws.send(JSON.stringify({ type: 'JOIN_ROOM', payload: { roomCode, sessionToken: hostToken } }));
+    newHostSocket.ws.send(JSON.stringify({ type: 'JOIN_ROOM', payload: { protocolVersion: 2, roomCode, sessionToken: hostToken } }));
     const recon = await newHostSocket.waitForType('JOIN_SUCCESS');
     assert.equal(recon.payload.isHost, true);
 
@@ -398,13 +401,13 @@ test('Production Server: disconnected lobby seats free capacity after grace expi
   try {
     const host = await createTestWsClient(wsUrl);
     clients.push(host);
-    host.ws.send(JSON.stringify({ type: 'CREATE_ROOM', payload: { playerName: 'Host' } }));
+    host.ws.send(JSON.stringify({ type: 'CREATE_ROOM', payload: { protocolVersion: 2, playerName: 'Host' } }));
     const hostJoin = await host.waitForType('JOIN_SUCCESS');
     const roomCode = hostJoin.payload.roomCode;
 
     // Player joins
     const player = await createTestWsClient(wsUrl);
-    player.ws.send(JSON.stringify({ type: 'JOIN_ROOM', payload: { roomCode, playerName: 'Leaver' } }));
+    player.ws.send(JSON.stringify({ type: 'JOIN_ROOM', payload: { protocolVersion: 2, roomCode, playerName: 'Leaver' } }));
     await player.waitForType('JOIN_SUCCESS');
 
     const room = server.getActiveRoom()!;
@@ -438,13 +441,13 @@ test(`Production Server: rejects fewer than 3 connected players (debug=${debugMo
   try {
     const host = await createTestWsClient(wsUrl);
     clients.push(host);
-    host.ws.send(JSON.stringify({ type: 'CREATE_ROOM', payload: { playerName: 'Host', debugMode } }));
+    host.ws.send(JSON.stringify({ type: 'CREATE_ROOM', payload: { protocolVersion: 2, playerName: 'Host', debugMode } }));
     const hostJoin = await host.waitForType('JOIN_SUCCESS');
     const roomCode = hostJoin.payload.roomCode;
 
     const p2 = await createTestWsClient(wsUrl);
     clients.push(p2);
-    p2.ws.send(JSON.stringify({ type: 'JOIN_ROOM', payload: { roomCode, playerName: 'P2' } }));
+    p2.ws.send(JSON.stringify({ type: 'JOIN_ROOM', payload: { protocolVersion: 2, roomCode, playerName: 'P2' } }));
     await p2.waitForType('JOIN_SUCCESS');
 
     // Both ready, but only 2 players
@@ -484,20 +487,20 @@ test('Production Server: full 3-player Tournament Lifecycle (3 Qualifiers -> Cha
     // 1. Connect Host and 2 additional players
     const host = await createTestWsClient(wsUrl);
     clients.push(host);
-    host.ws.send(JSON.stringify({ type: 'CREATE_ROOM', payload: { playerName: 'Ace (Host)', avatar: '⚡' } }));
+    host.ws.send(JSON.stringify({ type: 'CREATE_ROOM', payload: { protocolVersion: 2, playerName: 'Ace (Host)', avatar: '⚡' } }));
     const hostJoin = await host.waitForType('JOIN_SUCCESS');
     const roomCode = hostJoin.payload.roomCode;
     const p1Id = hostJoin.payload.player.id;
 
     const p2 = await createTestWsClient(wsUrl);
     clients.push(p2);
-    p2.ws.send(JSON.stringify({ type: 'JOIN_ROOM', payload: { roomCode, playerName: 'Blaze', avatar: '🔥' } }));
+    p2.ws.send(JSON.stringify({ type: 'JOIN_ROOM', payload: { protocolVersion: 2, roomCode, playerName: 'Blaze', avatar: '🔥' } }));
     const p2Join = await p2.waitForType('JOIN_SUCCESS');
     const p2Id = p2Join.payload.player.id;
 
     const p3 = await createTestWsClient(wsUrl);
     clients.push(p3);
-    p3.ws.send(JSON.stringify({ type: 'JOIN_ROOM', payload: { roomCode, playerName: 'Cipher', avatar: '🔮' } }));
+    p3.ws.send(JSON.stringify({ type: 'JOIN_ROOM', payload: { protocolVersion: 2, roomCode, playerName: 'Cipher', avatar: '🔮' } }));
     const p3Join = await p3.waitForType('JOIN_SUCCESS');
     const p3Id = p3Join.payload.player.id;
 
@@ -517,6 +520,7 @@ test('Production Server: full 3-player Tournament Lifecycle (3 Qualifiers -> Cha
     });
 
     // 3. Host starts tournament
+    server.getActiveRoom()!.gameBag = ['millisecond_stop'];
     host.ws.send(JSON.stringify({ type: 'START_GAME' }));
 
     const r1State = await host.waitForRoomState(s => s.phase === 'FIGHTER_REVEAL' && s.currentRound?.roundNumber === 1, 5000);
@@ -628,6 +632,7 @@ test('Production Server: full 3-player Tournament Lifecycle (3 Qualifiers -> Cha
       assert.ok(recap.currentRound?.payouts.length! >= 1);
 
       // Host advances to next round
+      activeRoom.gameBag = [q % 2 === 1 ? 'quick_draw' : 'millisecond_stop'];
       host.ws.send(JSON.stringify({ type: 'NEXT_ROUND' }));
     }
 
@@ -690,6 +695,7 @@ test('Production Server: full 3-player Tournament Lifecycle (3 Qualifiers -> Cha
     assert.equal(activeRoom.tournamentSchedule?.championId, null, 'Champion must not be crowned after 1 win');
     assertQualifierPointsInvariant('after Championship Game 1');
 
+    activeRoom.gameBag = ['millisecond_stop'];
     host.ws.send(JSON.stringify({ type: 'NEXT_ROUND' }));
 
     // --- Championship Game 2: TIE Result (Score stays 1-0, Series Extends!) ---
@@ -712,6 +718,7 @@ test('Production Server: full 3-player Tournament Lifecycle (3 Qualifiers -> Cha
     assert.equal(activeRoom.tournamentSchedule?.championId, null, 'Tied game never crowns a champion; series extends');
     assertQualifierPointsInvariant('after Championship Game 2 (Tie)');
 
+    activeRoom.gameBag = ['quick_draw'];
     host.ws.send(JSON.stringify({ type: 'NEXT_ROUND' }));
 
     // --- Championship Game 3: P2 Wins (Score 1-1, Series Equalized) ---
@@ -734,6 +741,7 @@ test('Production Server: full 3-player Tournament Lifecycle (3 Qualifiers -> Cha
     assert.equal(activeRoom.tournamentSchedule?.championId, null, 'Champion must not be crowned at 1-1');
     assertQualifierPointsInvariant('after Championship Game 3 (1-1)');
 
+    activeRoom.gameBag = ['millisecond_stop'];
     host.ws.send(JSON.stringify({ type: 'NEXT_ROUND' }));
 
     // --- Championship Game 4: P1 Wins (Score 2-1, Decisive Championship Clinch!) ---
@@ -789,4 +797,3 @@ test('Production Server: full 3-player Tournament Lifecycle (3 Qualifiers -> Cha
     await server.close();
   }
 });
-

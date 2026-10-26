@@ -4,9 +4,11 @@ on:
   push:
     branches:
       - v1-web-cloudflare-ready
+      - codex/v2-games-web
   pull_request:
     branches:
       - v1-web-cloudflare-ready
+      - codex/v2-games-web
 
 permissions:
   contents: read

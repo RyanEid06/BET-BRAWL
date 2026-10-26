@@ -11,6 +11,7 @@ import { STABLE_HIGHER_LOWER_BANK } from '../src/engine/miniGamesCatalog.ts';
 import type { ClientMessage, PublicRoomState, ServerMessage } from '../src/engine/types.ts';
 
 let baseUrl = '';
+const LEGACY_GAME_SEQUENCE = 'millisecond_stop,rapid_red_green,speed_math,millisecond_stop,rapid_red_green,speed_math,higher_lower';
 type Join = Extract<ServerMessage, { type: 'JOIN_SUCCESS' }>['payload'];
 interface Client {
   ws: WebSocket;
@@ -49,7 +50,11 @@ async function connect(code: string): Promise<Client> {
   }
   const client: Client = {
     ws, received, waitFor,
-    send(message: ClientMessage) { ws.send(JSON.stringify(message)); },
+    send(message: ClientMessage) {
+      const versioned = message.type === 'CREATE_ROOM' || message.type === 'JOIN_ROOM'
+        ? { ...message, payload: { ...message.payload, protocolVersion: 2 } } : message;
+      ws.send(JSON.stringify(versioned));
+    },
     async state(predicate: (state: PublicRoomState) => boolean = () => true, timeoutMs = 6000) {
       return (await waitFor('ROOM_STATE', m => predicate(m.payload), timeoutMs)).payload;
     },
@@ -181,6 +186,51 @@ async function tournament() {
   return { host, podium };
 }
 
+async function v2ProtocolAndPrivacy(restart: () => Promise<void>) {
+  const { host, seats } = await readyStart('V2SAFE');
+  const active = await host.client.state(s => s.phase === 'MINIGAME_ACTIVE');
+  const round = active.currentRound!;
+  assert.equal(round.miniGame.id, 'safecracker');
+  assert.ok(round.matchId);
+  assert.doesNotMatch(JSON.stringify(round), /"secret"\s*:/);
+  const fighter = seats.find(s => s.seat.player.id === round.fighterIds[0])!;
+  const opponent = seats.find(s => s.seat.player.id === round.fighterIds[1])!;
+  const spectator = seats.find(s => !round.fighterIds.includes(s.seat.player.id))!;
+  const stageIndex = Number(round.gameState!.stageIndex);
+  const actionId = 'v2-safecracker-1';
+  const validAction = { type: 'FIGHTER_ACTION', payload: {
+    type: 'CODE_GUESS', symbols: [0, 0, 0], matchId: round.matchId!, stageIndex, actionId,
+  } } satisfies ClientMessage;
+  fighter.client.send(validAction);
+  assert.equal((await fighter.client.waitFor('GAME_ACTION_RESULT', m => m.payload.actionId === actionId)).payload.accepted, true);
+  const own = await fighter.client.sync();
+  assert.equal((own.currentRound!.gameState!.mine as { history: unknown[] }).history.length, 1);
+  for (const client of [opponent.client, spectator.client]) {
+    const view = await client.sync();
+    assert.doesNotMatch(JSON.stringify(view.currentRound), /"secret"\s*:/);
+    assert.deepEqual((view.currentRound!.gameState!.mine as { history: unknown[] } | undefined)?.history ?? [], []);
+    assert.equal(JSON.stringify(view.currentRound).includes('"symbols":[0,0,0]'), false);
+  }
+  fighter.client.send(validAction);
+  assert.equal((await fighter.client.waitFor('GAME_ACTION_RESULT', m => m.payload.actionId === actionId)).payload.accepted, true);
+  assert.equal(((await fighter.client.sync()).currentRound!.gameState!.mine as { history: unknown[] }).history.length, 1);
+  fighter.client.send({ type: 'FIGHTER_ACTION', payload: { ...validAction.payload,
+    matchId: 'stale-match', actionId: 'v2-stale-1' } });
+  assert.equal((await fighter.client.waitFor('GAME_ACTION_RESULT', m => m.payload.actionId === 'v2-stale-1')).payload.accepted, false);
+  await restart();
+  for (const seat of seats) seat.client = await resume('V2SAFE', seat.seat);
+  const recovered = await fighter.client.sync();
+  assert.equal(recovered.currentRound!.gameStartsAt, round.gameStartsAt);
+  assert.equal(recovered.currentRound!.gameEndsAt, round.gameEndsAt);
+  assert.equal((recovered.currentRound!.gameState!.mine as { history: unknown[] }).history.length, 1);
+  assert.equal((await spectator.client.sync()).currentRound!.gameState!.mine, undefined);
+  const recap = await host.client.state(s => s.phase === 'PAYOUT_RECAP', 35000);
+  assert.equal(recap.currentRound!.matchId, round.matchId);
+  assert.equal(recap.tournamentSchedule!.qualifiersCompleted, 1);
+  host.client.send({ type: 'CLOSE_ROOM' });
+  console.log('Wrangler: V2 accepted/duplicate/stale actions, owner-only feedback, settled deadline PASS');
+}
+
 async function authorityAndCapacity() {
   const host = await join('AUTH01', 'Host', true);
   host.client.send({ type: 'START_GAME' });
@@ -286,9 +336,11 @@ async function main() {
   const persistence = await mkdtemp(resolve('.wrangler', 'protocol-'));
   let proc: ChildProcess | undefined;
   let logs = '';
-  async function start() {
+  async function start(gameSequence = LEGACY_GAME_SEQUENCE) {
     proc = spawn(process.execPath, [resolve('node_modules/wrangler/bin/wrangler.js'), 'dev', '--local', '--port', String(port),
-      '--persist-to', persistence, '--var', 'BRAWL_TEST_FAST:1', '--log-level', 'error'], { stdio: ['ignore', 'pipe', 'pipe'] });
+      '--persist-to', persistence, '--var', 'BRAWL_TEST_FAST:1',
+      '--var', `BRAWL_TEST_GAME_SEQUENCE:${gameSequence}`,
+      '--log-level', 'error'], { stdio: ['ignore', 'pipe', 'pipe'] });
     proc.stdout!.on('data', data => { logs = (logs + data).slice(-100000); });
     proc.stderr!.on('data', data => { logs = (logs + data).slice(-100000); });
     const deadline = Date.now() + 30000;
@@ -346,6 +398,9 @@ async function main() {
     restored.send({ type: 'CLOSE_ROOM' });
     await restored.waitFor('ROOM_CLOSED');
     console.log('Wrangler: room isolation, real restart/SQLite recovery, pending deadline/bet recovery, authenticated close PASS');
+    await stop();
+    await start('safecracker');
+    await v2ProtocolAndPrivacy(async () => { await stop(); await start('safecracker'); });
     console.log('Cloudflare multiplayer integration: PASS');
   } catch (error) {
     console.error(logs);

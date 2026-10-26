@@ -1,5 +1,5 @@
 {
-  "name": "bet-brawl",
+  "name": "bet-brawl-v2-candidate",
   "main": "./worker/index.ts",
   "compatibility_date": "2026-10-18",
   "compatibility_flags": [

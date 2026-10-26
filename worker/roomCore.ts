@@ -22,8 +22,9 @@ import type {
   TournamentMatch,
   TournamentSchedule,
   TournamentStage,
+  MiniGameId,
 } from '../src/engine/types.ts';
-import { toPublicPlayer } from '../src/engine/types.ts';
+import { toPublicPlayer, BRAWL_PROTOCOL_VERSION } from '../src/engine/types.ts';
 import {
   computeSessionAwards,
   computeTournamentRankings,
@@ -35,6 +36,8 @@ import {
   MIN_PLAYERS_TO_START,
   sanitizePlayerAvatar,
   sanitizePlayerName,
+  drawMiniGame,
+  MINI_GAME_ROTATION,
 } from '../src/engine/roomEngine.ts';
 import {
   calculateDynamicOdds,
@@ -46,12 +49,15 @@ import {
   processFighterAction,
   resolveGameTimeout,
 } from '../src/engine/gameEngine.ts';
+import { initV2Game, advanceV2Game, v2NextDeadline, projectV2Game, getV2BotAction, type V2GameId } from '../src/engine/v2Games.ts';
 
 export interface Env {
   BRAWL_ROOMS: DurableObjectNamespace;
   ASSETS: Fetcher;
   /** Test-only. Never configured in production. */
   BRAWL_TEST_FAST?: string;
+  /** Test-only ordered games for local Wrangler protocol fixtures. */
+  BRAWL_TEST_GAME_SEQUENCE?: string;
 }
 
 interface TimingConfig {
@@ -88,6 +94,8 @@ type ScheduledEventKind =
   | 'BET_TICK'
   | 'START_MINIGAME'
   | 'GAME_TIMEOUT'
+  | 'V2_STAGE'
+  | 'BOT_V2'
   | 'BOT_BET'
   | 'BOT_MILLISECOND_STOP'
   | 'BOT_RED_GREEN'
@@ -117,6 +125,9 @@ interface PersistentRoom {
   currentRound: RoundState | null;
   internalGameState: InternalGameState | null;
   tournamentSchedule: TournamentSchedule | null;
+  tournamentId?: string;
+  gameBag?: MiniGameId[];
+  v2ActionIds?: Record<string, string[]>;
   roundHistory: Array<{
     roundNumber: number;
     miniGameName: string;
@@ -146,6 +157,8 @@ const ROUND_EVENT_KINDS = new Set<ScheduledEventKind>([
   'BET_TICK',
   'START_MINIGAME',
   'GAME_TIMEOUT',
+  'V2_STAGE',
+  'BOT_V2',
   'BOT_BET',
   'BOT_MILLISECOND_STOP',
   'BOT_RED_GREEN',
@@ -240,6 +253,13 @@ export class BrawlRoomCore {
       return;
     }
 
+    if ((msg.type === 'CREATE_ROOM' || msg.type === 'JOIN_ROOM') && msg.payload?.protocolVersion !== BRAWL_PROTOCOL_VERSION) {
+      this.send(ws, { type: 'JOIN_ERROR', timestamp: Date.now(), payload: {
+        code: 'CLIENT_UPDATE_REQUIRED', message: 'This room uses BET-BRAWL V2. Reload or update the game to join.',
+      } });
+      return;
+    }
+
     const attachment = this.getAttachment(ws);
     if (!attachment || attachment.revoked) return;
 
@@ -323,6 +343,8 @@ export class BrawlRoomCore {
       this.room.currentRound = null;
       this.room.internalGameState = null;
       this.room.tournamentSchedule = null;
+      this.room.tournamentId = undefined;
+      this.room.gameBag = [];
       this.room.roundHistory = [];
       this.room.awards = [];
       await this.commitAndBroadcast();
@@ -432,6 +454,7 @@ export class BrawlRoomCore {
       currentRound: null,
       internalGameState: null,
       tournamentSchedule: null,
+      gameBag: [],
       roundHistory: [],
       awards: [],
       scheduledEvents: [],
@@ -449,6 +472,7 @@ export class BrawlRoomCore {
         sessionToken: hostPlayer.sessionToken,
         roomCode,
         isHost: true,
+        protocolVersion: BRAWL_PROTOCOL_VERSION,
       },
     });
     this.broadcastRoomState();
@@ -520,6 +544,7 @@ export class BrawlRoomCore {
           sessionToken: existing.sessionToken,
           roomCode: this.room.roomCode,
           isHost: existing.isHost,
+          protocolVersion: BRAWL_PROTOCOL_VERSION,
         },
       });
       this.broadcastRoomState();
@@ -560,6 +585,7 @@ export class BrawlRoomCore {
         sessionToken: newPlayer.sessionToken,
         roomCode: this.room.roomCode,
         isHost: false,
+        protocolVersion: BRAWL_PROTOCOL_VERSION,
       },
     });
     this.broadcastRoomState();
@@ -605,6 +631,7 @@ export class BrawlRoomCore {
     const schedule = generateTournamentSchedule(connectedPlayers);
 
     this.room.tournamentSchedule = schedule;
+    this.room.tournamentId = crypto.randomUUID();
     this.room.totalRounds = schedule.totalRounds;
     for (const p of Object.values(this.room.players)) {
       p.qualifierPoints = 0;
@@ -678,6 +705,27 @@ export class BrawlRoomCore {
     if (this.room.currentRound.gameStartsAt && now < this.room.currentRound.gameStartsAt) return;
     if (this.room.currentRound.gameEndsAt && now >= this.room.currentRound.gameEndsAt) return;
 
+    const round = this.room.currentRound;
+    const state = this.room.internalGameState.v2;
+    if (state) {
+      const envelope = action as FighterAction & { matchId?: unknown; stageIndex?: unknown; actionId?: unknown };
+      const reject = (reason: string) => this.send(ws, { type: 'GAME_ACTION_RESULT', timestamp: now,
+        payload: { matchId: round.matchId!, stageIndex: state.stageIndex,
+          actionId: typeof envelope?.actionId === 'string' ? envelope.actionId : '', accepted: false, reason } });
+      if (!envelope || envelope.matchId !== round.matchId || envelope.stageIndex !== state.stageIndex ||
+          typeof envelope.actionId !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(envelope.actionId)) {
+        reject('Stale or invalid action'); return;
+      }
+      const seen = this.room.v2ActionIds ??= {};
+      const ids = seen[player.id] ??= [];
+      if (ids.includes(envelope.actionId)) {
+        this.send(ws, { type: 'GAME_ACTION_RESULT', timestamp: now,
+          payload: { matchId: round.matchId!, stageIndex: state.stageIndex, actionId: envelope.actionId, accepted: true } });
+        return;
+      }
+      if (ids.length >= 4096) { reject('Too many actions'); return; }
+    }
+
     const result = processFighterAction(
       this.room.internalGameState,
       this.room.currentRound.fighterScores,
@@ -685,6 +733,19 @@ export class BrawlRoomCore {
       action,
       now,
     );
+
+    let acceptedV2ActionId: string | null = null;
+    if (state) {
+      const envelope = action as FighterAction & { actionId: string };
+      if (result.rejectionReason) {
+        this.send(ws, { type: 'GAME_ACTION_RESULT', timestamp: now,
+          payload: { matchId: round.matchId!, stageIndex: state.stageIndex, actionId: envelope.actionId,
+            accepted: false, reason: result.rejectionReason } });
+        return;
+      }
+      (this.room.v2ActionIds![player.id] ??= []).push(envelope.actionId);
+      acceptedV2ActionId = envelope.actionId;
+    }
 
     if (result.gameStatePatch) {
       this.room.currentRound.gameState = {
@@ -705,6 +766,8 @@ export class BrawlRoomCore {
       this.resolveCurrentGame(result.winnerId, result.isTie);
     }
     await this.commitAndBroadcast();
+    if (acceptedV2ActionId) this.send(ws, { type: 'GAME_ACTION_RESULT', timestamp: Date.now(),
+      payload: { matchId: round.matchId!, stageIndex: state!.stageIndex, actionId: acceptedV2ActionId, accepted: true } });
   }
 
   private startRound(roundNum: number): void {
@@ -747,6 +810,12 @@ export class BrawlRoomCore {
     }
 
     const lastMiniGameId = this.room.currentRound?.miniGame.id;
+    const selectedMiniGameId = drawMiniGame(this.room.gameBag ??= [], Math.random, lastMiniGameId);
+    const fixtureSequence = this.env.BRAWL_TEST_FAST === '1'
+      ? this.env.BRAWL_TEST_GAME_SEQUENCE?.split(',') : undefined;
+    const fixtureGame = fixtureSequence?.[roundNum - 1];
+    const gameId = fixtureGame && MINI_GAME_ROTATION.includes(fixtureGame as MiniGameId)
+      ? fixtureGame as MiniGameId : selectedMiniGameId;
     const { round, internalGame } = initAuthoritativeRound(
       roundNum,
       this.room.totalRounds,
@@ -759,16 +828,22 @@ export class BrawlRoomCore {
       qualifierTotal,
       championshipGameNumber,
       lastMiniGameId,
+      gameId,
     );
 
     const now = Date.now();
     round.revealEndsAt = now + this.timing.revealDurationMs;
     round.bettingEndsAt = round.revealEndsAt + this.timing.bettingDurationSeconds * 1000;
     round.gameStartsAt = round.bettingEndsAt + this.timing.countdownDurationMs;
-    round.gameEndsAt = round.gameStartsAt + round.miniGame.durationSeconds * 1000;
+    const durationMs = internalGame.v2 ? round.miniGame.durationSeconds * 1000
+      : this.timing.gameDurationMs ?? round.miniGame.durationSeconds * 1000;
+    round.gameEndsAt = round.gameStartsAt + durationMs;
+    internalGame.gameStartsAt = round.gameStartsAt;
+    if (internalGame.v2) internalGame.v2 = initV2Game(gameId as V2GameId, round.fighterIds, round.gameStartsAt);
 
     this.room.currentRound = round;
     this.room.internalGameState = internalGame;
+    this.room.v2ActionIds = {};
     this.room.lastPairing = round.fighterIds;
     this.room.phase = 'FIGHTER_REVEAL';
     this.schedule('OPEN_BETTING', round.revealEndsAt, { roundNumber: roundNum });
@@ -785,8 +860,7 @@ export class BrawlRoomCore {
     if (!this.room?.currentRound) return;
     const round = this.room.currentRound;
     this.room.phase = 'BETTING_WINDOW';
-    round.bettingTimeRemaining = this.timing.bettingDurationSeconds;
-    round.bettingEndsAt = Date.now() + this.timing.bettingDurationSeconds * 1000;
+    round.bettingTimeRemaining = Math.max(0, Math.ceil((round.bettingEndsAt! - Date.now()) / 1000));
 
     const botSpectators = Object.values(this.room.players).filter(
       p => p.isBot && !round.fighterIds.includes(p.id),
@@ -796,11 +870,11 @@ export class BrawlRoomCore {
         this.timing.bettingDurationSeconds * 1000 - 500,
         1500 + idx * 1200 + Math.random() * 1500,
       ));
-      this.schedule('BOT_BET', Date.now() + delayMs, { playerId: bot.id, roundNumber: round.roundNumber });
+      this.schedule('BOT_BET', round.revealEndsAt! + delayMs, { playerId: bot.id, roundNumber: round.roundNumber });
     });
 
     const intervalStepMs = this.timing.bettingDurationSeconds <= 3 ? 200 : 1000;
-    this.schedule('BET_TICK', Math.min(round.bettingEndsAt, Date.now() + intervalStepMs), {
+    this.schedule('BET_TICK', Math.min(round.bettingEndsAt!, Date.now() + intervalStepMs), {
       roundNumber: round.roundNumber,
     });
   }
@@ -808,10 +882,7 @@ export class BrawlRoomCore {
   private startMiniGameCountdown(): void {
     if (!this.room?.currentRound) return;
     this.room.phase = 'MINIGAME_COUNTDOWN';
-    this.room.currentRound.gameStartsAt = Date.now() + this.timing.countdownDurationMs;
-    this.room.currentRound.gameEndsAt =
-      this.room.currentRound.gameStartsAt + this.room.currentRound.miniGame.durationSeconds * 1000;
-    this.schedule('START_MINIGAME', this.room.currentRound.gameStartsAt, {
+    this.schedule('START_MINIGAME', this.room.currentRound.gameStartsAt!, {
       roundNumber: this.room.currentRound.roundNumber,
     });
   }
@@ -821,13 +892,19 @@ export class BrawlRoomCore {
     const round = this.room.currentRound;
     const internal = this.room.internalGameState;
     this.room.phase = 'MINIGAME_ACTIVE';
-    round.gameStartsAt = Date.now();
-    const durationMs = this.timing.gameDurationMs ?? round.miniGame.durationSeconds * 1000;
-    round.gameEndsAt = round.gameStartsAt + durationMs;
-    internal.gameStartsAt = round.gameStartsAt;
+    internal.gameStartsAt = round.gameStartsAt!;
+
+    if (internal.v2) {
+      advanceV2Game(internal.v2, round.gameStartsAt!);
+      const next = v2NextDeadline(internal.v2);
+      if (next !== null) this.schedule('V2_STAGE', next, { matchId: round.matchId });
+      for (const fighterId of round.fighterIds) {
+        if (this.findPlayerById(fighterId)?.isBot) this.schedule('BOT_V2', round.gameStartsAt! + 250, { matchId: round.matchId, playerId: fighterId });
+      }
+    }
 
     if (round.miniGame.id === 'quick_draw' && internal.quickDraw) {
-      internal.quickDraw.drawAt = round.gameStartsAt + internal.quickDraw.drawDelayMs;
+      internal.quickDraw.drawAt = round.gameStartsAt! + internal.quickDraw.drawDelayMs;
       if (round.gameConfig) round.gameConfig.drawAt = internal.quickDraw.drawAt;
     }
 
@@ -869,7 +946,7 @@ export class BrawlRoomCore {
       }
     }
 
-    this.schedule('GAME_TIMEOUT', round.gameEndsAt, { roundNumber: round.roundNumber });
+    this.schedule('GAME_TIMEOUT', round.gameEndsAt!, { roundNumber: round.roundNumber, matchId: round.matchId });
   }
 
   private resolveCurrentGame(
@@ -977,9 +1054,44 @@ export class BrawlRoomCore {
   private async handleScheduledEvent(event: ScheduledEvent): Promise<void> {
     if (!this.room) return;
     const roundNumber = Number(event.payload?.roundNumber ?? -1);
-    const sameRound = !this.room.currentRound || roundNumber < 0 || this.room.currentRound.roundNumber === roundNumber;
+    const sameRound = (!this.room.currentRound || roundNumber < 0 || this.room.currentRound.roundNumber === roundNumber) &&
+      (!event.payload?.matchId || this.room.currentRound?.matchId === event.payload.matchId);
 
     switch (event.kind) {
+      case 'V2_STAGE': {
+        const round = this.room.currentRound;
+        const state = this.room.internalGameState?.v2;
+        if (!round || !state || this.room.phase !== 'MINIGAME_ACTIVE' || event.payload?.matchId !== round.matchId) break;
+        advanceV2Game(state, Date.now());
+        if (state.finished) {
+          Object.assign(round.fighterScores, state.scores);
+          this.resolveCurrentGame(state.winnerId, !state.winnerId);
+        } else {
+          const next = v2NextDeadline(state);
+          if (next !== null) this.schedule('V2_STAGE', next, { matchId: round.matchId });
+        }
+        break;
+      }
+      case 'BOT_V2': {
+        const round = this.room.currentRound;
+        const state = this.room.internalGameState?.v2;
+        if (!round || !state || this.room.phase !== 'MINIGAME_ACTIVE' || event.payload?.matchId !== round.matchId) break;
+        const playerId = String(event.payload?.playerId ?? '');
+        if (!this.findPlayerById(playerId)?.isBot || !round.fighterIds.includes(playerId)) break;
+        advanceV2Game(state, Date.now());
+        if (state.finished) break;
+        const view = projectV2Game(state, playerId, Date.now());
+        const action = getV2BotAction(view);
+        if (action) {
+          const result = processFighterAction(this.room.internalGameState!, round.fighterScores, playerId,
+            { ...action, matchId: round.matchId!, stageIndex: state.stageIndex, actionId: crypto.randomUUID() } as FighterAction, Date.now());
+          if (result.resolved) { this.resolveCurrentGame(result.winnerId, result.isTie); break; }
+        }
+        const next = v2NextDeadline(state);
+        this.schedule('BOT_V2', Math.min(next ?? round.gameEndsAt!, Date.now() + 500) + 1,
+          { matchId: round.matchId, playerId });
+        break;
+      }
       case 'OPEN_BETTING':
         if (sameRound && this.room.phase === 'FIGHTER_REVEAL') this.openBettingWindow();
         break;
@@ -1225,6 +1337,13 @@ export class BrawlRoomCore {
       if (!player) continue;
 
       let tailoredRound = publicRound;
+      const v2 = this.room.internalGameState?.v2;
+      if (publicRound && v2) {
+        const viewTime = this.room.phase === 'MINIGAME_ACTIVE' || this.room.phase === 'PAYOUT_RECAP' || this.room.phase === 'FINAL_PODIUM'
+          ? Date.now() : Math.min(Date.now(), v2.startsAt - 1);
+        const view = projectV2Game(v2, player.id, viewTime, this.room.phase === 'PAYOUT_RECAP');
+        tailoredRound = { ...publicRound, gameConfig: view.config, gameState: view.state, fighterScores: view.scores };
+      }
       if (
         publicRound &&
         publicRound.miniGame.id === 'higher_lower' &&
@@ -1296,7 +1415,7 @@ export class BrawlRoomCore {
 
   private schedule(kind: ScheduledEventKind, at: number, payload?: Record<string, unknown>): void {
     if (!this.room) return;
-    this.room.scheduledEvents.push({ id: eventId(kind), kind, at: Math.max(Date.now(), Math.floor(at)), payload });
+    this.room.scheduledEvents.push({ id: eventId(kind), kind, at: Math.floor(at), payload });
   }
 
   private removeEvents(predicate: (event: ScheduledEvent) => boolean): void {

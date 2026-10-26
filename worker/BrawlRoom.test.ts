@@ -46,6 +46,7 @@ class FakeContext {
 
 const env = {
   BRAWL_TEST_FAST: '1',
+  BRAWL_TEST_GAME_SEQUENCE: 'millisecond_stop',
   BRAWL_ROOMS: {} as DurableObjectNamespace,
   ASSETS: {} as Fetcher,
 };
@@ -58,12 +59,15 @@ function attach(ctx: FakeContext, roomCode: string): FakeSocket {
 }
 
 async function send(room: BrawlRoomCore, ws: FakeSocket, message: unknown) {
-  await room.webSocketMessage(ws as unknown as WebSocket, JSON.stringify(message));
+  const msg = message as { type?: string; payload?: Record<string, unknown> };
+  const withVersion = msg.type === 'CREATE_ROOM' || msg.type === 'JOIN_ROOM'
+    ? { ...msg, payload: { ...msg.payload, protocolVersion: 2 } } : msg;
+  await room.webSocketMessage(ws as unknown as WebSocket, JSON.stringify(withVersion));
 }
 
-async function lobby(names = ['Host', 'P2', 'P3'], debugMode = false) {
+async function lobby(names = ['Host', 'P2', 'P3'], debugMode = false, environment: ConstructorParameters<typeof BrawlRoomCore>[1] = env) {
   const ctx = new FakeContext();
-  const room = new BrawlRoomCore(ctx as unknown as DurableObjectState, env);
+  const room = new BrawlRoomCore(ctx as unknown as DurableObjectState, environment);
   await ctx.ready();
   const sockets: FakeSocket[] = [];
   for (const [index, playerName] of names.entries()) {
@@ -98,6 +102,105 @@ async function runAlarmAt(room: BrawlRoomCore, at: number) {
   Date.now = () => at;
   try { await room.alarm(); } finally { Date.now = originalNow; }
 }
+
+async function sendAt(room: BrawlRoomCore, ws: FakeSocket, message: unknown, at: number) {
+  const originalNow = Date.now;
+  Date.now = () => at;
+  try { await send(room, ws, message); } finally { Date.now = originalNow; }
+}
+
+test('old clients receive an explicit update error before taking a room seat', async () => {
+  const ctx = new FakeContext();
+  const room = new BrawlRoomCore(ctx as unknown as DurableObjectState, env);
+  await ctx.ready();
+  const socket = attach(ctx, 'VERSION');
+  await room.webSocketMessage(socket as unknown as WebSocket, JSON.stringify({ type: 'CREATE_ROOM', payload: { playerName: 'Old' } }));
+  assert.equal(socket.find('JOIN_ERROR')?.payload.code, 'CLIENT_UPDATE_REQUIRED');
+  assert.equal(ctx.storage.values.has('activeRoom'), false);
+});
+
+test('V2 Memory study disappears and owner drafts stay private across room views', async () => {
+  const { ctx, room, host, sockets } = await lobby(undefined, false, { ...env, BRAWL_TEST_FAST: undefined });
+  (room as unknown as { room: { gameBag: string[] } }).room.gameBag = ['memory_heist'];
+  await send(room, host, { type: 'START_GAME' });
+  assert.equal(host.lastState()!.currentRound!.miniGame.id, 'memory_heist');
+  await runAlarmAt(room, host.lastState()!.currentRound!.revealEndsAt!);
+  await runAlarmAt(room, host.lastState()!.currentRound!.bettingEndsAt!);
+  await runAlarmAt(room, host.lastState()!.currentRound!.gameStartsAt!);
+  assert.equal(host.lastState()!.phase, 'MINIGAME_ACTIVE');
+  const active = host.lastState()!.currentRound!;
+  assert.ok(active.gameConfig && 'board' in active.gameConfig);
+  await runAlarmAt(room, active.gameStartsAt! + 4000);
+  const afterStudy = host.lastState()!.currentRound!;
+  assert.equal(afterStudy.gameState?.phase, 'draft');
+  assert.equal('board' in (afterStudy.gameConfig || {}), false);
+  assert.equal('answer' in (afterStudy.gameState || {}), false);
+  const fighter = sockets.find(s => s.lastState()!.currentRound!.fighterIds.includes(s.find('JOIN_SUCCESS')!.payload.player.id))!;
+  const spectator = sockets.find(s => !s.lastState()!.currentRound!.fighterIds.includes(s.find('JOIN_SUCCESS')!.payload.player.id))!;
+  await sendAt(room, fighter, { type: 'FIGHTER_ACTION', payload: {
+    type: 'MEMORY_DRAFT', board: [0, 1, 2, null, null, null, 3, 4, 5], lock: false,
+    matchId: afterStudy.matchId, stageIndex: 0, actionId: 'draft1',
+  } }, active.gameStartsAt! + 4001);
+  assert.ok(fighter.lastState()!.currentRound!.gameState?.mine);
+  assert.equal(spectator.lastState()!.currentRound!.gameState?.mine, undefined);
+  assert.deepEqual(spectator.lastState()!.currentRound!.fighterScores,
+    Object.fromEntries(afterStudy.fighterIds.map(id => [id, 0])));
+  await sendAt(room, fighter, { type: 'FIGHTER_ACTION', payload: {
+    type: 'MEMORY_DRAFT', board: [0, 1, 2, null, null, null, 3, 4, 5], lock: true,
+    matchId: afterStudy.matchId, stageIndex: 2, actionId: 'stale',
+  } }, active.gameStartsAt! + 4002);
+  assert.equal(fighter.messages.at(-1)?.type, 'GAME_ACTION_RESULT');
+  assert.equal((fighter.messages.at(-1) as Extract<ServerMessage, {type:'GAME_ACTION_RESULT'}>).payload.accepted, false);
+  const replacement = attach(ctx, 'REGRES');
+  await send(room, replacement, { type: 'JOIN_ROOM', payload: {
+    roomCode: 'REGRES', sessionToken: fighter.find('JOIN_SUCCESS')!.payload.sessionToken,
+  } });
+  assert.equal('board' in (replacement.lastState()!.currentRound!.gameConfig || {}), false);
+  assert.ok(replacement.lastState()!.currentRound!.gameState?.mine);
+});
+
+test('overdue V2 turns settle before final timeout and do not pay twice', async () => {
+  const { room, ctx, host } = await lobby(undefined, false, { ...env, BRAWL_TEST_FAST: undefined });
+  (room as unknown as { room: { gameBag: string[] } }).room.gameBag = ['split_decision'];
+  await send(room, host, { type: 'START_GAME' });
+  await runAlarmAt(room, host.lastState()!.currentRound!.revealEndsAt!);
+  await runAlarmAt(room, host.lastState()!.currentRound!.bettingEndsAt!);
+  await runAlarmAt(room, host.lastState()!.currentRound!.gameStartsAt!);
+  const gameEnd = host.lastState()!.currentRound!.gameEndsAt!;
+  await runAlarmAt(room, gameEnd);
+  assert.equal(host.lastState()!.phase, 'PAYOUT_RECAP');
+  const saved = ctx.storage.values.get('activeRoom') as { roundHistory: unknown[]; currentRound: { resolutionReason: string } };
+  assert.equal(saved.roundHistory.length, 1);
+  assert.equal(saved.currentRound.resolutionReason, 'TIE');
+  await runAlarmAt(room, gameEnd + 1000);
+  assert.equal((ctx.storage.values.get('activeRoom') as { roundHistory: unknown[] }).roundHistory.length, 1);
+});
+
+test('restart before V2 start keeps published deadlines and catches up the saved puzzle', async () => {
+  for (const delayMs of [7000, 30000]) {
+    const { room, ctx, host } = await lobby(undefined, false, { ...env, BRAWL_TEST_FAST: undefined });
+    (room as any).room.gameBag = ['memory_heist'];
+    await send(room, host, { type: 'START_GAME' });
+    const announced = host.lastState()!.currentRound!;
+    const saved = structuredClone(ctx.storage.values.get('activeRoom')) as any;
+    const restored = new BrawlRoomCore(ctx as unknown as DurableObjectState, { ...env, BRAWL_TEST_FAST: undefined });
+    await ctx.ready();
+    await runAlarmAt(restored, announced.gameStartsAt! + delayMs);
+    const recovered = host.lastState()!;
+    assert.equal(recovered.currentRound!.gameStartsAt, announced.gameStartsAt);
+    assert.equal(recovered.currentRound!.gameEndsAt, announced.gameEndsAt);
+    const authority = ctx.storage.values.get('activeRoom') as any;
+    assert.deepEqual(authority.internalGameState.v2.data.answer, saved.internalGameState.v2.data.answer);
+    if (delayMs < 24000) {
+      assert.equal(recovered.phase, 'MINIGAME_ACTIVE');
+      assert.equal(recovered.currentRound!.gameState!.phase, 'draft');
+      assert.equal(recovered.currentRound!.gameConfig!.board, undefined);
+    } else {
+      assert.equal(recovered.phase, 'PAYOUT_RECAP');
+      assert.equal(recovered.tournamentSchedule!.qualifiersCompleted, 1);
+    }
+  }
+});
 
 test('replaced socket cannot close a room or reclaim its token while closing', async () => {
   const { ctx, room, host } = await lobby();
@@ -156,8 +259,11 @@ test('alarms never transition reveal or countdown before the published deadline'
 
 test('fighter actions before authoritative gameStartsAt cannot score', async () => {
   const { ctx, room, host, sockets } = await lobby();
+  (room as unknown as { room: { gameBag: string[] } }).room.gameBag = ['millisecond_stop'];
   await send(room, host, { type: 'START_GAME' });
-  for (let i = 0; i < 3; i++) await runAlarmAt(room, ctx.storage.alarmAt! + 1000);
+  await runAlarmAt(room, host.lastState()!.currentRound!.revealEndsAt!);
+  await runAlarmAt(room, host.lastState()!.currentRound!.bettingEndsAt!);
+  await runAlarmAt(room, host.lastState()!.currentRound!.gameStartsAt!);
   const state = host.lastState()!;
   assert.equal(state.phase, 'MINIGAME_ACTIVE');
   const fighterId = state.currentRound!.fighterIds[0];

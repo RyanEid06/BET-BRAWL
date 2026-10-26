@@ -170,7 +170,31 @@ export const MINI_GAME_ROTATION: MiniGameId[] = [
   'higher_lower',
   'blind_pinpoint',
   'quick_draw',
+  'memory_heist',
+  'crowd_count',
+  'mirror_trouble',
+  'safecracker',
+  'circuit_sprint',
+  'split_decision',
+  'treasure_tug',
+  'pocket_territory',
 ];
+
+/** Removes one game from a tournament's persisted shuffle bag. */
+export function drawMiniGame(bag: MiniGameId[], random: () => number = Math.random, last?: MiniGameId): MiniGameId {
+  if (bag.length === 0) {
+    bag.push(...MINI_GAME_ROTATION);
+    for (let i = bag.length - 1; i > 0; i--) {
+      const j = Math.floor(random() * (i + 1));
+      [bag[i], bag[j]] = [bag[j], bag[i]];
+    }
+    if (bag[bag.length - 1] === last) {
+      const swap = bag.findIndex(id => id !== last);
+      [bag[swap], bag[bag.length - 1]] = [bag[bag.length - 1], bag[swap]];
+    }
+  }
+  return bag.pop()!;
+}
 
 /**
  * Order circular qualifier matches to minimize back-to-back appearances.
@@ -467,9 +491,10 @@ export function initAuthoritativeRound(
   qualifierIndex?: number,
   qualifierTotal?: number,
   championshipGameNumber?: number,
-  lastMiniGameId?: MiniGameId
+  lastMiniGameId?: MiniGameId,
+  selectedMiniGameId?: MiniGameId
 ): { round: RoundState; internalGame: InternalGameState } {
-  const miniGameId = selectMiniGame(
+  const miniGameId = selectedMiniGameId ?? selectMiniGame(
     roundNumber - 1,
     lastMiniGameId,
     isChampionship,
@@ -500,6 +525,7 @@ export function initAuthoritativeRound(
   );
 
   const round: RoundState = {
+    matchId: crypto.randomUUID(),
     roundNumber,
     maxRounds: totalRounds,
     stage,

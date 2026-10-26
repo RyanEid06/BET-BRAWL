@@ -1,4 +1,10 @@
-# BET & BRAWL — Online Web V1
+# BET & BRAWL — Online Web V2 candidate
+
+V2 adds **Memory Heist, Crowd Count, Mirror Trouble, Safecracker, Circuit Sprint, Split Decision, Treasure Tug, and Pocket Territory** to the six V1 games. All 14 share the existing tournament, betting, championship and bankroll rules. Games use phone taps or PC mouse/keyboard controls.
+
+This is the private `codex/v2-games-web` candidate, version **2.0.0**, using protocol **2** and the isolated Worker name `bet-brawl-v2-candidate`. It has not been deployed or published. V1 remains on `v1-web-cloudflare-ready`; Android/LAN V2 is maintained separately on `codex/v2-games-android`.
+
+The [approved plan](docs/superpowers/plans/2026-10-26-v2-games.md), [candidate evidence](docs/V2_CANDIDATE.md), and [worklog](CODEX_WORKLOG.md) record implementation and acceptance. New hosts explicitly reject incompatible clients; all participants need the same version. Secret drafts, guesses and choices are projected per viewer, and server deadlines survive reconnect/restart. A shuffled bag exhausts all games before repeating.
 
 An online party game for 3–9 players, hosted on Cloudflare. React/Vite assets and a Worker share the HTTPS origin. Each room code routes to exactly one authoritative SQLite Durable Object; clients communicate over WSS. Players can use different networks. Internet is required.
 

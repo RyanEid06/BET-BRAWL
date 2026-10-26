@@ -8,6 +8,8 @@
 import React from 'react';
 import type { PublicPlayer, RoundState, TournamentSchedule } from '../engine/types.ts';
 import { ArrowRight, Trophy, Coins } from 'lucide-react';
+import { V2GameView } from './games/V2GameView.tsx';
+import { V2_GAME_IDS, type V2GameId } from '../engine/v2Games.ts';
 
 interface Props {
   round: RoundState;
@@ -254,6 +256,12 @@ export const PayoutRecapModal: React.FC<Props> = ({
           ))}
         </div>
       </div>
+
+      {fA && fB && V2_GAME_IDS.includes(round.miniGame.id as V2GameId) && round.gameState?.finished === true && (
+        <V2GameView gameId={round.miniGame.id as V2GameId} gameConfig={round.gameConfig || {}}
+          gameState={round.gameState} fighterA={fA} fighterB={fB} myPlayerId={myPlayer?.id || null}
+          serverTimeOffset={0} onSendAction={() => {}} />
+      )}
 
       {/* Next Round Action */}
       <div className="pt-1">
