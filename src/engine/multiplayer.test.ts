@@ -359,6 +359,7 @@ test('Production Server: host reconnect grace timer survives mini-game resolutio
     await host.waitForRoomState(s => s.players.length === 3 && s.players.every(p => p.isHost || p.isReady));
 
     // Host starts game
+    server.getActiveRoom()!.gameBag = ['millisecond_stop'];
     host.ws.send(JSON.stringify({ type: 'START_GAME' }));
 
     // Wait until MINIGAME_ACTIVE
