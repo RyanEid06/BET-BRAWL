@@ -57,7 +57,7 @@ import {
   processFighterAction,
   resolveGameTimeout,
 } from './src/engine/gameEngine.ts';
-import { initV2Game, advanceV2Game, v2NextDeadline, projectV2Game, getV2BotAction, type V2GameId } from './src/engine/v2Games.ts';
+import { advanceV2Game, v2NextDeadline, projectV2Game, getV2BotAction } from './src/engine/v2Games.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -393,6 +393,10 @@ export function createBrawlServer(options: CreateServerOptions = {}) {
     round.bettingEndsAt = round.revealEndsAt + timing.bettingDurationSeconds * 1000;
     round.gameStartsAt = round.bettingEndsAt + timing.countdownDurationMs;
     round.gameEndsAt = round.gameStartsAt + round.miniGame.durationSeconds * 1000;
+    if (internalGame.v2) {
+      internalGame.gameStartsAt = round.gameStartsAt;
+      Object.assign(internalGame.v2, { startsAt: round.gameStartsAt, endsAt: round.gameEndsAt, phaseEndsAt: round.gameStartsAt });
+    }
 
     activeRoom.currentRound = round;
     activeRoom.internalGameState = internalGame;
@@ -423,8 +427,12 @@ export function createBrawlServer(options: CreateServerOptions = {}) {
     const currentRoundNum = currentRound.roundNumber;
 
     room.phase = 'BETTING_WINDOW';
-    currentRound.bettingTimeRemaining = timing.bettingDurationSeconds;
-    currentRound.bettingEndsAt = Date.now() + timing.bettingDurationSeconds * 1000;
+    if (!room.internalGameState?.v2) currentRound.bettingEndsAt = Date.now() + timing.bettingDurationSeconds * 1000;
+    currentRound.bettingTimeRemaining = Math.max(0, Math.ceil((currentRound.bettingEndsAt! - Date.now()) / 1000));
+    if (room.internalGameState?.v2 && Date.now() >= currentRound.bettingEndsAt!) {
+      startMiniGameCountdown();
+      return;
+    }
     broadcastRoomState();
 
     // If there are server debug bot spectators, schedule realistic wagers
@@ -493,8 +501,10 @@ export function createBrawlServer(options: CreateServerOptions = {}) {
     const currentRoundNum = activeRoom.currentRound.roundNumber;
 
     activeRoom.phase = 'MINIGAME_COUNTDOWN';
-    activeRoom.currentRound.gameStartsAt = Date.now() + timing.countdownDurationMs;
-    activeRoom.currentRound.gameEndsAt = activeRoom.currentRound.gameStartsAt + activeRoom.currentRound.miniGame.durationSeconds * 1000;
+    if (!activeRoom.internalGameState?.v2) {
+      activeRoom.currentRound.gameStartsAt = Date.now() + timing.countdownDurationMs;
+      activeRoom.currentRound.gameEndsAt = activeRoom.currentRound.gameStartsAt + activeRoom.currentRound.miniGame.durationSeconds * 1000;
+    }
     broadcastRoomState();
 
     activeRoom.roundTimers.phaseTimer = setTimeout(() => {
@@ -502,7 +512,7 @@ export function createBrawlServer(options: CreateServerOptions = {}) {
         return;
       }
       launchActiveMiniGame();
-    }, timing.countdownDurationMs);
+    }, Math.max(0, activeRoom.currentRound.gameStartsAt! - Date.now()));
   }
 
   function launchActiveMiniGame() {
@@ -515,13 +525,13 @@ export function createBrawlServer(options: CreateServerOptions = {}) {
     const currentRoomId = room.roomId;
 
     room.phase = 'MINIGAME_ACTIVE';
-    round.gameStartsAt = Date.now();
-    round.gameEndsAt = round.gameStartsAt + round.miniGame.durationSeconds * 1000;
-    internal.gameStartsAt = round.gameStartsAt;
+    if (!internal.v2) {
+      round.gameStartsAt = Date.now();
+      round.gameEndsAt = round.gameStartsAt + round.miniGame.durationSeconds * 1000;
+      internal.gameStartsAt = round.gameStartsAt;
+    }
 
     if (internal.v2) {
-      internal.v2 = initV2Game(round.miniGame.id as V2GameId, round.fighterIds, round.gameStartsAt);
-      advanceV2Game(internal.v2, round.gameStartsAt);
       const matchId = round.matchId;
       const progress = () => {
         if (!activeRoom || activeRoom !== room || room.currentRound?.matchId !== matchId || room.phase !== 'MINIGAME_ACTIVE' || !internal.v2) return;
@@ -535,8 +545,8 @@ export function createBrawlServer(options: CreateServerOptions = {}) {
         const next = v2NextDeadline(internal.v2);
         if (next !== null) room.roundTimers.v2PhaseTimer = setTimeout(progress, Math.max(1, next - Date.now()));
       };
-      const next = v2NextDeadline(internal.v2);
-      if (next !== null) room.roundTimers.v2PhaseTimer = setTimeout(progress, Math.max(1, next - Date.now()));
+      progress();
+      if (room.phase !== 'MINIGAME_ACTIVE') return;
       const bots = round.fighterIds.map(id => Array.from(room.players.values()).find(p => p.id === id)).filter(p => p?.isBot);
       if (bots.length) {
         const timer = setInterval(() => {
@@ -554,10 +564,11 @@ export function createBrawlServer(options: CreateServerOptions = {}) {
         }, 500);
         room.roundTimers.botGameTimers.push(timer);
       }
+      return;
     }
 
     if (round.miniGame.id === 'quick_draw' && internal.quickDraw) {
-      internal.quickDraw.drawAt = round.gameStartsAt + internal.quickDraw.drawDelayMs;
+      internal.quickDraw.drawAt = round.gameStartsAt! + internal.quickDraw.drawDelayMs;
       round.gameConfig!.drawAt = internal.quickDraw.drawAt;
     }
 
@@ -1119,78 +1130,48 @@ export function createBrawlServer(options: CreateServerOptions = {}) {
           return;
         }
 
-        // 7. FIGHTER_ACTION (Authoritative Mini-Game Gameplay Action)
+        // 7. FIGHTER_ACTION (all fourteen games share the same wire envelope)
         if (msg.type === 'FIGHTER_ACTION') {
-          if (!activeRoom.currentRound || !activeRoom.internalGameState || activeRoom.phase !== 'MINIGAME_ACTIVE') {
-            return;
-          }
-
           const now = Date.now();
-          // Authoritative game deadline: Reject any actions at or after gameEndsAt
-          if (activeRoom.currentRound.gameEndsAt && now >= activeRoom.currentRound.gameEndsAt) {
-            return;
-          }
-
-          const action: FighterAction = (msg as any).payload;
           const round = activeRoom.currentRound;
-          const v2 = activeRoom.internalGameState.v2;
-          if (v2) {
+          const internal = activeRoom.internalGameState;
+          const v2 = internal?.v2;
+          const action = (msg as { payload?: unknown }).payload as FighterAction | null;
+          const envelope = action as { matchId?: unknown; stageIndex?: unknown; actionId?: unknown } | null;
+          const sendResult = (accepted: boolean, reason?: string) => ws.send(JSON.stringify({
+            type: 'GAME_ACTION_RESULT', timestamp: now, payload: {
+              matchId: round?.matchId ?? '', stageIndex: v2?.stageIndex ?? 0,
+              actionId: typeof envelope?.actionId === 'string' ? envelope.actionId : '', accepted, reason,
+            },
+          } satisfies ServerMessage));
+          if (v2 && activeRoom.phase === 'MINIGAME_ACTIVE') {
             advanceV2Game(v2, now);
-            const envelope = action as FighterAction & { matchId?: unknown; stageIndex?: unknown; actionId?: unknown };
-            const sendResult = (accepted: boolean, reason?: string) => ws.send(JSON.stringify({
-              type: 'GAME_ACTION_RESULT', timestamp: Date.now(), payload: {
-                matchId: round.matchId!, stageIndex: v2.stageIndex,
-                actionId: typeof envelope?.actionId === 'string' ? envelope.actionId : '', accepted, reason,
-              },
-            } satisfies ServerMessage));
-            if (!envelope || envelope.matchId !== round.matchId || envelope.stageIndex !== v2.stageIndex ||
-                typeof envelope.actionId !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(envelope.actionId)) {
-              sendResult(false, 'Stale or invalid action'); return;
+            if (v2.finished && round) {
+              Object.assign(round.fighterScores, v2.scores);
+              resolveCurrentGame(v2.winnerId, v2.winnerId === null);
             }
-            const ids = activeRoom.v2ActionIds[player.id] ??= [];
-            if (ids.includes(envelope.actionId)) { sendResult(true); return; }
-            if (ids.length >= 4096) { sendResult(false, 'Too many actions'); return; }
           }
-          const result = processFighterAction(
-            activeRoom.internalGameState,
-            activeRoom.currentRound.fighterScores,
-            player.id,
-            action,
-            now
-          );
-          if (v2) {
-            const envelope = action as FighterAction & { actionId: string };
-            if (result.rejectionReason) {
-              ws.send(JSON.stringify({ type: 'GAME_ACTION_RESULT', timestamp: now,
-                payload: { matchId: round.matchId!, stageIndex: v2.stageIndex, actionId: envelope.actionId,
-                  accepted: false, reason: result.rejectionReason } } satisfies ServerMessage));
-              return;
-            }
-            activeRoom.v2ActionIds[player.id].push(envelope.actionId);
-            ws.send(JSON.stringify({ type: 'GAME_ACTION_RESULT', timestamp: now,
-              payload: { matchId: round.matchId!, stageIndex: v2.stageIndex, actionId: envelope.actionId, accepted: true } } satisfies ServerMessage));
+          if (!round || !internal || activeRoom.phase !== 'MINIGAME_ACTIVE' ||
+              now < round.gameStartsAt! || now >= round.gameEndsAt!) {
+            sendResult(false, 'Not accepting actions'); return;
           }
-
-          if (result.gameStatePatch) {
-            activeRoom.currentRound.gameState = {
-              ...activeRoom.currentRound.gameState,
-              ...result.gameStatePatch,
-            };
+          if (!round.fighterIds.includes(player.id)) { sendResult(false, 'Not an active fighter'); return; }
+          if (!action || !envelope || typeof action !== 'object' || Array.isArray(action) ||
+              envelope?.matchId !== round.matchId || envelope.stageIndex !== (v2?.stageIndex ?? 0) ||
+              typeof envelope.actionId !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(envelope.actionId)) {
+            sendResult(false, 'Stale or invalid action'); return;
           }
-
-          if (result.actionFeedback) {
-            ws.send(JSON.stringify({
-              type: 'ACTION_RESULT',
-              timestamp: Date.now(),
-              payload: result.actionFeedback,
-            }));
-          }
-
-          if (result.resolved) {
-            resolveCurrentGame(result.winnerId, result.isTie);
-          } else {
-            broadcastRoomState();
-          }
+          const ids = activeRoom.v2ActionIds[player.id] ??= [];
+          if (ids.includes(envelope.actionId)) { sendResult(true); return; }
+          if (ids.length >= 4096) { sendResult(false, 'Too many actions'); return; }
+          const result = processFighterAction(internal, round.fighterScores, player.id, action, now);
+          if (result.rejectionReason) { sendResult(false, result.rejectionReason); return; }
+          ids.push(envelope.actionId);
+          sendResult(true);
+          if (result.gameStatePatch) round.gameState = { ...round.gameState, ...result.gameStatePatch };
+          if (result.actionFeedback) ws.send(JSON.stringify({ type: 'ACTION_RESULT', timestamp: now, payload: result.actionFeedback }));
+          if (result.resolved) resolveCurrentGame(result.winnerId, result.isTie);
+          else broadcastRoomState();
           return;
         }
 

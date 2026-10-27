@@ -700,74 +700,40 @@ export class BrawlRoomCore {
   }
 
   private async handleFighterAction(ws: WebSocket, player: Player, action: FighterAction): Promise<void> {
-    if (!this.room?.currentRound || !this.room.internalGameState || this.room.phase !== 'MINIGAME_ACTIVE') return;
+    if (!this.room) return;
     const now = Date.now();
-    if (this.room.currentRound.gameStartsAt && now < this.room.currentRound.gameStartsAt) return;
-    if (this.room.currentRound.gameEndsAt && now >= this.room.currentRound.gameEndsAt) return;
-
     const round = this.room.currentRound;
-    const state = this.room.internalGameState.v2;
-    if (state) {
-      const envelope = action as FighterAction & { matchId?: unknown; stageIndex?: unknown; actionId?: unknown };
-      const reject = (reason: string) => this.send(ws, { type: 'GAME_ACTION_RESULT', timestamp: now,
-        payload: { matchId: round.matchId!, stageIndex: state.stageIndex,
-          actionId: typeof envelope?.actionId === 'string' ? envelope.actionId : '', accepted: false, reason } });
-      if (!envelope || envelope.matchId !== round.matchId || envelope.stageIndex !== state.stageIndex ||
-          typeof envelope.actionId !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(envelope.actionId)) {
-        reject('Stale or invalid action'); return;
-      }
-      const seen = this.room.v2ActionIds ??= {};
-      const ids = seen[player.id] ??= [];
-      if (ids.includes(envelope.actionId)) {
-        this.send(ws, { type: 'GAME_ACTION_RESULT', timestamp: now,
-          payload: { matchId: round.matchId!, stageIndex: state.stageIndex, actionId: envelope.actionId, accepted: true } });
-        return;
-      }
-      if (ids.length >= 4096) { reject('Too many actions'); return; }
+    const internal = this.room.internalGameState;
+    const state = internal?.v2;
+    const envelope = action as { matchId?: unknown; stageIndex?: unknown; actionId?: unknown } | null;
+    const sendResult = (accepted: boolean, reason?: string) => this.send(ws, {
+      type: 'GAME_ACTION_RESULT', timestamp: now, payload: {
+        matchId: round?.matchId ?? '', stageIndex: state?.stageIndex ?? 0,
+        actionId: typeof envelope?.actionId === 'string' ? envelope.actionId : '', accepted, reason,
+      },
+    });
+    if (!round || !internal || this.room.phase !== 'MINIGAME_ACTIVE' ||
+        now < round.gameStartsAt! || now >= round.gameEndsAt!) {
+      sendResult(false, 'Not accepting actions'); return;
     }
-
-    const result = processFighterAction(
-      this.room.internalGameState,
-      this.room.currentRound.fighterScores,
-      player.id,
-      action,
-      now,
-    );
-
-    let acceptedV2ActionId: string | null = null;
-    if (state) {
-      const envelope = action as FighterAction & { actionId: string };
-      if (result.rejectionReason) {
-        this.send(ws, { type: 'GAME_ACTION_RESULT', timestamp: now,
-          payload: { matchId: round.matchId!, stageIndex: state.stageIndex, actionId: envelope.actionId,
-            accepted: false, reason: result.rejectionReason } });
-        return;
-      }
-      (this.room.v2ActionIds![player.id] ??= []).push(envelope.actionId);
-      acceptedV2ActionId = envelope.actionId;
+    if (!round.fighterIds.includes(player.id)) { sendResult(false, 'Not an active fighter'); return; }
+    if (!action || !envelope || typeof action !== 'object' || Array.isArray(action) ||
+        envelope?.matchId !== round.matchId || envelope.stageIndex !== (state?.stageIndex ?? 0) ||
+        typeof envelope.actionId !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(envelope.actionId)) {
+      sendResult(false, 'Stale or invalid action'); return;
     }
-
-    if (result.gameStatePatch) {
-      this.room.currentRound.gameState = {
-        ...this.room.currentRound.gameState,
-        ...result.gameStatePatch,
-      };
-    }
-
-    if (result.actionFeedback) {
-      this.send(ws, {
-        type: 'ACTION_RESULT',
-        timestamp: Date.now(),
-        payload: result.actionFeedback,
-      });
-    }
-
-    if (result.resolved) {
-      this.resolveCurrentGame(result.winnerId, result.isTie);
-    }
+    const seen = this.room.v2ActionIds ??= {};
+    const ids = seen[player.id] ??= [];
+    if (ids.includes(envelope.actionId)) { sendResult(true); return; }
+    if (ids.length >= 4096) { sendResult(false, 'Too many actions'); return; }
+    const result = processFighterAction(internal, round.fighterScores, player.id, action, now);
+    if (result.rejectionReason) { sendResult(false, result.rejectionReason); return; }
+    ids.push(envelope.actionId);
+    if (result.gameStatePatch) round.gameState = { ...round.gameState, ...result.gameStatePatch };
+    if (result.resolved) this.resolveCurrentGame(result.winnerId, result.isTie);
     await this.commitAndBroadcast();
-    if (acceptedV2ActionId) this.send(ws, { type: 'GAME_ACTION_RESULT', timestamp: Date.now(),
-      payload: { matchId: round.matchId!, stageIndex: state!.stageIndex, actionId: acceptedV2ActionId, accepted: true } });
+    if (result.actionFeedback) this.send(ws, { type: 'ACTION_RESULT', timestamp: now, payload: result.actionFeedback });
+    sendResult(true);
   }
 
   private startRound(roundNum: number): void {

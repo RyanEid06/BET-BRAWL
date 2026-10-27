@@ -68,3 +68,18 @@ test('VOID recap adds no fighter outcome and explains the actual wager refund re
   assert.match(render(players[2]), /Round void/);
   assert.doesNotMatch(render(players[2]), /ended in a tie/);
 });
+
+test('V2 forfeit and VOID recaps never show a recomputed played result after the clock expires', () => {
+  const { round, players, render } = recap();
+  round.miniGame = MINI_GAMES.safecracker;
+  const state = initV2Game('safecracker', [players[0].id, players[1].id], 0);
+  advanceV2Game(state, state.endsAt);
+  const view = projectV2Game(state, null, state.endsAt);
+  round.gameConfig = view.config;
+  round.gameState = view.state;
+  for (const reason of ['DISCONNECT_FORFEIT', 'VOID'] as const) {
+    round.resolutionReason = reason;
+    round.winnerId = reason === 'VOID' ? null : players[0].id;
+    assert.doesNotMatch(render(), /Final result confirmed by the server/);
+  }
+});

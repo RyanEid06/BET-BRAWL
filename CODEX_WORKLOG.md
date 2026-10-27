@@ -1,5 +1,12 @@
 # BET-BRAWL V2 candidate checkpoint
 
+## Final contract correction — 2026-10-27 (overrides prior handoff below)
+- Final shared/native patch scopes all14 network fighter actions (current match/stage0legacy/action identity, dedup and acknowledgments), retains published Node V2 deadlines/puzzle after delayed callbacks, and hides recomputed played results for forfeit/VOID recaps.
+- Android runtime e186e154334e4109d958c15b76544714943b5b15 pushed; local shared verify103/103 +build/sync PASS, separate-module native76/76 PASS. Exact-source Android CI40468986738 SUCCESS. Prior b012a74 APKs below are historical and must be replaced for final handoff.
+- Actual App browser smoke at e186e15 passes V1 rapid_red_green scoped TAPs/visible scores and Memory study/draft/lock/payout with6 accepted scoped acknowledgments, no page errors. No remaining local native/browser process.
+- Current branch codex/v2-games-web: applied only six-file shared delta (preserved web routing), plus reviewed Worker files. Full local cf:verify PASS96/96 engine/client +19/19 Worker, typechecks/build/dryrun and actual SQLite/WebSocket restart/protocol suite (artifacts/v2/web-final-contract-verify.log). A remaining random host-grace fixture was pinned to its intended V1 game; transfer that one test-only line to Android as well. Commit/push final web source, then record both final exact-source CI runs and refreshed APKs.
+- Evidence: artifacts/v2/{android-final-contract-verify.log,native-final-contract-green.log,payout-forfeit-red.log,payout-forfeit-green.log,android-final-protocol.md,final-web/REPORT.md,browser/final-protocol-results.json}. No merge/deploy/release/device actions.
+
 ## Outcome and boundary
 [Approved 14-game plan](docs/superpowers/plans/2026-10-26-v2-games.md), milestones1–7 COMPLETE as reviewable web and Android/LAN candidates. Version2.0.0/protocol2, Android code2. No merge, deployment, public release, device installation, signing identity creation or Android tooling installation. Physical/public/manual acceptance remains separate. User explicitly approved pushes of both V2 branches to RyanEid06/BET-BRAWL for CI.
 

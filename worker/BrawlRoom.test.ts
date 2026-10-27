@@ -62,6 +62,11 @@ async function send(room: BrawlRoomCore, ws: FakeSocket, message: unknown) {
   const msg = message as { type?: string; payload?: Record<string, unknown> };
   const withVersion = msg.type === 'CREATE_ROOM' || msg.type === 'JOIN_ROOM'
     ? { ...msg, payload: { ...msg.payload, protocolVersion: 2 } } : msg;
+  if (withVersion.type === 'FIGHTER_ACTION' && withVersion.payload && typeof withVersion.payload === 'object' && !Array.isArray(withVersion.payload)) {
+    const round = ws.lastState()?.currentRound;
+    withVersion.payload = { matchId: round?.matchId, stageIndex: round?.gameState?.stageIndex ?? 0,
+      actionId: crypto.randomUUID(), ...withVersion.payload };
+  }
   await room.webSocketMessage(ws as unknown as WebSocket, JSON.stringify(withVersion));
 }
 
@@ -522,4 +527,42 @@ test('Durable Object fighter disconnect resolves by forfeit before game timeout'
   assert.equal(state.phase, 'PAYOUT_RECAP');
   assert.equal(state.currentRound!.winnerId, otherFighterId);
   assert.equal(state.currentRound!.resolutionReason, 'DISCONNECT_FORFEIT');
+});
+
+test('legacy network actions reject stale scopes and replay once across persisted recovery', async () => {
+  const {ctx,room,host,sockets} = await lobby(['Host','P2','P3'],false,{...env,BRAWL_TEST_GAME_SEQUENCE:'rapid_red_green'});
+  await send(room,host,{type:'START_GAME'});
+  const round = host.lastState()!.currentRound!;
+  await runAlarmAt(room,round.gameStartsAt!);
+  const fighter = sockets.find(s => s.find('JOIN_SUCCESS')!.payload.player.id === round.fighterIds[0])!;
+  const saved = ctx.storage.values.get('activeRoom') as any;
+  saved.internalGameState.redGreen.schedule = [{light:'GREEN',durationMs:30000}];
+  // Restore the actual persisted authority, retaining the socket attachment identity.
+  const recovered = new BrawlRoomCore(ctx as unknown as DurableObjectState,env); await ctx.ready();
+  const lastAck = () => [...fighter.messages].reverse().find(m => m.type === 'GAME_ACTION_RESULT') as Extract<ServerMessage,{type:'GAME_ACTION_RESULT'}>;
+  const at = round.gameStartsAt! + 50;
+  await sendAt(recovered,fighter,{type:'FIGHTER_ACTION',payload:{type:'TAP',actionId:'once'}},at);
+  assert.equal(lastAck()?.payload.accepted,true,'legacy valid actions must acknowledge');
+  assert.equal(fighter.lastState()!.currentRound!.fighterScores[round.fighterIds[0]],1);
+  const again = new BrawlRoomCore(ctx as unknown as DurableObjectState,env); await ctx.ready();
+  await sendAt(again,fighter,{type:'FIGHTER_ACTION',payload:{type:'TAP',actionId:'once'}},at+100);
+  assert.equal(lastAck().payload.accepted,true);
+  assert.equal((ctx.storage.values.get('activeRoom') as any).currentRound.fighterScores[round.fighterIds[0]],1,'a persisted replay cannot score twice');
+  for (const payload of [
+    {type:'TAP',matchId:'old-match',actionId:'stale'},
+    {type:'TAP',stageIndex:1,actionId:'stage'},
+    {type:'TAP',actionId:null},
+    {type:'INVALID',actionId:'invalid'},
+    null,
+  ]) {
+    await sendAt(again,fighter,{type:'FIGHTER_ACTION',payload},at+200);
+    assert.equal(lastAck().payload.accepted,false);
+  }
+  await sendAt(again,fighter,{type:'FIGHTER_ACTION',payload:{type:'TAP',actionId:'invalid'}},at+300);
+  assert.equal(lastAck().payload.accepted,true,'rejection must not consume an action ID');
+  assert.equal((ctx.storage.values.get('activeRoom') as any).currentRound.fighterScores[round.fighterIds[0]],2);
+  const nativeNow = Date.now; Date.now = () => at+400;
+  try { await again.webSocketMessage(fighter as unknown as WebSocket,JSON.stringify({type:'FIGHTER_ACTION',payload:{type:'TAP',actionId:'bare'}})); }
+  finally { Date.now = nativeNow; }
+  assert.equal(lastAck().payload.accepted,false,'bare legacy frames must be rejected on the wire');
 });

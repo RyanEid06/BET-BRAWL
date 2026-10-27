@@ -31,6 +31,17 @@ async function createTestWsClient(wsUrl: string) {
     }
   });
 
+  const rawSend = ws.send.bind(ws);
+  ws.send = ((data: string) => {
+    const message = JSON.parse(data);
+    if (message.type === 'FIGHTER_ACTION' && message.payload && typeof message.payload === 'object' && !Array.isArray(message.payload)) {
+      const round = [...received].reverse().find(m => m.type === 'ROOM_STATE')?.payload.currentRound;
+      message.payload = { matchId: round?.matchId, stageIndex: round?.gameState?.stageIndex ?? 0,
+        actionId: crypto.randomUUID(), ...message.payload };
+    }
+    rawSend(JSON.stringify(message));
+  }) as typeof ws.send;
+
   const waitFor = (predicate: (m: ServerMessage) => boolean, timeoutMs = 4000): Promise<ServerMessage> => {
     return new Promise((resolve, reject) => {
       const existing = received.find(predicate);
@@ -80,7 +91,7 @@ async function createTestWsClient(wsUrl: string) {
     }
   };
 
-  return { ws, received, waitFor, waitForType, waitForRoomState, close };
+  return { ws, rawSend, received, waitFor, waitForType, waitForRoomState, close };
 }
 
 test('Production Server Integration: full 6-player lifecycle on actual server handlers', async () => {
@@ -348,6 +359,7 @@ test('Production Server: host reconnect grace timer survives mini-game resolutio
     await host.waitForRoomState(s => s.players.length === 3 && s.players.every(p => p.isHost || p.isReady));
 
     // Host starts game
+    server.getActiveRoom()!.gameBag = ['millisecond_stop'];
     host.ws.send(JSON.stringify({ type: 'START_GAME' }));
 
     // Wait until MINIGAME_ACTIVE
@@ -796,4 +808,73 @@ test('Production Server: full 3-player Tournament Lifecycle (3 Qualifiers -> Cha
     for (const c of clients) c.close();
     await server.close();
   }
+});
+
+async function protocolRoom(game: 'rapid_red_green' | 'memory_heist' = 'rapid_red_green') {
+  const server = createBrawlServer({ timingConfig: { revealDurationMs: 20, bettingDurationSeconds: .1, countdownDurationMs: 30 } });
+  const { port } = await server.listen(0, '127.0.0.1');
+  const clients: Awaited<ReturnType<typeof createTestWsClient>>[] = [];
+  for (let i = 0; i < 3; i++) {
+    const client = await createTestWsClient(`ws://127.0.0.1:${port}/ws`); clients.push(client);
+    client.ws.send(JSON.stringify(i === 0 ? { type: 'CREATE_ROOM', payload: { protocolVersion: 2, playerName: 'Host' } }
+      : { type: 'JOIN_ROOM', payload: { protocolVersion: 2, roomCode: server.getActiveRoom()!.roomCode, playerName: `Guest${i}` } }));
+    await client.waitForType('JOIN_SUCCESS');
+    if (i > 0) client.ws.send(JSON.stringify({ type: 'TOGGLE_READY' }));
+  }
+  await clients[0].waitForRoomState(s => s.players.length === 3 && s.players.every(p => p.isHost || p.isReady));
+  server.getActiveRoom()!.gameBag = [game];
+  clients[0].ws.send(JSON.stringify({ type: 'START_GAME' }));
+  await clients[0].waitForRoomState(s => s.phase === 'FIGHTER_REVEAL');
+  return { server, clients, async close() { clients.forEach(c => c.close()); await server.close(); } };
+}
+
+test('all-game wire contract rejects legacy stale and malformed actions and deduplicates replay effects', async () => {
+  const room = await protocolRoom();
+  try {
+    const { payload: active } = await room.clients[0].waitForRoomState(s => s.phase === 'MINIGAME_ACTIVE');
+    const round = active.currentRound!;
+    const fighter = room.clients.find(c => c.received.some(m => m.type === 'JOIN_SUCCESS' && m.payload.player.id === round.fighterIds[0]))!;
+    const internal = room.server.getActiveRoom()!.internalGameState!;
+    internal.redGreen!.schedule = [{ light: 'GREEN', durationMs: 30000 }];
+    const ack = (id: string) => fighter.waitFor(m => m.type === 'GAME_ACTION_RESULT' && m.payload.actionId === id, 1000) as Promise<Extract<ServerMessage,{type:'GAME_ACTION_RESULT'}>>;
+    fighter.ws.send(JSON.stringify({ type: 'FIGHTER_ACTION', payload: { type: 'TAP', actionId: 'once' } }));
+    assert.equal((await ack('once')).payload.accepted,true);
+    assert.equal(room.server.getActiveRoom()!.currentRound!.fighterScores[round.fighterIds[0]],1);
+    await new Promise(r => setTimeout(r,40));
+    const before = fighter.received.length;
+    fighter.ws.send(JSON.stringify({ type: 'FIGHTER_ACTION', payload: { type: 'TAP', actionId: 'once' } }));
+    await fighter.waitFor(m => m.type === 'GAME_ACTION_RESULT' && m.payload.actionId === 'once' && fighter.received.slice(before).some(next => next.type === 'GAME_ACTION_RESULT' && next.payload.actionId === 'once'),1000);
+    assert.equal(room.server.getActiveRoom()!.currentRound!.fighterScores[round.fighterIds[0]],1,'replay must not add another green tap');
+    fighter.ws.send(JSON.stringify({ type: 'FIGHTER_ACTION', payload: { type: 'TAP', matchId: 'previous-match', actionId: 'stale' } }));
+    assert.equal((await ack('stale')).payload.accepted,false);
+    fighter.ws.send(JSON.stringify({ type: 'FIGHTER_ACTION', payload: { type: 'TAP', stageIndex: 1, actionId: 'wrong-stage' } }));
+    assert.equal((await ack('wrong-stage')).payload.accepted,false);
+    fighter.rawSend(JSON.stringify({ type:'FIGHTER_ACTION',payload:{type:'TAP',actionId:'unscoped'} }));
+    assert.equal((await ack('unscoped')).payload.accepted,false);
+    fighter.ws.send(JSON.stringify({ type:'FIGHTER_ACTION',payload:{type:'INVALID',actionId:'invalid'} }));
+    assert.equal((await ack('invalid')).payload.accepted,false);
+    fighter.ws.send(JSON.stringify({ type:'FIGHTER_ACTION',payload:{type:'TAP',actionId:'invalid'} }));
+    await new Promise(r => setTimeout(r,20));
+    assert.equal(room.server.getActiveRoom()!.currentRound!.fighterScores[round.fighterIds[0]],2,'rejection must not consume action ID');
+    fighter.rawSend(JSON.stringify({type:'FIGHTER_ACTION',payload:null}));
+    assert.equal((await ack('')).payload.accepted,false);
+  } finally { await room.close(); }
+});
+
+test('Node V2 delayed phase callbacks preserve published deadlines and generated puzzle', async () => {
+  const room = await protocolRoom('memory_heist');
+  try {
+    const authority = room.server.getActiveRoom()!;
+    const round = authority.currentRound!;
+    const savedPuzzle = structuredClone(authority.internalGameState!.v2!.data);
+    const published = { betting: round.bettingEndsAt, starts: round.gameStartsAt, ends: round.gameEndsAt };
+    const blockUntil = Date.now() + 260;
+    while (Date.now() < blockUntil) { /* Simulate a delayed event loop after publishing the schedule. */ }
+    const active = await room.clients[0].waitForRoomState(s => s.phase === 'MINIGAME_ACTIVE');
+    assert.equal(active.payload.currentRound!.bettingEndsAt,published.betting,'delayed betting callback must not extend betting');
+    assert.equal(active.payload.currentRound!.gameStartsAt,published.starts,'delayed countdown callback must not extend the published start');
+    assert.equal(active.payload.currentRound!.gameEndsAt,published.ends,'delayed launch must not extend the published finish');
+    assert.equal(authority.internalGameState!.v2!.startsAt,published.starts);
+    assert.deepEqual(authority.internalGameState!.v2!.data,savedPuzzle,'launch must retain the already generated private puzzle');
+  } finally { await room.close(); }
 });

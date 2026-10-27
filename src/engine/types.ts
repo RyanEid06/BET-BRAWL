@@ -202,14 +202,17 @@ export interface Award {
 // TYPED FIGHTER ACTIONS
 // -------------------------------------------------------------
 
-export type FighterAction =
+export interface FighterActionIdentity { matchId: string; stageIndex: number; actionId: string }
+
+// Components/pure rules accept decisions; the client adds the mandatory wire identity for every game.
+export type FighterAction = (
   | { type: 'STOP' }
   | { type: 'TAP' }
   | { type: 'ANSWER'; questionIndex: number; answer: number }
   | { type: 'GUESS'; questionIndex: number; guess: 'HIGHER' | 'LOWER' }
   | { type: 'PIN'; normX: number; normY: number }
   | { type: 'DRAW_TAP' }
-  | (V2Action & { matchId: string; stageIndex: number; actionId: string });
+) & Partial<FighterActionIdentity> | (V2Action & FighterActionIdentity);
 
 // -------------------------------------------------------------
 // DISCRIMINATED UNION PROTOCOL SCHEMAS

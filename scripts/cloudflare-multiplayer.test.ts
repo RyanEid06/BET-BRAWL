@@ -53,7 +53,12 @@ async function connect(code: string): Promise<Client> {
     send(message: ClientMessage) {
       const versioned = message.type === 'CREATE_ROOM' || message.type === 'JOIN_ROOM'
         ? { ...message, payload: { ...message.payload, protocolVersion: 2 } } : message;
-      ws.send(JSON.stringify(versioned));
+      if (versioned.type === 'FIGHTER_ACTION' && versioned.payload && typeof versioned.payload === 'object' && !Array.isArray(versioned.payload)) {
+        const round = client.latest()?.currentRound;
+        const payload = { matchId: round?.matchId, stageIndex: round?.gameState?.stageIndex ?? 0,
+          actionId: crypto.randomUUID(), ...versioned.payload };
+        ws.send(JSON.stringify({ ...versioned, payload }));
+      } else ws.send(JSON.stringify(versioned));
     },
     async state(predicate: (state: PublicRoomState) => boolean = () => true, timeoutMs = 6000) {
       return (await waitFor('ROOM_STATE', m => predicate(m.payload), timeoutMs)).payload;
@@ -156,7 +161,16 @@ async function tournament() {
     if (game === 1) {
       assert.equal(round.miniGame.id, 'millisecond_stop');
       await delay(30);
-      byId.get(finalists[0])!.send({ type: 'FIGHTER_ACTION', payload: { type: 'STOP' } });
+      const fighter = byId.get(finalists[0])!;
+      fighter.send({ type: 'FIGHTER_ACTION', payload: { type: 'STOP', matchId: 'previous-match', actionId: 'legacy-stale' } });
+      assert.equal((await fighter.waitFor('GAME_ACTION_RESULT', m => m.payload.actionId === 'legacy-stale')).payload.accepted, false);
+      const action = { type: 'FIGHTER_ACTION', payload: { type: 'STOP', actionId: 'legacy-once' } } satisfies ClientMessage;
+      fighter.send(action);
+      assert.equal((await fighter.waitFor('GAME_ACTION_RESULT', m => m.payload.actionId === 'legacy-once')).payload.accepted, true);
+      const score = (await fighter.sync()).currentRound!.fighterScores[finalists[0]];
+      fighter.send(action);
+      assert.equal((await fighter.waitFor('GAME_ACTION_RESULT', m => m.payload.actionId === 'legacy-once')).payload.accepted, true);
+      assert.equal((await fighter.sync()).currentRound!.fighterScores[finalists[0]], score, 'legacy retry must retain the accepted result');
     } else if (game === 3) {
       assert.equal(round.miniGame.id, 'speed_math');
       const q = (round.gameConfig!.questions as Array<{ q: string }>)[0].q;
