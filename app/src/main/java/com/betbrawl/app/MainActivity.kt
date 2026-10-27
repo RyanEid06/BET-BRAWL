@@ -29,13 +29,12 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Set up immersive fullscreen
-        hideSystemUI()
-
         webView = WebView(this).apply {
             id = View.generateViewId()
         }
         setContentView(webView)
+        // The insets controller requires the window's decor to exist first.
+        hideSystemUI()
 
         lanDiscovery = LanDiscovery(this)
         lanDiscovery.startListening { discoveredHost ->
