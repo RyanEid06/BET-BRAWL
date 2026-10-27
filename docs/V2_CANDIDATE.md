@@ -7,9 +7,11 @@
 | Candidate | Source | Exact-source CI | Observed checks |
 |---|---|---|---|
 | Online web, codex/v2-games-web | d20ccc4afd909818dfed88529c4fb8d776b8f508 | [40469684284](https://github.com/RyanEid06/BET-BRAWL/actions/runs/40469684284), SUCCESS | 96 shared tests,19 Worker tests, typechecks/build, Wrangler dry run and actual local SQLite/WebSocket tournament/restart suite |
-| Android/LAN, codex/v2-games-android | f7ad2f91160bd71197d51675409ac5f90f5332b6 | [40469773003](https://github.com/RyanEid06/BET-BRAWL/actions/runs/40469773003), SUCCESS | 103 shared tests,76 Gradle unit tests, lint0errors/14warnings, debug/release assembly |
+| Android/LAN, codex/v2-games-android | 8b0fc98f0165317ccfcfeddfca183a9e887d7c39 | [40522679066](https://github.com/RyanEid06/BET-BRAWL/actions/runs/40522679066), SUCCESS | 103 shared tests,76 Gradle unit tests, lint0errors/14warnings, debug/release builds, three Android16 visible-home cold launches |
 
-The Android runtime at e186e15 also passed [CI40468986738](https://github.com/RyanEid06/BET-BRAWL/actions/runs/40468986738). The final f7ad2f9 checkpoint changes only the legacy Node timing fixture and worklog; the delivered APKs are from that final checkpoint. Final documentation commits follow these verified sources; runtime changes are checked to be empty.
+Earlier e186e15/f7ad2f9 builds passed compilation and unit checks but did not exercise Activity startup. The owner reported immediate launch failure on Honor X9d / Android16 / MagicOS10. The exact f7ad2f9 APK reproduced a fatal null DecorView in PhoneWindow.getInsetsController on the existing API37 emulator: MainActivity requested fullscreen before creating window content. Source f9ecbd8 moves that call after setContentView. Its process-only smoke passed but a visible-screen check exposed a second inherited defect: file-origin CORS blocked the bundled Vite modules and left home blank. That intermediate APK was withdrawn.
+
+Source ac58281 loads the bundle through the existing AndroidX WebViewAssetLoader and an intercepted local HTTP appassets origin, preserving native LAN ws:// connections. File/content access is disabled and deep-link query parameters are preserved. The smoke now requires visible HOST NEW GAME text on every launch, dismisses Android's first-run fullscreen tip using UI-tree bounds, and waits up to 60s for WebView readiness. The one-shot checks in CI40512730087/40514936496 failed; their build jobs passed. Final test correction 8b0fc98 changes no app/runtime source from 500293c. Exact 500293c APK passed three fresh API37 cold launches and a native HostService/lobby UI flow; hash, screenshots, UI trees and app logs are retained in artifacts/v2/startup-crash/resumed-readiness-local/. Final 8b0fc98 CI passed three visible-home cold launches on Android16/API36. Its exact downloaded APK also passed three local API37 launches and the native HostService/lobby flow; installed hash matched the delivered APK. Evidence: startup-crash/ci-8b0fc98/ and final-8b0fc98-local/. Physical Honor verification remains separate.
 
 ## Authority, privacy and recovery
 
@@ -32,14 +34,16 @@ Reports, frame/role evidence and screenshots remain in artifacts/v2/browser/. Fo
 
 ## APK handoff
 
-Final directory: `artifacts/v2/android-candidate-f7ad2f9/`. Independently verified package `com.betbrawl.app`, version `2.0.0`, code `2`, minimum SDK24, target SDK35; source f7ad2f9 /CI40469773003.
+Current directory: `artifacts/v2/android-candidate-8b0fc98/`. Independently verified package `com.betbrawl.app`, version `2.0.0`, code `2`, minimum SDK24, target SDK35; source 8b0fc98 / CI40522679066. Desktop installable file: `C:/Users/Administrator/Desktop/BET-BRAWL-V2-2.0.0-startup-fixed-8b0fc98.apk`.
 
 | File | Bytes | SHA-256 | Signing |
 |---|---:|---|---|
-| `BET-BRAWL-V2-2.0.0-debug-f7ad2f9.apk` | 6,482,141 | `ea4cc72659935cc207dff08be8487da012640cf3a307e2d3d59d41cd4c4778f8` | Android Debug certificate; APK v2 signature verifies |
-| `BET-BRAWL-V2-2.0.0-release-unsigned-f7ad2f9.apk` | 5,194,426 | `2aac354b45a798a99d91fe20fb93148fa3ae1cc0faf955ec6523f86bcf617a56` | Unsigned; established release identity required before installation |
+| `BET-BRAWL-V2-2.0.0-debug-8b0fc98.apk` | 6,482,621 | `6ab98089c6ce2085a14fb67cea1d551c50dc5f4e4f7e89893b0651fb671af273` | Android Debug certificate; APK v2 signature verifies |
+| `BET-BRAWL-V2-2.0.0-release-unsigned-8b0fc98.apk` | 5,194,438 | `6b2c9bac7408dc4a1be12a04b62d0dc369d3fe64ea7e6a99cfb401422fc8135d` | Unsigned; established release identity required before installation |
 
-Both APKs contain all eight new game IDs and byte-identical bundled assets (3/3). JavaScript/CSS match the verified local source build byte for byte; local HTML differs only by one blank line. Existing SDK aapt/apksigner logs and verification.json are retained beside the APKs; actual Gradle/lint reports are in artifacts/v2/android-ci-reports-f7ad2f9/. The established release-signing CI step was skipped; no release signing key was created. CI artifact retention is14days; local copies remain. Earlier b012a74 files under artifacts/v2/android-candidate/ are historical and are not the final corrected candidate.
+Both APKs contain all eight new game IDs and byte-identical bundled assets (3/3). JavaScript/CSS match the verified local source build byte for byte; local HTML differs only by one blank line. Existing SDK aapt/apksigner logs and verification.json are retained beside the APKs; actual Gradle/lint reports are in artifacts/v2/android-ci-reports-8b0fc98/. The established release-signing CI step was skipped; no release signing key was created. CI artifact retention is14days; local copies remain. Earlier b012a74/f7ad2f9/f9ecbd8/500293c APKs are historical; f7ad2f9 has the reproduced startup crash and f9ecbd8 opens blank. The Desktop copy was verified byte for byte; desktop-delivery.json records the path/hash.
+
+The corrected debug APK signer SHA256 is `8785b7cbc2fe59735ff244a2e9c2438295c85a03c254b7102c0cb337eeea2120`, different from the previous V2 CI debug signer. These ephemeral CI debug keys prevent in-place updates: replacing the earlier test installation requires owner uninstall (erases local app data). No automatic phone uninstall or new signing identity was performed; stable established signing is still needed for reliable future updates.
 
 All seven implementation milestones are complete as reviewable candidates. Both branch updates are pushed independently. There is no product merge, deployment, publication or device acceptance claim.
 
@@ -49,4 +53,4 @@ Installation follow-up (2026-10-27): the owner reported a package-conflict insta
 
 Before release, play all14 games with three or more real participants on phone/PC. Check fighter/opponent/spectator privacy, reconnect during study/answer/commit/reveal, bets, qualifiers, championship ties, disconnect-forfeit and VOID refunds. Confirm timed-game scrolling and orientation are comfortable.
 
-Public HTTPS/WSS deployment and physical Android LAN discovery/hosting/joining remain owner acceptance. No device was installed, wiped or modified. Release signing requires the established identity; no signing key is created by this task. Candidate branches stay separate from V1 main/web/frozen refs. Merge, deployment, publication and frozen-branch retirement require separate authorization.
+Public HTTPS/WSS deployment and physical Android LAN discovery/hosting/joining remain owner acceptance. Only isolated emulators were used; no physical device was installed, wiped or modified. Release signing requires the established identity; no signing key is created by this task. Candidate branches stay separate from V1 main/web/frozen refs. Merge, deployment, publication and frozen-branch retirement require separate authorization.
