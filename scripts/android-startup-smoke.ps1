@@ -31,5 +31,10 @@ for ($attempt = 1; $attempt -le 3; $attempt++) {
             Set-Content (Join-Path $EvidenceDir "crash-$attempt.txt")
         throw "MainActivity is not resumed after cold launch $attempt."
     }
+    & $AdbPath -s $Serial shell uiautomator dump /sdcard/brawl-startup-ui.xml | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Could not inspect the home screen.' }
+    $ui = & $AdbPath -s $Serial shell cat /sdcard/brawl-startup-ui.xml
+    $ui | Set-Content (Join-Path $EvidenceDir "home-$attempt.xml")
+    if ($ui -notmatch '(?i)HOST NEW GAME') { throw "Home screen did not render after cold launch $attempt." }
     Write-Output "PASS cold launch $attempt (PID $appPid)"
 }

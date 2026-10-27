@@ -68,9 +68,9 @@ class MainActivity : AppCompatActivity() {
             val initialUrl = if (coldLink != null) {
                 val encodedRoom = URLEncoder.encode(coldLink.roomCode, "UTF-8")
                 val encodedHost = URLEncoder.encode(coldLink.host, "UTF-8")
-                "file:///android_asset/web/index.html?room=$encodedRoom&host=$encodedHost&port=${coldLink.port}"
+                "http://appassets.androidplatform.net/assets/web/index.html?room=$encodedRoom&host=$encodedHost&port=${coldLink.port}"
             } else {
-                "file:///android_asset/web/index.html"
+                "http://appassets.androidplatform.net/assets/web/index.html"
             }
             webView.loadUrl(initialUrl)
         }
@@ -102,15 +102,15 @@ class MainActivity : AppCompatActivity() {
         settings.javaScriptEnabled = true
         settings.domStorageEnabled = true
         settings.databaseEnabled = true
-        settings.allowFileAccess = true
-        settings.allowContentAccess = true
+        settings.allowFileAccess = false
+        settings.allowContentAccess = false
         settings.mediaPlaybackRequiresUserGesture = false
         settings.cacheMode = WebSettings.LOAD_DEFAULT
         settings.useWideViewPort = true
         settings.loadWithOverviewMode = true
 
         webView.webChromeClient = WebChromeClient()
-        webView.webViewClient = BrawlWebViewClient()
+        webView.webViewClient = BrawlWebViewClient(this)
         webView.addJavascriptInterface(BrawlWebInterface(this, lanDiscovery), "BetBrawlAndroid")
     }
 

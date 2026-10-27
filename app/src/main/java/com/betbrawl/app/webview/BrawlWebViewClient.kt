@@ -1,15 +1,28 @@
 package com.betbrawl.app.webview
 
 import android.content.Intent
+import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.webkit.WebViewAssetLoader
 import com.betbrawl.app.server.HostService
 import com.betbrawl.app.server.LanDiscovery
 
-class BrawlWebViewClient : WebViewClient() {
+class BrawlWebViewClient(context: Context) : WebViewClient() {
+    // HTTP keeps the bundled page compatible with the existing LAN ws:// hosts.
+    private val assetLoader = WebViewAssetLoader.Builder()
+        .setHttpAllowed(true)
+        .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(context))
+        .build()
+
+    override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest): WebResourceResponse? {
+        return assetLoader.shouldInterceptRequest(request.url)
+            ?: super.shouldInterceptRequest(view, request)
+    }
 
     override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
         val uri = request?.url ?: return false
@@ -31,7 +44,8 @@ class BrawlWebViewClient : WebViewClient() {
         }
 
         // Allow loading local bundled assets
-        if (scheme == "file" || uri.host == "localhost" || uri.host == "127.0.0.1") {
+        if ((scheme == "http" && uri.host == WebViewAssetLoader.DEFAULT_DOMAIN && uri.path?.startsWith("/assets/") == true)
+            || uri.host == "localhost" || uri.host == "127.0.0.1") {
             return false
         }
 
