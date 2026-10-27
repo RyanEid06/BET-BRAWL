@@ -34,6 +34,15 @@ for ($attempt = 1; $attempt -le 3; $attempt++) {
     & $AdbPath -s $Serial shell uiautomator dump /sdcard/brawl-startup-ui.xml | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Could not inspect the home screen.' }
     $ui = & $AdbPath -s $Serial shell cat /sdcard/brawl-startup-ui.xml
+    # Fresh emulators may cover the app with Android's one-time fullscreen tip.
+    $tip = ([xml]($ui -join "`n")).SelectSingleNode('//node[@resource-id="com.android.systemui:id/ok" and @text="Got it"]')
+    if ($tip -and $tip.bounds -match '^\[(\d+),(\d+)\]\[(\d+),(\d+)\]$') {
+        $tipX = [int](([int]$Matches[1] + [int]$Matches[3]) / 2)
+        $tipY = [int](([int]$Matches[2] + [int]$Matches[4]) / 2)
+        & $AdbPath -s $Serial shell input tap $tipX $tipY
+        & $AdbPath -s $Serial shell uiautomator dump /sdcard/brawl-startup-ui.xml | Out-Null
+        $ui = & $AdbPath -s $Serial shell cat /sdcard/brawl-startup-ui.xml
+    }
     $ui | Set-Content (Join-Path $EvidenceDir "home-$attempt.xml")
     if ($ui -notmatch '(?i)HOST NEW GAME') { throw "Home screen did not render after cold launch $attempt." }
     Write-Output "PASS cold launch $attempt (PID $appPid)"
