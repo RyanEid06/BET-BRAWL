@@ -45,6 +45,8 @@ All seven implementation milestones are complete as reviewable candidates. Both 
 
 ## Acceptance boundary
 
+Installation follow-up (2026-10-27): the owner reported a package-conflict installer error. Shipped V1 and V2 have the same package ID but different debug signing certificates, so this V2 APK cannot update that V1 in place. A fresh install requires uninstalling the previous app, which can erase local data. Keeping V1 requires a separately packaged V2 candidate; an in-place update requires the original installed app's signing key. No device uninstall or package/signing change was performed. Signature verification above proves APK validity, not compatibility with an existing installation.
+
 Before release, play all14 games with three or more real participants on phone/PC. Check fighter/opponent/spectator privacy, reconnect during study/answer/commit/reveal, bets, qualifiers, championship ties, disconnect-forfeit and VOID refunds. Confirm timed-game scrolling and orientation are comfortable.
 
 Public HTTPS/WSS deployment and physical Android LAN discovery/hosting/joining remain owner acceptance. No device was installed, wiped or modified. Release signing requires the established identity; no signing key is created by this task. Candidate branches stay separate from V1 main/web/frozen refs. Merge, deployment, publication and frozen-branch retirement require separate authorization.
