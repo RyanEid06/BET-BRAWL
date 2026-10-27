@@ -2,11 +2,11 @@
 
 V2 adds **Memory Heist, Crowd Count, Mirror Trouble, Safecracker, Circuit Sprint, Split Decision, Treasure Tug, and Pocket Territory** to the six V1 games. All 14 share the existing tournament, betting, championship and bankroll rules. Games use phone taps or PC mouse/keyboard controls.
 
-This is the private `codex/v2-games-web` candidate, version **2.0.0**, using protocol **2** and the isolated Worker name `bet-brawl-v2-candidate`. It has not been deployed or published. V1 remains on `v1-web-cloudflare-ready`; Android/LAN V2 is maintained separately on `codex/v2-games-android`.
+This is the `codex/v2-games-web` reviewable candidate, version **2.0.0**, using protocol **2** and the isolated Worker name `bet-brawl-v2-candidate`. It has not been deployed or published as a release. V1 remains on `v1-web-cloudflare-ready`; Android/LAN V2 is maintained separately on `codex/v2-games-android`.
 
 The [approved plan](docs/superpowers/plans/2026-10-26-v2-games.md), [candidate evidence](docs/V2_CANDIDATE.md), and [worklog](CODEX_WORKLOG.md) record implementation and acceptance. New hosts explicitly reject incompatible clients; all participants need the same version. Secret drafts, guesses and choices are projected per viewer, and server deadlines survive reconnect/restart. A shuffled bag exhausts all games before repeating.
 
-Both reviewable candidates are verified: [web CI40361090266](https://github.com/RyanEid06/BET-BRAWL/actions/runs/40361090266) at `c1e03cf`, and [Android CI40362713620](https://github.com/RyanEid06/BET-BRAWL/actions/runs/40362713620) at `b012a74`. The [handoff](docs/V2_CANDIDATE.md) records the verified debug APK, unsigned release APK, hashes and remaining manual acceptance. V1 branches are unchanged; no candidate merge, deployment or publication has occurred.
+Both final candidates are verified: [web CI40469684284](https://github.com/RyanEid06/BET-BRAWL/actions/runs/40469684284) at `d20ccc4` (96 shared +19 Worker tests), and [Android CI40469773003](https://github.com/RyanEid06/BET-BRAWL/actions/runs/40469773003) at `f7ad2f9` (103 shared +76 Kotlin tests, lint and APK builds). The [handoff](docs/V2_CANDIDATE.md) records the final verified debug APK, unsigned release APK, hashes and remaining manual acceptance. V1 branches are unchanged; no candidate merge, deployment or release publication has occurred.
 
 An online party game for 3–9 players, hosted on Cloudflare. React/Vite assets and a Worker share the HTTPS origin. Each room code routes to exactly one authoritative SQLite Durable Object; clients communicate over WSS. Players can use different networks. Internet is required.
 
