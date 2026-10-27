@@ -46,7 +46,7 @@ class BrawlWebSocketServer(
     private var minigameTimerJob: Job? = null
     private var v2PhaseTimerJob: Job? = null
     private val v2BotJobs = mutableListOf<Job>()
-    private val v2ActionIds = mutableMapOf<String, MutableSet<String>>()
+    private val fighterActionIds = mutableMapOf<String, MutableSet<String>>()
     private val gameBag = mutableListOf<String>()
     var tournamentId: String? = null
         private set
@@ -253,7 +253,7 @@ class BrawlWebSocketServer(
         tournamentSchedule = null
         tournamentId = null
         gameBag.clear()
-        v2ActionIds.clear()
+        fighterActionIds.clear()
         currentRound = null
         internalGameState = null
         phase = GamePhase.LOBBY
@@ -551,7 +551,7 @@ class BrawlWebSocketServer(
         round.fighterScores[f1] = 0
         round.fighterScores[f2] = 0
         currentRound = round
-        v2ActionIds.clear()
+        fighterActionIds.clear()
 
         // Phase 1: FIGHTER_REVEAL
         phase = GamePhase.FIGHTER_REVEAL
@@ -720,43 +720,35 @@ class BrawlWebSocketServer(
         val internal = internalGameState ?: return
         val now = nowMs()
         val v2 = internal.v2
-        if (v2 != null) {
-            // The stage may have expired while its coroutine was delayed.
-            if (phase == GamePhase.MINIGAME_ACTIVE) advanceV2Round(round, now)
-            fun ack(accepted: Boolean, reason: String? = null) = sendToSocket(conn, "GAME_ACTION_RESULT", mapOf(
-                "matchId" to round.matchId, "stageIndex" to v2["stageIndex"].asInt,
-                "actionId" to (payload?.get("actionId") as? String ?: ""), "accepted" to accepted, "reason" to reason))
-            if (phase != GamePhase.MINIGAME_ACTIVE || now < round.gameStartsAt || now >= round.gameEndsAt) {
-                ack(false, "Not accepting actions"); return
-            }
-            if (player.id !in round.fighterIds) { ack(false, "Not an active fighter"); return }
-            val actionId = payload?.get("actionId") as? String
-            if (payload?.get("matchId") != round.matchId ||
-                GameEngine.toStrictNonNegativeInteger(payload?.get("stageIndex")) != v2["stageIndex"].asInt ||
-                actionId == null || !actionId.matches(Regex("^[a-zA-Z0-9_-]{1,64}$"))) {
-                ack(false, "Stale or invalid action"); broadcastRoomState(); return
-            }
-            val ids = v2ActionIds.getOrPut(player.id) { mutableSetOf() }
-            if (actionId in ids) { ack(true); return }
-            if (ids.size >= 4096) { ack(false, "Too many actions"); return }
-            val result = GameEngine.processFighterAction(internal, round.fighterScores, player.id, payload, now)
-            if (result.rejectionReason != null) { ack(false, result.rejectionReason); return }
-            ids.add(actionId)
-            ack(true)
-            if (result.resolved) resolveCurrentGame(result.winnerId, result.isTie,
-                if (result.isTie) RoundResolutionReason.TIE else RoundResolutionReason.PLAYED)
-            else broadcastRoomState()
-            return
+        // The stage may have expired while its coroutine was delayed.
+        if (v2 != null && phase == GamePhase.MINIGAME_ACTIVE) advanceV2Round(round, now)
+        val stageIndex = v2?.get("stageIndex")?.asInt ?: 0
+        fun ack(accepted: Boolean, reason: String? = null) = sendToSocket(conn, "GAME_ACTION_RESULT", mapOf(
+            "matchId" to round.matchId, "stageIndex" to stageIndex,
+            "actionId" to (payload?.get("actionId") as? String ?: ""), "accepted" to accepted, "reason" to reason))
+        if (phase != GamePhase.MINIGAME_ACTIVE || now < round.gameStartsAt || now >= round.gameEndsAt) {
+            ack(false, "Not accepting actions"); return
         }
-
-        if (phase != GamePhase.MINIGAME_ACTIVE || now < round.gameStartsAt || now >= round.gameEndsAt || player.id !in round.fighterIds) return
-        val result = GameEngine.processFighterAction(internal, round.fighterScores, player.id, payload ?: emptyMap(), now)
+        if (player.id !in round.fighterIds) { ack(false, "Not an active fighter"); return }
+        val actionId = payload?.get("actionId") as? String
+        if (payload?.get("matchId") != round.matchId ||
+            GameEngine.toStrictNonNegativeInteger(payload?.get("stageIndex")) != stageIndex ||
+            actionId == null || !actionId.matches(Regex("^[a-zA-Z0-9_-]{1,64}$"))) {
+            ack(false, "Stale or invalid action"); broadcastRoomState(); return
+        }
+        val ids = fighterActionIds.getOrPut(player.id) { mutableSetOf() }
+        if (actionId in ids) { ack(true); return }
+        if (ids.size >= 4096) { ack(false, "Too many actions"); return }
+        val result = GameEngine.processFighterAction(internal, round.fighterScores, player.id, payload, now)
+        if (result.rejectionReason != null) { ack(false, result.rejectionReason); return }
+        ids.add(actionId)
+        ack(true)
         result.scoreUpdate?.let { round.fighterScores.putAll(it) }
         result.gameStatePatch?.let { round.gameState = (round.gameState ?: emptyMap()) + it }
         result.actionFeedback?.let { sendToSocket(conn, "ACTION_RESULT", it) }
-        broadcastRoomState()
         if (result.resolved) resolveCurrentGame(result.winnerId, result.isTie,
             if (result.isTie) RoundResolutionReason.TIE else RoundResolutionReason.PLAYED)
+        else broadcastRoomState()
     }
 
     /** Returns true once authority has finished, settling only an active current match. */
@@ -902,7 +894,7 @@ class BrawlWebSocketServer(
         tournamentSchedule = null
         tournamentId = null
         gameBag.clear()
-        v2ActionIds.clear()
+        fighterActionIds.clear()
         currentRound = null
         internalGameState = null
         phase = GamePhase.LOBBY
@@ -987,7 +979,7 @@ class BrawlWebSocketServer(
         tournamentSchedule = null
         tournamentId = null
         gameBag.clear()
-        v2ActionIds.clear()
+        fighterActionIds.clear()
         currentRound = null
         internalGameState = null
         roomCode = ""

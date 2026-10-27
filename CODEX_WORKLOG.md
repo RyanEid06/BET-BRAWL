@@ -1,5 +1,9 @@
 # BET-BRAWL V2 candidate checkpoint
 
+## Reopened final contract check — 2026-10-27
+The prior candidate/CI/APK evidence below is valid for c1e03cf/b012a74, but final handoff is pending a narrow contract correction: scope legacy six-game network inputs too (match/stage0/action identity, dedup/acks), retain published Node V2 deadlines/puzzle after delayed callbacks, and suppress contradictory recomputed V2 results on forfeit/VOID recaps. No new game/features. Rebuild/reverify both branches and refresh APK provenance after corrections. Current Android branch35a0e78 has preserved native test edits from the interrupted worker; active workers own native host/tests and Node/Worker host/tests. Root owns shared client/types/payout. Native worker owns the sole native compiler run. No merge/deployment/publication/device actions.
+- Final contract changes now implemented: shared verify103/103 +build/assetsync PASS; separate-module native76/76 PASS; payout regression RED→GREEN. Node focused9/9 PASS, staged Worker19/19 PASS. Actual two-game browser smoke pending after resource-pressure restart. No native compiler remains running. Final Worker files to copy on web branch: artifacts/v2/final-web/{roomCore.ts,BrawlRoom.test.ts,cloudflare-multiplayer.test.ts}; README there records evidence. New exact-source CI/APKs still required; b012a74 APKs are historical candidate evidence.
+
 ## Outcome and boundary
 [Approved 14-game plan](docs/superpowers/plans/2026-10-26-v2-games.md), milestones1–7 COMPLETE as reviewable web and Android/LAN candidates. Version2.0.0/protocol2, Android code2. No merge, deployment, public release, device installation, signing identity creation or Android tooling installation. Physical/public/manual acceptance remains separate. User explicitly approved pushes of both V2 branches to RyanEid06/BET-BRAWL for CI.
 

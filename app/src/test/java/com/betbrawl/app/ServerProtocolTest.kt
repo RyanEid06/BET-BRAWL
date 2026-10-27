@@ -47,9 +47,17 @@ class ServerProtocolTest {
         val peers = mutableListOf(host)
         init { send(host, "CREATE_ROOM", mapOf("playerName" to "Host")) }
         fun send(peer: Peer, type: String, payload: Any = emptyMap<String, Any>()) {
+            val round = server.currentRound
             @Suppress("UNCHECKED_CAST")
-            val versioned = if (type == "CREATE_ROOM" || type == "JOIN_ROOM")
-                (payload as Map<String, Any?>) + ("protocolVersion" to 2) else payload
+            val versioned = when {
+                type == "CREATE_ROOM" || type == "JOIN_ROOM" -> (payload as Map<String, Any?>) + ("protocolVersion" to 2)
+                type == "FIGHTER_ACTION" && round != null && payload is Map<*, *> && payload["type"] is String &&
+                    listOf("matchId", "stageIndex", "actionId").none { payload.containsKey(it) } ->
+                    (payload as Map<String, Any?>) + mapOf("matchId" to round.matchId,
+                        "stageIndex" to (server.internalGameState?.v2?.get("stageIndex")?.asInt ?: 0),
+                        "actionId" to java.util.UUID.randomUUID().toString())
+                else -> payload
+            }
             server.onMessage(peer.socket, gson.toJson(mapOf("type" to type, "payload" to versioned)))
             scheduler.runCurrent()
         }
@@ -280,6 +288,44 @@ class ServerProtocolTest {
     }
 
     @Test
+    fun legacyActionsRejectStaleMatchesAndMalformedScopesAndDedupAcceptedReplays() = Room().use { room ->
+        room.join(); room.join(); room.readyStart()
+        val oldMatch = room.server.currentRound!!.matchId
+        room.play(null); room.send(room.host, "NEXT_ROUND"); room.startActive()
+        val round = room.server.currentRound!!
+        assertEquals("rapid_red_green", round.miniGame.id)
+        val fighter = room.fighter(round.fighterIds[0])
+        val spectator = room.peers.first { it.id !in round.fighterIds }
+        val valid = mapOf("type" to "TAP", "matchId" to round.matchId, "stageIndex" to 0, "actionId" to "legacy-once")
+        val invalid = listOf(
+            valid + ("matchId" to oldMatch), valid + ("stageIndex" to 1), valid + ("stageIndex" to 0.5),
+            valid + ("actionId" to ""), valid + ("actionId" to "contains spaces"), valid - "stageIndex"
+        )
+        for (input in invalid) {
+            room.action(fighter, input)
+            assertEquals(0, round.fighterScores[fighter.id]!!.toInt())
+            assertFalse(fighter.payload("GAME_ACTION_RESULT")["accepted"].asBoolean)
+        }
+        // Direct transport bypasses automatic helper scoping to verify a truly bare old packet.
+        room.server.onMessage(fighter.socket, """{"type":"FIGHTER_ACTION","payload":{"type":"TAP"}}""")
+        assertEquals(0, round.fighterScores[fighter.id]!!.toInt())
+        assertFalse(fighter.payload("GAME_ACTION_RESULT")["accepted"].asBoolean)
+        room.action(spectator, valid)
+        assertFalse(spectator.payload("GAME_ACTION_RESULT")["accepted"].asBoolean)
+        room.action(fighter, valid)
+        assertTrue(fighter.payload("GAME_ACTION_RESULT")["accepted"].asBoolean)
+        assertEquals(1, round.fighterScores[fighter.id]!!.toInt())
+        val recovered = room.recover(fighter)
+        room.advance(40) // Past the gameplay tap limiter: only action-ID dedup can prevent a second point.
+        room.action(recovered, valid)
+        assertTrue(recovered.payload("GAME_ACTION_RESULT")["accepted"].asBoolean)
+        assertEquals(1, round.fighterScores[fighter.id]!!.toInt())
+        room.action(recovered, valid + ("actionId" to "fresh-tap"))
+        assertTrue(recovered.payload("GAME_ACTION_RESULT")["accepted"].asBoolean)
+        assertEquals(2, round.fighterScores[fighter.id]!!.toInt())
+    }
+
+    @Test
     fun reconnectRecoversSeatAndStaleSocketCannotActOrDisconnectReplacement() = Room().use { room ->
         val guest = room.join(); room.join()
         val replacement = room.recover(guest)
@@ -400,7 +446,8 @@ class ServerProtocolTest {
         room.action(room.fighter(round.fighterIds[0]), mapOf("type" to "STOP"))
         room.advance(1000)
         val second = room.fighter(round.fighterIds[1])
-        val json = room.gson.toJson(mapOf("type" to "FIGHTER_ACTION", "payload" to mapOf("type" to "STOP")))
+        val json = room.gson.toJson(mapOf("type" to "FIGHTER_ACTION", "payload" to mapOf("type" to "STOP",
+            "matchId" to round.matchId, "stageIndex" to 0, "actionId" to "concurrent-stop")))
         val start = CountDownLatch(1)
         val threads = List(8) { thread { start.await(); room.server.onMessage(second.socket, json) } }
         start.countDown(); threads.forEach { it.join() }; room.scheduler.runCurrent()

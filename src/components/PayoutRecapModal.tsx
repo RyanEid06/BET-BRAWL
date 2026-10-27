@@ -257,7 +257,8 @@ export const PayoutRecapModal: React.FC<Props> = ({
         </div>
       </div>
 
-      {fA && fB && V2_GAME_IDS.includes(round.miniGame.id as V2GameId) && round.gameState?.finished === true && (
+      {fA && fB && V2_GAME_IDS.includes(round.miniGame.id as V2GameId) && round.gameState?.finished === true &&
+        round.resolutionReason !== 'DISCONNECT_FORFEIT' && round.resolutionReason !== 'VOID' && (
         <V2GameView gameId={round.miniGame.id as V2GameId} gameConfig={round.gameConfig || {}}
           gameState={round.gameState} fighterA={fA} fighterB={fB} myPlayerId={myPlayer?.id || null}
           serverTimeOffset={0} onSendAction={() => {}} />

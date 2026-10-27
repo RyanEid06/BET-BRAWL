@@ -679,21 +679,14 @@ const hostGame = useCallback((playerName: string, avatar: string) => {
 
   const sendFighterAction = useCallback((action: FighterAction | V2Action) => {
     const round = state.currentRound;
-    if (round && V2_GAME_IDS.includes(round.miniGame.id as V2GameId)) {
-      const stageIndex = round.gameState?.stageIndex;
-      if (!round.matchId || !Number.isInteger(stageIndex)) {
-        setState(prev => ({ ...prev, lastGameActionError: 'Game state is not ready yet.' }));
-        return;
-      }
-      send({ type: 'FIGHTER_ACTION', payload: { ...action, matchId: round.matchId,
-          stageIndex: stageIndex as number,
-          actionId: Array.from(crypto.getRandomValues(new Uint32Array(4)), value => value.toString(16).padStart(8, '0')).join('') } as FighterAction });
+    const stageIndex = round && V2_GAME_IDS.includes(round.miniGame.id as V2GameId) ? round.gameState?.stageIndex : 0;
+    if (!round?.matchId || !Number.isInteger(stageIndex)) {
+      setState(prev => ({ ...prev, lastGameActionError: 'Game state is not ready yet.' }));
       return;
     }
-    send({
-      type: 'FIGHTER_ACTION',
-      payload: action as FighterAction,
-    });
+    send({ type: 'FIGHTER_ACTION', payload: { ...action, matchId: round.matchId,
+      stageIndex: stageIndex as number,
+      actionId: Array.from(crypto.getRandomValues(new Uint32Array(4)), value => value.toString(16).padStart(8, '0')).join('') } as FighterAction });
   }, [send, state.currentRound]);
 
   const nextRound = useCallback(() => {
