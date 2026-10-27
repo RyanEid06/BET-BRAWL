@@ -9,7 +9,7 @@ A local party game for 3–9 players. The host Android phone runs the authoritat
 ## Maintained targets
 
 - `codex/v2-games-android`: Android/LAN V2 candidate, application ID `com.betbrawl.app`, version `2.0.0` / code `2`.
-- `codex/v2-games-web`: separate online V2 candidate; exact-source Cloudflare CI passes at `c1e03cf`.
+- `codex/v2-games-web`: separate online V2 candidate; exact-source Cloudflare CI passes at `d20ccc4`.
 - `main`: Android local/LAN V1, application ID `com.betbrawl.app`, version `1.0.0` / code `1`.
 - `v1-web-cloudflare-ready`: online web V1, Cloudflare Worker and one SQLite Durable Object per room. Internet required.
 - `v1-web-final`: preserved Node/LAN behavioral reference at `e1f948c`, tagged `v1.0.0-web-final`. Do not modify or delete without separate owner approval.
@@ -42,7 +42,7 @@ Bets stay private until payout. VOID refunds bets and adds no qualifier fighter 
 
 Native NSD/mDNS discovery has UDP fallback and stale-entry cleanup. QR invites use `brawl://join?host=<RFC1918-IP>&port=<port>&room=<code>`; invalid addresses, loopback/link-local guest targets, ambiguous parameters and invalid ports are rejected. Cold and warm intents share the parser. HostService publishes hosting readiness only after bind success and keeps serving through Activity recreation.
 
-[V2 candidate evidence and verified APKs](docs/V2_CANDIDATE.md) distinguish automated tests/CI from manual Android acceptance; [V1 release evidence](V1_RELEASE_REPORT.md) remains historical. V2 passes 100 shared tests and 75 Kotlin tests, with both candidate CIs green. The debug APK is verified and available under `artifacts/v2/android-candidate/`; release assembly is unsigned. No ADB, emulator, APK installation, physical LAN/QR/deep-link testing, or new signing identity is part of this coding task.
+[V2 candidate evidence and verified APKs](docs/V2_CANDIDATE.md) distinguish automated tests/CI from manual Android acceptance; [V1 release evidence](V1_RELEASE_REPORT.md) remains historical. V2 passes 103 shared tests and 76 Kotlin tests, with both final candidate CIs green. The debug APK is available under `artifacts/v2/android-candidate-f7ad2f9/`; release assembly is unsigned. No ADB, emulator, APK installation, physical LAN/QR/deep-link testing, or new signing identity is part of this coding task.
 
 ## Signing
 
