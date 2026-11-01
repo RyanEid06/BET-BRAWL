@@ -67,6 +67,14 @@ try {
   assert.match(await page.getByLabel('Territory scores').innerText(), /Alexandra[\s\S]*1 points[\s\S]*Benjamin[\s\S]*1 points/);
   assert.equal(await page.locator('.v2-owner-a strong').last().innerText(), '🦊');
   checks.push('Territory identities and weighted scores');
+  const socketsBeforeResume = await run(() => window.__regression.sockets.length);
+  await run(() => window.onAndroidResume()); await page.waitForTimeout(3200);
+  assert.equal(await run(() => window.__regression.sockets.length), socketsBeforeResume);
+  await run(() => { window.__regression.autoPong = false; window.onAndroidResume(); });
+  await page.waitForFunction(count => window.__regression.sockets.length > count, socketsBeforeResume);
+  await run(() => { const a = window.__regression; a.autoPong = true; a.open(); a.join(); }); await settle();
+  assert.equal(await run(() => window.__regression.client.status), 'CONNECTED');
+  checks.push('Resume preserves healthy socket and replaces silent socket safely');
   await run(() => window.__regression.socket.close());
   await page.waitForFunction(() => window.__regression.socket.readyState === 0);
   await run(() => { window.__regression.open(); window.__regression.failJoin(); }); await settle();
@@ -91,6 +99,23 @@ try {
     await page.screenshot({ path: `output/playwright/${width}-payout.png`, fullPage: true });
   }
   checks.push('Payout: closed details, reachable/actionable host continuation at 3 widths');
+  await run(() => window.__regression.showApp()); await settle();
+  await page.getByRole('button', {name: 'HOST NEW GAME', exact: true}).click();
+  await run(() => { const a = window.__regression; a.open(); a.reset('memory_heist'); a.join(); }); await settle();
+  assert.equal(await run(() => window.onAndroidBackPressed()), true); await settle();
+  assert.equal(await page.getByRole('dialog').isVisible(), true);
+  await page.getByRole('button', {name: 'Keep playing', exact: true}).click();
+  assert.equal(await page.getByRole('dialog').isVisible(), false);
+  await run(() => window.onAndroidBackPressed()); await settle();
+  await page.keyboard.press('Escape'); assert.equal(await page.getByRole('dialog').isVisible(), false);
+  await run(() => { window.BetBrawlAndroid = {stopHosting: () => window.__regression.stopped++}; window.onAndroidBackPressed(); }); await settle();
+  await page.getByRole('button', {name: 'Close room and leave', exact: true}).click();
+  await page.getByRole('button', {name: 'HOST NEW GAME', exact: true}).waitFor();
+  assert.equal(await run(() => window.__regression.stopped), 1);
+  assert.equal(await run(() => window.onAndroidBackPressed()), false);
+  const afterLeave = await run(() => window.__regression.sockets.length);
+  await page.waitForTimeout(2200); assert.equal(await run(() => window.__regression.sockets.length), afterLeave);
+  checks.push('Android Back dialog cancel/escape/explicit leave, native host stops, no rejoin after leave');
   assert.deepEqual(errors, []);
 } catch (error) { errors.push(String(error)); process.exitCode = 1; }
 finally { await browser.close(); fs.writeFileSync('output/playwright/regressions.json', JSON.stringify({ checks, errors }, null, 2)); console.log(JSON.stringify({ checks, errors }, null, 2)); }

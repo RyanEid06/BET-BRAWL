@@ -1,4 +1,4 @@
-> Historical V1 document. Current production/deployment instructions: [README](../README.md) and [V2 release](V2_RELEASE.md). Statements below describe the V1 checkpoint only.
+> Historical V1 checkpoint. Current Android production instructions are in ../README.md and docs/ANDROID_V2_RELEASE.md. V1 source remains preserved on v1 and immutable recovery tags.
 
 You are the FINAL RELEASE ENGINEER for BET & BRAWL V1.
 

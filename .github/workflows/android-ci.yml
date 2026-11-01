@@ -1,0 +1,150 @@
+name: Android V2 production verification
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-and-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Shared lint, typecheck and protocol/parity tests
+        run: npm run lint && npm test
+      - name: Build and sync bundled Android UI
+        run: npm run build:android
+      - name: Install isolated browser verification tooling
+        run: |
+          npm install --no-save --package-lock=false playwright@1.62.1
+          npx playwright install --with-deps chromium
+      - name: Verify shared V2 browser controls and reconnects
+        run: |
+          npm exec vite -- --host 127.0.0.1 --port 5175 --strictPort > "$RUNNER_TEMP/brawl-vite.log" 2>&1 &
+          vite_pid=$!
+          trap 'kill "$vite_pid"' EXIT
+          for attempt in {1..60}; do
+            if curl -fsS http://127.0.0.1:5175/scripts/browser/v2.html > /dev/null; then break; fi
+            sleep 1
+          done
+          npm run test:browser
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v3
+      - name: Prepare permanent production signing
+        env:
+          STORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          test -n "$STORE" && test -n "$STORE_PASSWORD" && test -n "$KEY_ALIAS" && test -n "$KEY_PASSWORD"
+          store="$RUNNER_TEMP/bet-brawl-release.p12"
+          umask 077
+          printf '%s' "$STORE" | base64 --decode > "$store"
+          echo "ANDROID_KEYSTORE_FILE=$store" >> "$GITHUB_ENV"
+      - name: Kotlin/server parity, Android lint, debug and permanently signed release
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:testDebugUnitTest :app:lintDebug :app:lintRelease :app:assembleDebug :app:assembleRelease --no-daemon
+      - name: Independently verify release certificate and APK metadata
+        run: |
+          mkdir -p artifacts/android-release-verification
+          signer=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -n 1)
+          aapt=$(find "$ANDROID_HOME/build-tools" -name aapt | sort -V | tail -n 1)
+          "$signer" verify --verbose --print-certs app/build/outputs/apk/release/app-release.apk | tee artifacts/android-release-verification/signature.txt
+          actual=$(awk '/Signer #1 certificate SHA-256 digest:/{print tolower($NF)}' artifacts/android-release-verification/signature.txt)
+          expected=$(tr -d '[:space:]' < app/release-signing.sha256)
+          test "$actual" = "$expected"
+          "$aapt" dump badging app/build/outputs/apk/release/app-release.apk > artifacts/android-release-verification/badging.txt
+          sha256sum app/build/outputs/apk/release/app-release.apk > artifacts/android-release-verification/SHA256SUMS
+      - name: Remove temporary signing store
+        if: always()
+        run: rm -f "$RUNNER_TEMP/bet-brawl-release.p12"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-v2-release
+          path: app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-verification-reports
+          path: |
+            app/build/reports/tests/
+            app/build/reports/lint-results-*
+            artifacts/android-release-verification/
+            output/playwright/
+          retention-days: 30
+  startup-and-native-smoke:
+    needs: verify-and-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          name: android-v2-release
+          path: release-apk
+      - uses: actions/download-artifact@v4
+        with:
+          name: android-debug-apk
+          path: debug-apk
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Android 16 debug/release cold launches and native multiplayer/lifecycle
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 36
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          script: |
+            adb -s emulator-5554 install debug-apk/app-debug.apk
+            pwsh -File scripts/android-startup-smoke.ps1 -Serial emulator-5554 -EvidenceDir artifacts/android-debug-startup
+            adb -s emulator-5554 uninstall com.betbrawl.app
+            adb -s emulator-5554 install release-apk/app-release.apk
+            pwsh -File scripts/android-startup-smoke.ps1 -Serial emulator-5554 -EvidenceDir artifacts/android-release-startup
+            npx tsx scripts/android-native-smoke.ts --serial emulator-5554
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-native-acceptance
+          path: |
+            artifacts/android-debug-startup/
+            artifacts/android-release-startup/
+            artifacts/android-native-smoke/
+          retention-days: 30

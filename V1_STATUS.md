@@ -1,7 +1,9 @@
-> Historical V1 document. Current production/deployment instructions: [README](README.md) and [V2 release](docs/V2_RELEASE.md). Statements below describe the V1 checkpoint only.
+> Historical V1 checkpoint. Current Android production instructions are in README.md and docs/ANDROID_V2_RELEASE.md. V1 source remains preserved on v1 and immutable recovery tags.
 
-# Online Web V1 status
+# Android V1 status
 
-This branch is Cloudflare Worker/SQLite Durable Object online V1. `main` is the separate Android LAN target. The old Node-only release acceptance tables have been removed; current executed evidence is recorded in [CLOUDFLARE_VERIFICATION.md](CLOUDFLARE_VERIFICATION.md) and [V1_RELEASE_REPORT.md](V1_RELEASE_REPORT.md).
+This branch is the Android/Kotlin authoritative LAN target. The bundled React UI needs no remote gameplay backend. The online Cloudflare web target is maintained separately on `v1-web-cloudflare-ready`.
 
-Owner follow-up: authenticate/deploy using README commands, then test the public site/WSS/QR and multi-client behavior. No public deployment is implied by a local Wrangler test. `v1-web-final` remains preserved pending separate approval; see [CODEX_WORKLOG.md](CODEX_WORKLOG.md).
+Current executed test counts, exact source/CI identifiers, APK availability, signing limitations, and owner follow-up live in [V1_RELEASE_REPORT.md](V1_RELEASE_REPORT.md). Historical Node-only PASS tables and container/hardware claims have been removed; no old result stands in for current-head evidence.
+
+Manual Android/LAN/QR/deep-link acceptance is USER FOLLOW-UP by explicit owner instruction. The frozen `v1-web-final` branch remains untouched pending separate retirement approval. See [CODEX_WORKLOG.md](CODEX_WORKLOG.md) for continuation state.

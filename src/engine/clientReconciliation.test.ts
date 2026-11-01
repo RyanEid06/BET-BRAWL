@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { actionScope, isCurrentActionResult, unconfirmedRotations } from './clientReconciliation.ts';
+import { actionScope, isCurrentActionResult, unconfirmedRotations, readReconnectTicket } from './clientReconciliation.ts';
 import type { RoundState } from './types.ts';
 
 test('action feedback requires a locally sent identity in the current match, stage and phase', () => {
@@ -20,4 +20,15 @@ test('rapid optimistic rotations survive partial/batched snapshots without repla
   assert.deepEqual(unconfirmedRotations(5, [1, 1, 2], 6), [1, 2]);
   assert.deepEqual(unconfirmedRotations(5, [1, 1, 2], 8), []);
   assert.deepEqual(unconfirmedRotations(5, [1], 0), []);
+});
+
+test('Activity recreation resumes only a validated prior LAN or native-host endpoint', () => {
+  for (const wsUrl of ['ws://192.168.1.5:8080/ws', 'ws://127.0.0.1:8080/ws']) {
+    assert.deepEqual(readReconnectTicket(JSON.stringify({ roomCode: 'ROOM', wsUrl })), { roomCode: 'ROOM', wsUrl });
+  }
+  for (const wsUrl of ['ws://example.com:8080/ws', 'ws://127.0.0.1:9000/ws', 'ws://192.168.1.5:80/ws', 'ws://user:pass@192.168.1.5:8080/ws', 'ws://192.168.1.5:8080/ws?other=room', 'file:///ws']) {
+    assert.equal(readReconnectTicket(JSON.stringify({ roomCode: 'ROOM', wsUrl })), null);
+  }
+  assert.equal(readReconnectTicket('{broken'), null);
+  assert.equal(readReconnectTicket(JSON.stringify({ roomCode: '../bad', wsUrl: 'ws://192.168.1.5:8080/ws' })), null);
 });

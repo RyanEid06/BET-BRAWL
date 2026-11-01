@@ -1,3 +1,3 @@
 # Historical V2 candidate handoff
 
-The web candidate has been superseded by [V2 production release documentation](V2_RELEASE.md). Use README deployment instructions from main. Earlier candidate evidence and APK hashes remain in this file's Git history and artifacts/v2/; they do not certify the final production web source. Android/LAN V2 remains on codex/v2-games-android with its own worklog and validation.
+The current Android release record is [ANDROID_V2_RELEASE.md](ANDROID_V2_RELEASE.md). main is V2 Android, v2-web is production Cloudflare, v1 is historical V1. Candidate hashes and APKs remain in Git history and ignored artifacts/v2/; they do not certify the final signed Android production source.

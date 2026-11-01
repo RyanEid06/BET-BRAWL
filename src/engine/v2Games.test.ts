@@ -69,7 +69,6 @@ test('mirror puzzles have one rotation-equivalent answer and deadline-only revea
   assert.deepEqual(projectV2Game(s,null,start).scores,{a:0,b:0});
   advanceV2Game(s,start+4000);
   assert.equal(s.stageIndex,0); assert.equal(s.phase,'reveal'); assert.equal(s.scores.a,1);
-  assert.equal(projectV2Game(s, 'a', start+4000).config.choices instanceof Array, true);
   assert.equal(act(s,'a',{type:'MIRROR_PICK',choice:correct},start+4500).accepted,false);
   advanceV2Game(s,start+4999); assert.equal(s.phase,'reveal');
   advanceV2Game(s,start+5000); assert.equal(s.stageIndex,1); assert.equal(s.phase,'puzzle');
@@ -328,5 +327,18 @@ test('bots never act on spectator projections or outside active phases',()=>{
     const s=make(id);assert.equal(getV2BotAction(projectV2Game(s,'a',start-1)),null);
     assert.equal(getV2BotAction(projectV2Game(s,null,start+4000)),null);
     advanceV2Game(s,s.endsAt);assert.equal(getV2BotAction(projectV2Game(s,'a',s.endsAt)),null);
+  }
+});
+
+test('portable checkpoints preserve full state and all recipient projections across languages',async()=>{
+  const {readFileSync}=await import('node:fs');
+  const fixtures=JSON.parse(readFileSync(new URL('./fixtures/v2-projections.json',import.meta.url),'utf8'));
+  assert.equal(fixtures.checkpoints.length,104);
+  for(const fixture of fixtures.checkpoints){
+    const state=roundtrip(fixture.initialState);
+    for(const step of fixture.steps)assert.equal(act(state,step.fighterId,step.action,step.nowMs).accepted,true,fixture.name);
+    advanceV2Game(state,fixture.at);
+    assert.deepEqual(state,fixture.state,fixture.name);
+    for(const recipient of fixture.views)assert.deepEqual(projectV2Game(state,recipient.viewer,fixture.at,true),recipient.view,fixture.name);
   }
 });

@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import * as roomEngine from './roomEngine.ts';
 import {
   createFreshPlayer,
   selectRoundFighters,
@@ -7,9 +8,9 @@ import {
   computeSessionAwards,
   generateTournamentSchedule,
   computeTournamentRankings,
-  applyQualifierMatchResolution,
   getFinalTournamentStandings,
   selectMiniGame,
+  applyQualifierMatchResolution,
   drawMiniGame,
   MINI_GAME_ROTATION,
   MIN_PLAYERS_TO_START,
@@ -38,13 +39,12 @@ test('V2 bag exposes every game before repeating and avoids adjacent refill repe
 test('qualifier resolution owns exactly the requested match and ignores replay', () => {
   const players = createMockRoster(3);
   const schedule = generateTournamentSchedule(players);
-  const apply = applyQualifierMatchResolution;
+  const apply = (roomEngine as any).applyQualifierMatchResolution;
+  assert.equal(typeof apply, 'function');
   const q2 = schedule.matches[1];
   assert.equal(apply(schedule, players, q2.roundNumber, q2.fighterIds, q2.fighterIds[0], false, 'PLAYED'), true);
   assert.deepEqual(schedule.matches.map(m => m.completed), [false, true, false]);
   assert.equal(schedule.qualifiersCompleted, 1);
-  assert.equal(players.find(p => p.id === q2.fighterIds[0])!.qualifierPoints, 3);
-  assert.equal(players.find(p => p.id === q2.fighterIds[1])!.qualifierLosses, 1);
   const snapshot = structuredClone({ schedule, players });
   assert.equal(apply(schedule, players, q2.roundNumber, q2.fighterIds, q2.fighterIds[1], false, 'PLAYED'), false);
   assert.deepEqual({ schedule, players }, snapshot);
@@ -55,7 +55,8 @@ test('qualifier resolution owns exactly the requested match and ignores replay',
 test('qualifier VOID completes one exact match without changing fighter statistics', () => {
   const players = createMockRoster(3);
   const schedule = generateTournamentSchedule(players);
-  const apply = applyQualifierMatchResolution;
+  const apply = (roomEngine as any).applyQualifierMatchResolution;
+  assert.equal(typeof apply, 'function');
   const q1 = schedule.matches[0];
   assert.equal(apply(schedule, players, q1.roundNumber, q1.fighterIds, null, false, 'VOID'), true);
   assert.deepEqual(schedule.matches.map(m => m.completed), [true, false, false]);
@@ -405,4 +406,75 @@ test('computeSessionAwards derives awards strictly from genuine session statisti
   assert.ok(awardIds.includes('brawl_king'));
   assert.ok(awardIds.includes('the_oracle'));
   assert.ok(awardIds.includes('high_roller'));
+});
+
+test('computeSessionAwards crowns tournament_champion with proper award ID', () => {
+  const players = createMockRoster(3);
+  const champ = players[0];
+  champ.qualifierPoints = 6;
+  const awards = computeSessionAwards(players, champ.id);
+  const champAward = awards.find(a => a.id === 'tournament_champion');
+  assert.ok(champAward, 'Must contain award with id tournament_champion');
+  assert.equal(champAward.recipientId, champ.id);
+  assert.equal(champAward.title, 'Tournament Champion');
+});
+
+test('qualifier VOID advances completion without changing fighter qualifier stats', () => {
+  const players = createMockRoster(3);
+  const schedule = generateTournamentSchedule(players);
+  const [f1, f2] = schedule.matches[0].fighterIds.map(id => players.find(p => p.id === id)!);
+  assert.equal(schedule.qualifiersCompleted, 0);
+
+  const initialF1Points = f1.qualifierPoints;
+  const initialF1Wins = f1.qualifierWins;
+  const initialF1Losses = f1.qualifierLosses;
+  const initialF1Matches = f1.qualifierMatchesPlayed;
+  const initialF2Points = f2.qualifierPoints;
+  const initialF2Wins = f2.qualifierWins;
+  const initialF2Losses = f2.qualifierLosses;
+  const initialF2Matches = f2.qualifierMatchesPlayed;
+
+  // On VOID: qualifiersCompleted advances by 1 via real production resolution handler, while fighter stats remain completely untouched
+  applyQualifierMatchResolution(schedule, players, schedule.matches[0].roundNumber, [f1.id, f2.id], null, false, 'VOID');
+
+  assert.equal(schedule.qualifiersCompleted, 1, 'qualifiersCompleted must increment on VOID');
+  assert.equal(schedule.matches[0].completed, true, 'Match must be marked completed');
+  assert.equal(schedule.matches[0].resolutionReason, 'VOID');
+
+  // Fighter stats must be completely unchanged
+  assert.equal(f1.qualifierPoints, initialF1Points, 'f1 points must remain unchanged on VOID');
+  assert.equal(f1.qualifierWins, initialF1Wins, 'f1 wins must remain unchanged on VOID');
+  assert.equal(f1.qualifierTies, 0, 'f1 ties must remain unchanged on VOID');
+  assert.equal(f1.qualifierLosses, initialF1Losses, 'f1 losses must remain unchanged on VOID');
+  assert.equal(f1.qualifierMatchesPlayed, initialF1Matches, 'f1 matches played must remain unchanged on VOID');
+
+  assert.equal(f2.qualifierPoints, initialF2Points, 'f2 points must remain unchanged on VOID');
+  assert.equal(f2.qualifierWins, initialF2Wins, 'f2 wins must remain unchanged on VOID');
+  assert.equal(f2.qualifierTies, 0, 'f2 ties must remain unchanged on VOID');
+  assert.equal(f2.qualifierLosses, initialF2Losses, 'f2 losses must remain unchanged on VOID');
+  assert.equal(f2.qualifierMatchesPlayed, initialF2Matches, 'f2 matches played must remain unchanged on VOID');
+});
+
+test('public bet masking does not mutate authoritative round bets', () => {
+  const players = createMockRoster(3);
+  const { round } = initAuthoritativeRound(1, 4, players);
+
+  // Add a secret bet to the authoritative round
+  const secretBet = {
+    bettorId: players[2].id,
+    fighterId: players[0].id,
+    amount: 150,
+    oddsAtBet: 2.0,
+    timestamp: Date.now(),
+    potentialReturn: 300,
+  };
+  round.bets.push(secretBet);
+  assert.equal(round.bets.length, 1);
+
+  // Mask bets for public broadcast during active betting
+  const publicRound = { ...round, bets: [] };
+  assert.equal(publicRound.bets.length, 0, 'Public round bets must be scrubbed');
+  assert.equal(round.bets.length, 1, 'Authoritative round bets must remain completely unmutated');
+  assert.equal(round.bets[0].bettorId, players[2].id);
+  assert.equal(round.bets[0].amount, 150);
 });

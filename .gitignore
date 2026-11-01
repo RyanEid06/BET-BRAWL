@@ -1,29 +1,47 @@
+# Node & Frontend
 node_modules/
-build/
 dist/
 coverage/
-.DS_Store
 *.log
 .env*
 !.env.example
 .aistudio/
-.wrangler/
-.wrangler-dry-run/
 
-# Local tests, snapshots and secrets
-.dev.vars
-.dev.vars.*
-*.zip
+# Android & Gradle
+.gradle/
+build/
+app/build/
+local.properties
+*.iml
+.idea/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Build outputs & signing
 *.apk
 *.aab
-*.jks
+*.ap_
+*.dex
 *.keystore
+*.jks
+*.p12
 *.pem
 *.key
+*.zip
+.dev.vars
+.dev.vars.*
+.wrangler/
+.wrangler-dry-run/
 artifacts/
 test-results/
 playwright-report/
-output/playwright/
-
-# Generated Android UI when switching maintained branches in the canonical checkout
 app/src/main/assets/web/
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Local release verification and protected signing material
+output/playwright/
+.signing/

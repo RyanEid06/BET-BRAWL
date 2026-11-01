@@ -1,6 +1,7 @@
 // Synthetic transport permits delayed/batched acknowledgements and reconnect boundaries.
 import React from 'react';
 import { createRoot } from 'react-dom/client';
+import App from '../../src/App';
 import { useBrawlClient } from '../../src/engine/useBrawlClient';
 import { V2GameView } from '../../src/components/games/V2GameView';
 import { PayoutRecapModal } from '../../src/components/PayoutRecapModal';
@@ -12,13 +13,14 @@ import '../../src/components/games/V2GameView.css';
 const root = createRoot(document.getElementById('root')!);
 const players: any[] = ['Alexandra', 'Benjamin', 'Casey'].map((name, i) => ({ id: ['a','b','c'][i], name, avatar: ['🦊','🐻','🐸'][i], color: '#06b6d4', isHost: i === 0, isReady: true, connected: true, coins: 1000, matchesWon: 0, matchesPlayed: 0, totalBetsPlaced: 0, totalBetsWon: 0, totalCoinsWonInBets: 0, totalCoinsLostInBets: 0, highestSingleBet: 0, highestSinglePayout: 0, qualifierPoints: 0, qualifierWins: 0, qualifierTies: 0, qualifierLosses: 0, qualifierMatchesPlayed: 0 }));
 let authority: any, now: number, match = 0;
-const api: any = { queue: [], reads: 0, next: 0 };
+const api: any = { queue: [], reads: 0, next: 0, sockets: [], autoPong: true, stopped: 0 };
 class Socket {
   static OPEN = 1; static CLOSED = 3; static CONNECTING = 0;
   readyState = 0;
   onopen: any; onmessage: any; onclose: any; onerror: any;
-  constructor() { api.socket = this; }
-  send(raw: string) { const message = JSON.parse(raw); if (message.type === 'FIGHTER_ACTION') api.queue.push(message.payload); }
+  url: string;
+  constructor(url: string) { this.url = url; api.socket = this; api.sockets.push(this); }
+  send(raw: string) { const message = JSON.parse(raw); if (message.type === 'FIGHTER_ACTION') api.queue.push(message.payload); if (message.type === 'PING' && api.autoPong) this.onmessage?.({data: JSON.stringify({type: 'PONG', payload: {clientSentAt: message.payload.clientSentAt, serverNow: Date.now()}})}); }
   close() { this.readyState = 3; this.onclose?.({}); }
 }
 (window as any).WebSocket = Socket;
@@ -41,6 +43,7 @@ api.reject = () => { const action = api.queue.shift(); emit('GAME_ACTION_RESULT'
 api.ack = (result: any) => emit('GAME_ACTION_RESULT', result);
 api.failJoin = () => emit('JOIN_ERROR', { code: 'ROOM_NOT_FOUND', message: 'Room no longer exists. Create or join another room.' });
 api.remount = () => root.render(<Harness key={++match} />);
+api.showApp = () => { localStorage.removeItem('betnbrawl_reconnect'); root.render(<App key={++match} />); };
 api.step = (ms: number) => { now += ms; advanceV2Game(authority, now); api.snapshot(); };
 api.solve = () => { authority.data.players.a.solved = true; api.snapshot(); };
 api.payout = () => { advanceV2Game(authority, authority.endsAt); const r = { ...round(), winnerId: null, tieResult: true }; root.render(<PayoutRecapModal key={match} round={r as any} players={players} myPlayer={players[0]} isHost isFinalRound={false} onNextRound={() => api.next++} />); };

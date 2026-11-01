@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:pivotX="54"
+        android:pivotY="54">
+        <!-- Golden Diamond / Coin Base -->
+        <path
+            android:fillColor="#f59e0b"
+            android:pathData="M54,28 L78,54 L54,80 L30,54 Z" />
+        <path
+            android:fillColor="#d97706"
+            android:pathData="M54,34 L72,54 L54,74 L36,54 Z" />
+
+        <!-- Cyan Brawl Lightning Bolt -->
+        <path
+            android:fillColor="#06b6d4"
+            android:pathData="M56,22 L40,54 L52,54 L48,86 L68,48 L56,48 Z" />
+
+        <!-- Crimson Accent Spark -->
+        <path
+            android:fillColor="#ef4444"
+            android:pathData="M64,36 L72,44 L66,46 Z" />
+        <path
+            android:fillColor="#f43f5e"
+            android:pathData="M42,66 L36,74 L44,72 Z" />
+    </group>
+</vector>

@@ -1,80 +1,31 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import os from 'os';
-import { discoverLanAddresses, isRfc1918, isLinkLocal, isLoopback } from './networkDiscovery.ts';
-import { buildRoomJoinUrl, type RoomNetworkInfo } from './types.ts';
+import { discoverLanAddresses, isRfc1918, isLinkLocal, isLoopback, buildJoinUrl, isLoopbackUrl, resolveJoinEndpoint, resolveWsUrl } from './networkDiscovery.ts';
 
-test('buildRoomJoinUrl sets one room query on a public Cloudflare URL', () => {
-  const result = buildRoomJoinUrl('https://brawl.example.com/?campaign=summer&room=OLD', 'abc123', 'cloud');
-  assert.equal(result, 'https://brawl.example.com/?campaign=summer&room=ABC123');
-});
-
-test('buildRoomJoinUrl rejects non-public or non-HTTP Cloudflare sources', () => {
-  for (const source of ['file:///game/index.html', 'null', 'brawl://join', 'http://localhost:5173', 'https://192.168.1.2']) {
-    assert.equal(buildRoomJoinUrl(source, 'ABC123', 'cloud'), null, source);
+test('LAN addresses reject malformed octets instead of accepting numeric prefixes', () => {
+  for (const address of ['10.bad.1.2.3', '10.1.2.999', '10.1.2.3x', '192.168.-1.2']) {
+    assert.equal(isRfc1918(address), false, address);
   }
 });
 
-test('Cloudflare entry and lobby copy describe online play while LAN keeps Wi-Fi guidance', async t => {
-  let React: typeof import('react');
-  let renderToStaticMarkup: typeof import('react-dom/server').renderToStaticMarkup;
-  let TitleAndDiscovery: typeof import('../components/TitleAndDiscovery.tsx').TitleAndDiscovery;
-  let LobbyScreen: typeof import('../components/LobbyScreen.tsx').LobbyScreen;
-  try {
-    [React, { renderToStaticMarkup }, { TitleAndDiscovery }, { LobbyScreen }] = await Promise.all([
-      import('react'), import('react-dom/server'), import('../components/TitleAndDiscovery.tsx'), import('../components/LobbyScreen.tsx'),
-    ]);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ERR_MODULE_NOT_FOUND') {
-      t.skip('React dependencies are not installed in this worktree');
-      return;
-    }
-    throw error;
+test('guest QR links reject unsafe targets and replace existing room parameters', () => {
+  for (const source of ['brawl://join?host=127.0.0.1&port=8080', 'brawl://join?host=169.254.1.1&port=8080',
+    'brawl://join?host=192.168.1.2&port=wrong', 'brawl://join?host=192.168.1.2&port=99999',
+    'http://127.0.0.1:8080', 'http://169.254.1.1:8080', 'javascript:alert(1)', 'not-a-url']) {
+    assert.equal(buildJoinUrl(source, 'ABC123'), '', source);
   }
+  const url = new URL(buildJoinUrl('brawl://join?host=192.168.1.2&port=8181&room=OLD123&room=OLD456', 'ABC123'));
+  assert.deepEqual(url.searchParams.getAll('room'), ['ABC123']);
+  assert.equal(url.searchParams.get('port'), '8181');
+});
 
-  const networkInfo = (deploymentMode: 'cloud' | 'lan'): RoomNetworkInfo => ({
-    deploymentMode,
-    localIp: 'brawl.example.com',
-    port: 443,
-    roomCode: 'ABC123',
-    fullJoinUrl: 'https://brawl.example.com/',
-    hasActiveRoom: false,
-    candidateUrls: deploymentMode === 'lan' ? ['http://192.168.1.10:3000', 'http://10.0.0.4:3000'] : ['https://brawl.example.com/'],
-  });
-  const entryProps = {
-    playerName: '', setPlayerName: () => {}, playerAvatar: '🥊', setPlayerAvatar: () => {},
-    onHostGame: () => {}, onJoinGame: () => {}, errorMessage: null, status: 'IDLE',
-  };
-  const lobbyProps = {
-    players: [], roomCode: 'ABC123', isHost: true, myPlayer: null,
-    onToggleReady: () => {}, onStartGame: () => {},
-  };
-
-  const cloud = renderToStaticMarkup(React.createElement(React.Fragment, null,
-    React.createElement(TitleAndDiscovery, { ...entryProps, networkInfo: networkInfo('cloud') }),
-    React.createElement(LobbyScreen, { ...lobbyProps, networkInfo: networkInfo('cloud') }),
-  ));
-  assert.match(cloud, /3–9 players/);
-  assert.match(cloud, /different networks/);
-  assert.match(cloud, /Internet connection required/);
-  assert.match(cloud, /share room code or QR/i);
-  assert.doesNotMatch(cloud, /Same Wi-Fi|No internet needed|Alternative LAN Addresses|router AP isolation|Finding your local game/i);
-
-  const lan = renderToStaticMarkup(React.createElement(React.Fragment, null,
-    React.createElement(TitleAndDiscovery, { ...entryProps, networkInfo: networkInfo('lan') }),
-    React.createElement(LobbyScreen, { ...lobbyProps, networkInfo: networkInfo('lan') }),
-  ));
-  assert.match(lan, /Same Wi-Fi/);
-  assert.match(lan, /No internet needed/);
-  assert.match(lan, /Alternative LAN Addresses/);
-  assert.match(lan, /router AP isolation/);
-
-  const unknownMode = renderToStaticMarkup(React.createElement(React.Fragment, null,
-    React.createElement(TitleAndDiscovery, { ...entryProps, networkInfo: null }),
-    React.createElement(LobbyScreen, { ...lobbyProps, networkInfo: null }),
-  ));
-  assert.match(unknownMode, /3–9 players/);
-  assert.doesNotMatch(unknownMode, /Same Wi-Fi|No internet needed|Having trouble joining|Finding your local game|router AP isolation/i);
+test('guest endpoint resolution rejects invalid or ambiguous external targets', () => {
+  for (const search of ['?room=ABC123&host=127.0.0.1&port=8080', '?room=ABC123&host=192.168.1.2&port=bad',
+    '?room=ABC123&host=192.168.1.2&port=8080&port=8181', '?room=ABC123&room=DEF456&host=192.168.1.2']) {
+    assert.equal(resolveJoinEndpoint('ABC123', undefined, search).hostToConnect, undefined, search);
+  }
+  assert.equal(resolveJoinEndpoint('ABC123', '127.0.0.1:8080').hostToConnect, undefined);
 });
 
 test('networkDiscovery: correctly identifies RFC1918 and link-local ranges', () => {
@@ -141,4 +92,62 @@ test('networkDiscovery: rejects 169.254.x.x and prefers physical Wi-Fi over virt
   assert.equal(primaryIp, '192.168.1.45', 'Must select physical Wi-Fi private IP');
   assert.ok(!candidateIps.includes('169.254.8.1'), 'Must NEVER include link-local APIPA address');
   assert.ok(!candidateIps.includes('127.0.0.1'), 'Must not include internal loopback when valid LAN IP exists');
+});
+
+test('Android QR never becomes null?room=... and rejects null/file origins while preserving brawl scheme', () => {
+  // Rejection of null, file, about, and empty URLs
+  assert.equal(buildJoinUrl('null', 'BRAWL'), '');
+  assert.equal(buildJoinUrl('  null  ', 'BRAWL'), '');
+  assert.equal(buildJoinUrl('file:///android_asset/web/index.html', 'BRAWL'), '');
+  assert.equal(buildJoinUrl('', 'BRAWL'), '');
+
+  // Loopback / unroutable check
+  assert.equal(isLoopbackUrl('null'), true);
+  assert.equal(isLoopbackUrl('file:///android_asset/web/index.html'), true);
+  assert.equal(isLoopbackUrl(''), true);
+  assert.equal(isLoopbackUrl('brawl://join?host=127.0.0.1&port=8080'), true);
+  assert.equal(isLoopbackUrl('brawl://join?host=192.168.1.50&port=8080'), false);
+
+  // Valid Android brawl scheme produces proper URI: brawl://join?host=<LAN_IP>&port=8080&room=<ROOM_CODE>
+  const androidQr = buildJoinUrl('brawl://join?host=192.168.1.50&port=8080', 'BRAWL');
+  assert.equal(androidQr, 'brawl://join?host=192.168.1.50&port=8080&room=BRAWL');
+  assert.ok(!androidQr.includes('null'), 'Android QR must never contain string null');
+
+  // Normal browser keeps original URL with query param
+  const browserQr = buildJoinUrl('http://192.168.1.50:3000', 'BRAWL');
+  assert.equal(browserQr, 'http://192.168.1.50:3000/?room=BRAWL');
+});
+
+test('cold deep-link host/port reaches join target and bypasses discovery via real production endpoint resolver', () => {
+  // Empty discovered rooms map proves discovery is bypassed
+  const emptyDiscoveredRooms = new Map<string, { hostIp: string; port: number }>();
+  const coldSearch = '?room=BRAWL&host=192.168.1.42&port=8080';
+
+  // 1. Cold deep link directly resolves host and port from query search params
+  const resolution = resolveJoinEndpoint('BRAWL', undefined, coldSearch, emptyDiscoveredRooms);
+  assert.equal(resolution.source, 'query', 'Cold deep-link must resolve via query source');
+  assert.equal(resolution.hostToConnect, '192.168.1.42:8080');
+
+  // 2. Real resolveWsUrl maps the resolved target to canonical WebSocket endpoint
+  const wsUrl = resolveWsUrl(resolution.hostToConnect);
+  assert.equal(wsUrl, 'ws://192.168.1.42:8080/ws', 'WebSocket URL must connect directly to supplied cold deep-link host/port');
+});
+
+test('manual room joins without deep-link parameters use normal discovery', () => {
+  // When no query params exist, manual join with no discovered room returns none
+  const emptyDiscoveredRooms = new Map<string, { hostIp: string; port: number }>();
+  const noDiscoveryRes = resolveJoinEndpoint('BRAWL', undefined, '', emptyDiscoveredRooms);
+  assert.equal(noDiscoveryRes.source, 'none');
+  assert.equal(noDiscoveryRes.hostToConnect, undefined);
+
+  // When room is discovered via mDNS/UDP discovery, it resolves via discovered source
+  const discoveredRooms = new Map<string, { hostIp: string; port: number }>();
+  discoveredRooms.set('BRAWL', { hostIp: '192.168.1.88', port: 8080 });
+
+  const manualJoinRes = resolveJoinEndpoint('BRAWL', undefined, '', discoveredRooms);
+  assert.equal(manualJoinRes.source, 'discovered', 'Manual join must use normal discovery');
+  assert.equal(manualJoinRes.hostToConnect, '192.168.1.88:8080');
+
+  const wsUrl = resolveWsUrl(manualJoinRes.hostToConnect);
+  assert.equal(wsUrl, 'ws://192.168.1.88:8080/ws');
 });

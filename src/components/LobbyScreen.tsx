@@ -9,9 +9,9 @@ import React, { useEffect, useState } from 'react';
 import QRCode from 'qrcode';
 import { Users, Wifi, Play, Bot, WifiOff, LogOut, Trophy } from 'lucide-react';
 import type { PublicPlayer, RoomNetworkInfo } from '../engine/types.ts';
-import { buildRoomJoinUrl } from '../engine/types.ts';
 import { MIN_PLAYERS_TO_START, MAX_PLAYERS_CAPACITY } from '../engine/roomEngine.ts';
 import { sound } from '../engine/audio.ts';
+import { isLoopbackUrl, buildJoinUrl } from '../engine/networkDiscovery.ts';
 
 interface Props {
   players: PublicPlayer[];
@@ -39,58 +39,40 @@ export const LobbyScreen: React.FC<Props> = ({
   onAddDebugBot,
   isDebug = false,
 }) => {
-  const isCloud = networkInfo?.deploymentMode === 'cloud';
-  const isLan = networkInfo?.deploymentMode === 'lan';
-  const isLoopbackUrl = (url: string | undefined): boolean => {
-    if (!url) return true;
-    try {
-      const parsed = new URL(url);
-      const host = parsed.hostname;
-      return host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0' || host === '::1';
-    } catch {
-      return url.includes('localhost') || url.includes('127.0.0.1') || url.includes('0.0.0.0');
-    }
-  };
-
   const [selectedBaseUrl, setSelectedBaseUrl] = useState<string>(() => {
-    if (networkInfo?.deploymentMode === 'cloud' && networkInfo.fullJoinUrl) return networkInfo.fullJoinUrl;
-    // If client loaded over a proven non-loopback LAN host, use origin
-    if (typeof window !== 'undefined' && !isLoopbackUrl(window.location.origin)) {
-      return window.location.origin;
-    }
+    // 1. In Android WebView or native environment, prefer native networkInfo.fullJoinUrl (brawl://join?host=...)
     if (networkInfo?.fullJoinUrl && !isLoopbackUrl(networkInfo.fullJoinUrl)) {
       return networkInfo.fullJoinUrl;
     }
-    return typeof window !== 'undefined' ? window.location.origin : '';
+    // 2. If client loaded over a proven non-loopback LAN host in a normal browser, use origin
+    if (typeof window !== 'undefined' && !isLoopbackUrl(window.location.origin)) {
+      return window.location.origin;
+    }
+    return '';
   });
 
-  const [qrCode, setQrCode] = useState<{ joinUrl: string; dataUrl: string } | null>(null);
+  const [qrDataUrl, setQrDataUrl] = useState<string>('');
 
   useEffect(() => {
     if (!networkInfo) return;
 
-    if (networkInfo.deploymentMode === 'cloud') return;
-
-    // Never silently prefer localhost/loopback when a valid non-loopback LAN URL exists!
+    // Prefer native fullJoinUrl (e.g. Android brawl://join?host=...)
     if (networkInfo.fullJoinUrl && !isLoopbackUrl(networkInfo.fullJoinUrl)) {
-      if (isLoopbackUrl(selectedBaseUrl)) {
+      if (isLoopbackUrl(selectedBaseUrl) || selectedBaseUrl.startsWith('brawl://')) {
         setSelectedBaseUrl(networkInfo.fullJoinUrl);
       }
-    } else if (!selectedBaseUrl && networkInfo.fullJoinUrl) {
+    } else if (isLoopbackUrl(selectedBaseUrl) && networkInfo.fullJoinUrl) {
       setSelectedBaseUrl(networkInfo.fullJoinUrl);
     }
   }, [networkInfo, selectedBaseUrl]);
 
-  const joinUrlWithRoom = roomCode && networkInfo
-    ? buildRoomJoinUrl(isCloud ? networkInfo.fullJoinUrl : selectedBaseUrl, roomCode, networkInfo.deploymentMode)
-    : null;
+  const joinUrlWithRoom = buildJoinUrl(selectedBaseUrl, roomCode);
 
-  const hasValidJoinUrl = !!joinUrlWithRoom;
+  const isLanReady = !isLoopbackUrl(selectedBaseUrl);
 
-  // Generate a QR only for a validated join URL.
+  // Generate real join QR code ONLY when non-loopback LAN URL exists (BLOCKER 7)
   useEffect(() => {
-    let current = true;
-    if (joinUrlWithRoom && hasValidJoinUrl) {
+    if (joinUrlWithRoom && isLanReady) {
       QRCode.toDataURL(joinUrlWithRoom, {
         margin: 1,
         width: 160,
@@ -99,16 +81,14 @@ export const LobbyScreen: React.FC<Props> = ({
           light: '#ffffff',
         },
       })
-        .then(dataUrl => { if (current) setQrCode({ joinUrl: joinUrlWithRoom, dataUrl }); })
+        .then(url => setQrDataUrl(url))
         .catch(err => console.error('QR code generation error:', err));
     } else {
-      setQrCode(null);
+      setQrDataUrl('');
     }
-    return () => { current = false; };
-  }, [joinUrlWithRoom, hasValidJoinUrl]);
+  }, [joinUrlWithRoom, isLanReady]);
 
   const connectedPlayers = players.filter(p => p.connected);
-  const qrDataUrl = qrCode?.joinUrl === joinUrlWithRoom ? qrCode.dataUrl : '';
   const enoughPlayers = connectedPlayers.length >= MIN_PLAYERS_TO_START;
   const allReady = connectedPlayers.every(p => p.isReady || p.isHost) || isDebug;
   const canStart = isHost && enoughPlayers && allReady;
@@ -120,9 +100,8 @@ export const LobbyScreen: React.FC<Props> = ({
         <div className="flex-1 space-y-3 text-center md:text-left w-full">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-950 text-cyan-300 border border-cyan-700/60 text-xs font-mono">
             <Wifi className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
-            <span>{isCloud ? 'Online room · Share room code or QR' : isLan ? 'Same Wi-Fi · Scan QR or enter room code' : 'Room · Share the room code'}</span>
+            <span>Same Wi-Fi · Scan QR or enter room code</span>
           </div>
-          {isCloud && <p className="text-xs text-slate-400">Players can join from different networks. Internet connection required.</p>}
 
           <div className="space-y-0.5">
             <span className="text-xs font-mono text-slate-400 uppercase tracking-widest font-bold block">ROOM CODE</span>
@@ -139,14 +118,14 @@ export const LobbyScreen: React.FC<Props> = ({
           </div>
 
           {/* Host-only troubleshooting disclosure */}
-          {isHost && networkInfo && (
+          {isHost && (
             <details className="text-xs text-slate-400 pt-2 border-t border-slate-800/80">
               <summary className="cursor-pointer hover:text-slate-200 font-mono transition-colors">
-                {isCloud ? 'Share join link' : 'Having trouble joining?'}
+                Having trouble joining?
               </summary>
               <div className="mt-2 space-y-2 p-3 rounded-xl bg-slate-950/80 border border-slate-800 text-[11px] font-mono">
-                <div>{isCloud ? 'Join link:' : 'Manual Address:'} <span className="text-cyan-300 select-all">{joinUrlWithRoom}</span></div>
-                {!isCloud && networkInfo?.candidateUrls && networkInfo.candidateUrls.length > 1 && (
+                <div>Manual Address: <span className="text-cyan-300 select-all">{joinUrlWithRoom}</span></div>
+                {networkInfo?.candidateUrls && networkInfo.candidateUrls.length > 1 && (
                   <div className="flex items-center gap-1.5 flex-wrap pt-1">
                     <span>Alternative LAN Addresses:</span>
                     {networkInfo.candidateUrls.map(url => (
@@ -164,15 +143,15 @@ export const LobbyScreen: React.FC<Props> = ({
                     ))}
                   </div>
                 )}
-                {!isCloud && <div className="text-slate-500">
+                <div className="text-slate-500">
                   Ensure all devices are on the exact same Wi-Fi and router AP isolation is turned off.
-                </div>}
+                </div>
               </div>
             </details>
           )}
         </div>
 
-        {/* QR Code Container */}
+        {/* QR Code Container with Safe LAN fallback */}
         <div className="shrink-0 flex flex-col items-center">
           {qrDataUrl ? (
             <div className="bg-white p-2.5 rounded-2xl shadow-xl flex flex-col items-center">
@@ -182,7 +161,7 @@ export const LobbyScreen: React.FC<Props> = ({
           ) : (
             <div className="w-28 h-28 md:w-32 md:h-32 rounded-2xl bg-slate-950 border border-slate-800 flex flex-col items-center justify-center p-3 text-center shadow-inner">
               <Wifi className="w-5 h-5 text-cyan-400 animate-pulse mb-1.5" />
-              <span className="text-[11px] font-mono text-slate-400 font-bold leading-tight">{isCloud ? 'Share the room code to join online' : isLan ? 'Finding your local game…' : 'Share the room code to join'}</span>
+              <span className="text-[11px] font-mono text-slate-400 font-bold leading-tight">Finding your local game…</span>
             </div>
           )}
         </div>

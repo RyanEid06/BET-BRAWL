@@ -5,7 +5,7 @@
  * Bet & BRAWL: Master Client Application
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useBrawlClient } from './engine/useBrawlClient.ts';
 import { sound } from './engine/audio.ts';
 import { Volume2, VolumeX, WifiOff } from 'lucide-react';
@@ -40,6 +40,23 @@ export default function App() {
     return localStorage.getItem('betnbrawl_player_avatar') || '⚡';
   });
   const [isMuted, setIsMuted] = useState(sound.isMuted);
+  const [confirmLeave, setConfirmLeave] = useState(false);
+  const leaveDialog = useRef<HTMLDialogElement>(null);
+
+  useEffect(() => {
+    const shell = window as unknown as { onAndroidBackPressed?: () => boolean };
+    const back = () => {
+      if (client.phase === 'ENTRY') return false;
+      setConfirmLeave(previous => !previous);
+      return true;
+    };
+    shell.onAndroidBackPressed = back;
+    return () => { if (shell.onAndroidBackPressed === back) delete shell.onAndroidBackPressed; };
+  }, [client.phase]);
+  useEffect(() => {
+    if (confirmLeave && client.phase !== 'ENTRY') leaveDialog.current?.showModal();
+    else { leaveDialog.current?.close(); if (confirmLeave) setConfirmLeave(false); }
+  }, [confirmLeave, client.phase]);
 
   const toggleMute = () => {
     sound.isMuted = !sound.isMuted;
@@ -70,6 +87,11 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#0b0d14] text-slate-100 flex flex-col justify-between select-none relative">
+      <dialog ref={leaveDialog} aria-labelledby="leave-room-title" onCancel={event => { event.preventDefault(); setConfirmLeave(false); }} className="m-auto w-[calc(100%_-_2rem)] max-w-sm rounded-2xl border border-slate-600 bg-slate-900 p-5 text-slate-100 backdrop:bg-black/75">
+        <h2 id="leave-room-title" className="text-xl font-bold">{client.isHost ? 'Close room and leave?' : 'Leave this room?'}</h2>
+        <p className="my-4 text-sm text-slate-300">{client.isHost ? 'This closes your hosted game for everyone.' : 'Leaving disconnects your seat. An active match follows the normal disconnect rules.'}</p>
+        <div className="flex flex-wrap gap-3"><button autoFocus type="button" className="min-h-12 rounded-lg bg-cyan-700 px-4 font-bold" onClick={() => setConfirmLeave(false)}>Keep playing</button><button type="button" className="min-h-12 rounded-lg border border-rose-400 px-4 font-bold" onClick={() => { client.leaveRoom(); setConfirmLeave(false); }}>{client.isHost ? 'Close room and leave' : 'Leave room'}</button></div>
+      </dialog>
       {/* Sound toggle button in top corner */}
       <div className="px-3 pt-2 text-[10px] font-mono tracking-wider text-slate-400">BET &amp; BRAWL V2</div>
       <div className="fixed top-3 right-3 z-50">
