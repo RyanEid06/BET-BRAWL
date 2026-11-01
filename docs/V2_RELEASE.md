@@ -1,6 +1,6 @@
 # V2 release — 2.0.0
 
-V2 is the production web version on main, targeting the existing Cloudflare Worker/site bet-brawl. Deployment status and exact verification evidence are recorded below; production is not considered deployed until the public smoke passes.
+V2 is the production web version on main, targeting the existing Cloudflare Worker/site bet-brawl. V2 is deployed at [bet-brawl.northstack-labs.workers.dev](https://bet-brawl.northstack-labs.workers.dev). The public multi-client smoke passed.
 
 ## Changes
 
@@ -21,8 +21,12 @@ V2 is the production web version on main, targeting the existing Cloudflare Work
 - Local lint/full cf:verify PASS:98 shared +20 Worker, typechecks/build/dry-run and actual Wrangler SQLite/WebSocket tournament/restart. Real Chrome matrix32cases and8 focused regression groups PASS; zero page errors.
 - Exact-source [CI41309586042 SUCCESS](https://github.com/RyanEid06/BET-BRAWL/actions/runs/41309586042) at453c02836add4a0b5223de92f43dd97f471171fb includes clean-install full gate and Chromium matrix/regressions.
 - Published recovery tags: v1.0.0-production-web at a60a79d007b6c93acb49d49483b9f1c343f76d76; v1.0.0-pre-v2-main at2ee6d66f4ecd49a66bf31530413919d550055f11. Existing V1 branches/frozen tag verified unchanged.
-- Main integration CI, deployment URL/version and public smoke: pending. See CODEX_WORKLOG.md.
+- Production source:00b0572bcbbd31a42f17c0d86094413c96e1e526. [Main CI41309915087 SUCCESS](https://github.com/RyanEid06/BET-BRAWL/actions/runs/41309915087) and [same-head web CI41309915029 SUCCESS](https://github.com/RyanEid06/BET-BRAWL/actions/runs/41309915029), each including clean-install full verification and Chromium. Final release-evidence commits change documentation only; runtime/config remain identical to this deployed source.
+- Cloudflare Worker/site:bet-brawl, version d349b03e-b847-4f13-a6b9-445c0c639230, deployed2026-11-01 with strict remote-config checks and preserved dashboard variables. The old V1 version remains in deployment history. Existing BRAWL_ROOMS/BrawlRoom SQLite storage is retained.
+- Public smoke:3isolated Chrome clients created/joined a normal room, marked ready, started tournament, reconnected the same fighter seat, played Rapid Red/Green and Split Decision, finished both games, synchronized payout and advanced to the next round after each.12accepted actions,0rejected,0page/Join errors. Test-room CLOSE_ROOM sent during cleanup. Evidence:output/playwright/production-smoke.json and artifacts/v2/production-public-smoke.log.
+- Public integrity:home200, visible V2 badge/title, /api/network-info version2.0.0/protocol2. Public JS/CSS SHA-256 match the tested local deployment build exactly (artifacts/v2/production-integrity.json).
+- V1 remote branch and dereferenced tag hashes rechecked after deployment; unchanged. Final main documentation CI can be inspected in [Actions](https://github.com/RyanEid06/BET-BRAWL/actions?query=branch%3Amain).
 
 ## Recovery and boundaries
 
-Existing V1 web-ready/frozen branches and frozen tag remain untouched. Dedicated exact pre-promotion anchors are recorded when created. Protocol 1 clients must refresh to V2. Storage is preserved; rollback of Worker code does not roll back room data. Android/LAN code and device acceptance stay on their separate branch; this release does not create a new APK or claim phone testing.
+Existing V1 web-ready/frozen branches and frozen tag remain untouched. Exact pre-promotion anchors are recorded above. Protocol 1 clients must refresh to V2. Storage is preserved; rollback of Worker code does not roll back room data. Android/LAN code and device acceptance stay on their separate branch; this release does not create a new APK or claim phone testing.

@@ -1,34 +1,35 @@
-# BET & BRAWL V2 production finalization — 2026-11-01
+# BET & BRAWL V2 production checkpoint — 2026-11-01
 
-## Objective / authorization
-Owner authorized the ten fixes, full green local/CI/browser verification, V1 history preservation, V2 integration into main, replacement of the live V1 Cloudflare Worker, and post-deploy multi-client smoke. Do not deploy with any red gate. Preserve architecture, scoring and storage. No Android release/device actions requested.
+## Objective / status
+COMPLETE: ten requested fixes implemented in the current V2 web architecture; full local/CI/browser gates passed; V1 history preserved; main promoted; existing Cloudflare production replaced; public three-client smoke passed. No remaining implementation or deployment action. This final checkpoint/release-evidence change is documentation only.
 
-## Verified starting state
-- Clean checkout switched from codex/v2-games-android 7fc31ab to codex/v2-games-web 1bfc5d3. No extra worktree. GitHub refs refreshed; Windows keyring authenticated.
-- main 2ee6d66 (V1 Android/LAN), v1-web-cloudflare-ready a60a79d (V1 online), frozen v1-web-final e1f948c / v1.0.0-web-final unchanged. Preserve V1 refs and exact pre-production anchors before main integration.
-- Production config now targets bet-brawl; same BRAWL_ROOMS/BrawlRoom SQLite binding as V1. Authenticated Wrangler confirmed existing live version e95923d1-b1e4-4566-9b90-c1cf2fddb49b, compatibility date 2026-10-18 and ASSETS. Actual URL will be retrieved from deployment output.
-- Canonical [V2 plan](docs/superpowers/plans/2026-10-26-v2-games.md). Prior verification/handoffs are historical in Git and artifacts/v2/; rerun for this source.
+## Production / Git provenance
+- Canonical C:/Users/Administrator/Desktop/Projects/BET-BRAWL; production branch main; no extra worktree. V2 deployed source00b0572bcbbd31a42f17c0d86094413c96e1e526. Final documentation-only commits may follow; runtime/config trees must equal this source.
+- Main retains web production tree with former main as merge parent (ours strategy then fast-forward, no force/history rewrite). Prior V1 Android main is preserved by annotated tag v1.0.0-pre-v2-main ->2ee6d66f4ecd49a66bf31530413919d550055f11. Android V2 remains on codex/v2-games-android7fc31ab; no APK/device changes requested/performed.
+- Preserved online V1: v1-web-cloudflare-ready and annotated v1.0.0-production-web ->a60a79d007b6c93acb49d49483b9f1c343f76d76. Frozen v1-web-final and v1.0.0-web-final ->e1f948c6c6e46355435fd70ea9ab8ee63031ebea. Remote branch/tag hashes rechecked after deployment; unchanged.
+- Worker/site bet-brawl; https://bet-brawl.northstack-labs.workers.dev; V2 version d349b03e-b847-4f13-a6b9-445c0c639230. Previous live V1 version e95923d1-b1e4-4566-9b90-c1cf2fddb49b remains in Cloudflare history. Native Wrangler deploy --strict --keep-vars succeeded. BRAWL_ROOMS/BrawlRoom SQLite, activeRoom key, room-code routing and compatibility date2026-10-18 retained; no destructive migration/new namespace.
 
-## Decisions / important files
-- Keep TS rules and Worker/Node authority. Circuit optimistic rotations reconcile snapshots/rejects/solved/reconnect. Memory reconnect resets draft/undo to server projection; disable offline submissions.
-- Scope feedback to locally sent action identity, match, stage and phase; clear on transition/reconnect.
-- Isolate deadline clock rendering, using absolute server-adjusted time. Treasure direct controls/presets still require exactly 10 energy. Mirror 1-second authoritative reveal with five 4-second puzzle windows (25 seconds total).
-- Collapse standings/final boards behind View details; keep personal outcome/host continuation visible. Territory avatar/name ownership + weighted score. Visible V2 badge.
-- Files: src/components/games/V2GameView.tsx, src/engine/useBrawlClient.ts, src/components/PayoutRecapModal.tsx, src/engine/v2Games.ts, worker/roomCore.ts, wrangler.jsonc, docs and CI.
+## Changes / decisions
+- Circuit optimistic rotations/power/moves reconcile using authoritative move counts; rejects/solved/reconnect safely reset. Memory reconnect/rejection mounts from server board and clears undo. Offline/unauthenticated restoration controls pause; failed reconnect returns to entry with recoverable error.
+- Action results require locally known action ID/current match/stage/phase. Clear feedback at transitions/reconnect.
+- Deadline clock samples absolute server-adjusted time every100ms independently; integer seconds avoid game rerendering.
+- Treasure sliders +Balanced3/3/4 +Clear retain exact10-energy rules/scoring. Mirror five4-second puzzles each gain1-second authoritative correct/wrong reveal (25s total).
+- Compact payout keeps winner/personal result/host continuation visible; View details contains standings/final boards/history. Territory avatars/names/colors +weighted live scores. Visible BET & BRAWL V2 badge and API2.0.0/protocol2.
+- README/release/deployment docs target main/bet-brawl; no deployment instruction switches to the V1 branch. Historical V1 docs labeled. [Release](docs/V2_RELEASE.md), [storage/rollback](CLOUDFLARE_MIGRATION.md), [checks](CLOUDFLARE_VERIFICATION.md), original [V2 plan](docs/superpowers/plans/2026-10-26-v2-games.md).
 
-## Progress / checks
-- Source confirms reported causes. Storage audit: activeRoom key/data shape compatible via additive fields; V1 clients require refresh for protocol 2. Add V1 snapshot restoration regression.
-- Implemented all ten requested changes. Full local lint/cf:verify PASS:98 shared +20 Worker, production build, Worker typecheck, dry-run, actual Wrangler/SQLite/WebSocket tournament/restart/privacy/replay. Evidence artifacts/v2/production-cf-verify.log. Initial sandbox loopback test could not run; escalated actual release gate passed.
-- Real Chrome 32-case matrix PASS at four sizes, no page errors/overflow/undersized controls. New hook/component regressions PASS: rapid/partial/batched/rejected/solved Circuit, zero Circuit rerenders during1.25s clock sampling, Memory reconnect draft/undo and disabled actions before seat restoration, stale stage/match errors, Mirror reveal, allocation preset/slider, weighted scores, reachable payout continuation at360/390/1366. output/playwright/{results,regressions}.json; visual screenshots inspected.
-- Synthetic V1 restoration initially found a stale-host test fixture; corrected and full20Worker passed. Browser fixture-only failures (Node crypto import, offline Memory controls absent, repeated payout mount) corrected. No remaining observed test failure.
-- Review caught socket-open-before-seat-restore gap, fixed by CONNECTING until authoritative ROOM_STATE. Focused browser regression passes. Final review also found rejected-rejoin CONNECTING hang; fixed by returning to entry with an explicit error and closing that unauthenticated socket. Negative browser reconnect regression passes. No unresolved review blocker.
-- CI now includes lint/full cf:verify plus the committed real Chromium matrix/regressions, using isolated pinned Playwright tooling. No production dependency added.
-- Automatic approval review rejected direct credential-file access for custom Cloudflare API metadata; no credential read performed. Native Wrangler whoami/version/deployment commands succeeded. Continue through native Wrangler.
-- Exact-source CI41309586042 SUCCESS at453c02836add4a0b5223de92f43dd97f471171fb: clean npm ci, lint/full cf:verify and full Chromium matrix/regressions.
-- Published annotated recovery tags: v1.0.0-production-web -> a60a79d007b6c93acb49d49483b9f1c343f76d76; v1.0.0-pre-v2-main ->2ee6d66f4ecd49a66bf31530413919d550055f11. Remote dereferenced tags and unchanged existing V1 branches/frozen tag verified.
-- Production promotion retains the V2 web tree and links prior main as a merge parent (ours strategy), then fast-forwards main. This intentionally keeps Android/LAN separate rather than importing stale V1 native code into web production. No history rewrite or force push.
-- Prepared explicit public three-browser smoke script scripts/browser/production-smoke.ts (requires exact HTTPS URL, validates version before creating synthetic room, normal controls/reconnect/payout/next round, closes only its room).
-- Pending: main integration CI; deploy; public smoke; final evidence.
+## Observed verification / evidence
+- Local lint/full cf:verify PASS:98shared tests +20Worker tests, TS/Worker typechecks, production build/dry-run, actual Wrangler SQLite/WebSocket tournaments/privacy/replay/reconnect/restart/pending alarms. artifacts/v2/production-cf-verify.log. Synthetic V1 snapshot restore proves identity/bankroll/bet/schedule retention, one-time timeout/refund and next identified V2 round.
+- Real Chrome32-case matrix at360x640/390x844/768x1024/1366x768 PASS, no page errors/overflow/undersized controls.8focused hook/component groups PASS: rapid/partial/batched/reject/solve Circuit, zero Circuit rerenders during1.25s clock sampling, Memory draft/undo reconnect, pre-join pause/failed restoration, stale feedback, Mirror reveal, allocation, territory scores and reachable payout continuation. Screenshots visually inspected. output/playwright/{results,regressions}.json.
+- CI41309586042 SUCCESS at453c028; main CI41309915087 and same-source web CI41309915029 SUCCESS at00b0572. Each clean npm ci, lint/full cf:verify and real Chromium matrix/regressions; browser tooling isolated/pinned1.62.1. Logs/artifacts under artifacts/v2/production-{ci-453c028,main-ci-00b0572}*. Final documentation CI is visible in main Actions; runtime remains the tested/deployed tree.
+- Actual App local multi-client Node browser smoke PASS: Red/Green and Memory private role/scoped actions/study/draft/lock/payout, no page errors. artifacts/v2/production-app-smoke.log and browser/production-protocol-results.json. All local browser/Node/Vite processes ended.
+- Public HTTPS/WSS smoke PASS:3isolated Chrome clients, normal room create/join/ready/start, same fighter seat reconnect, Rapid Red/Green and Split Decision completion/payout/next-round twice.12accepted actions,0rejected,0page/Join errors; own test-room CLOSE_ROOM requested. output/playwright/production-smoke.json and artifacts/v2/production-public-smoke.log.
+- Public home200, visibleV2 and API2.0.0/protocol2; public JS/CSS match local SHA-256 exactly. artifacts/v2/production-integrity.json; deployment log artifacts/v2/production-deploy.log.
+
+## Limits / useful context
+- V1 tabs must refresh for protocol2. Existing V1 stored rounds can settle/refund from retained alarms; legacy rounds lack current action identity, so seamless in-progress V1 interaction is not claimed. Code rollback does not roll back room data; prefer roll-forward or quiet room boundary.
+- Public smoke used isolated browser contexts on one computer, not physical phones or participants on different networks. Android/LAN/established signing remain separate.
+- Native Wrangler auth/deployment succeeded. Automatic approval review rejected direct credential-file access for custom metadata; no credential was read by that rejected action. Used native CLI thereafter. No secrets printed/committed.
+- Fixed test-only stale host/Node-crypto/mount assertions during regression development; final suites green. Initial sandbox loopback restriction required approved local server execution. Useful logs/reports preserved; disposable dry-run/helper artifacts may be removed after exact-path audit.
 
 ## Exact next action
-Commit public smoke/support docs, integrate preserved main history into web tree, fast-forward production main and wait for green main CI. Then deploy existing bet-brawl and smoke three public clients. Record all identifiers. Production mutation authorized; do not deploy with red checks.
+No further product work required. Verify final documentation-only main CI succeeds, retain final status under artifacts/v2/, report final HEAD and production/recovery identifiers. Keep V1 history and Android branch intact. No further deployment needed for documentation-only changes.
