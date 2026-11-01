@@ -202,7 +202,11 @@ function hostServiceStatus(): { running: boolean; foreground: boolean } {
 }
 function hostServiceRunning(): boolean { return hostServiceStatus().running; }
 function imeVisible(): boolean { return /(?:mInputShown|mShowRequested|mImeWindowVis)\s*[=:]\s*(?:true|1)\b/i.test(shell('dumpsys', 'input_method')); }
-function notificationPermission(): string { return shell('pm', 'check-permission', 'android.permission.POST_NOTIFICATIONS', PACKAGE).toLowerCase(); }
+function notificationPermission(): string {
+  const state = shell('dumpsys', 'package', PACKAGE);
+  if (!state.includes('android.permission.POST_NOTIFICATIONS')) throw new Error('App does not declare its notification permission.');
+  return /android\.permission\.POST_NOTIFICATIONS:\s*granted=true\b/.test(state) ? 'granted' : 'denied';
+}
 
 function findRoomCode(roots: UiNode[]): string {
   const nodes = allNodes(roots);
@@ -297,6 +301,7 @@ async function foregroundApp(): Promise<void> {
 }
 
 async function testEntryBackAndIme(): Promise<void> {
+  shell('settings', 'put', 'secure', 'show_ime_with_hard_keyboard', '1');
   let ui = await waitForText(/HOST NEW GAME/i, 'entry screen');
   saveUi('entry', ui.xml);
   const pid = appPid();
