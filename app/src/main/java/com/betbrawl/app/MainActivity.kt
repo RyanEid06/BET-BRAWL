@@ -20,6 +20,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.betbrawl.app.server.LanDiscovery
+import com.betbrawl.app.server.HostService
 import com.betbrawl.app.webview.BrawlWebInterface
 import com.betbrawl.app.webview.BrawlWebViewClient
 import com.betbrawl.app.webview.DeepLinkParser
