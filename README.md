@@ -4,7 +4,7 @@ Play at **[bet-brawl.northstack-labs.workers.dev](https://bet-brawl.northstack-l
 
 Production web version **2.0.0**, protocol **2**, with 14 games for 3–9 players. The eight V2 games are Memory Heist, Crowd Count, Mirror Trouble, Safecracker, Circuit Sprint, Split Decision, Treasure Tug and Pocket Territory. Tournament, betting, championship and bankroll rules are unchanged.
 
-The production branch is `main`. Cloudflare Worker **bet-brawl** serves React/Vite assets and authoritative SQLite Durable Objects over the same HTTPS/WSS origin. Internet is required; players can join from different networks. `server.ts` is the local Node/LAN reference, not the production backend. Android/LAN V2 remains separate on `codex/v2-games-android`.
+The production branch is `v2-web`. Cloudflare Worker **bet-brawl** serves React/Vite assets and authoritative SQLite Durable Objects over the same HTTPS/WSS origin. Internet is required; players can join from different networks. `server.ts` is the local Node/LAN reference, not the production backend. Android/LAN V2 is maintained on `main`; `v1` preserves the former V1 Android main.
 
 [V2 release and verification](docs/V2_RELEASE.md), [deployment/storage notes](CLOUDFLARE_MIGRATION.md), [verification commands](CLOUDFLARE_VERIFICATION.md) and [worklog](CODEX_WORKLOG.md) distinguish observed results from pending gates.
 
@@ -31,7 +31,7 @@ npm run cf:verify
 Deploy only after all required local, browser and exact-source CI checks are green:
 
 ```powershell
-git switch main
+git switch v2-web
 git pull --ff-only
 npm ci
 npm run lint

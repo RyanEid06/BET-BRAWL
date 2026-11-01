@@ -1,6 +1,6 @@
 # V2 release — 2.0.0
 
-V2 is the production web version on main, targeting the existing Cloudflare Worker/site bet-brawl. V2 is deployed at [bet-brawl.northstack-labs.workers.dev](https://bet-brawl.northstack-labs.workers.dev). The public multi-client smoke passed.
+V2 is the production web version on v2-web, targeting the existing Cloudflare Worker/site bet-brawl. V2 is deployed at [bet-brawl.northstack-labs.workers.dev](https://bet-brawl.northstack-labs.workers.dev). The public multi-client smoke passed.
 
 ## Changes
 
@@ -13,7 +13,7 @@ V2 is the production web version on main, targeting the existing Cloudflare Work
 7. A separate deadline clock retains 100 ms sampling against absolute server-adjusted time; integer seconds update independently of game controls.
 8. Pocket Territory uses fighter avatars/names on tiles and a live weighted-score legend with distinct player colors.
 9. Small visible BET & BRAWL V2 indicator plus version 2.0.0/protocol 2 network metadata.
-10. README/deployment/release docs describe production main and bet-brawl; V1 is preserved history. Production keeps the existing Durable Object namespace and storage shape.
+10. README/deployment/release docs describe production v2-web and bet-brawl; V1 is preserved history. Production keeps the existing Durable Object namespace and storage shape.
 
 ## Verification and deployment record
 
@@ -25,7 +25,7 @@ V2 is the production web version on main, targeting the existing Cloudflare Work
 - Cloudflare Worker/site:bet-brawl, version d349b03e-b847-4f13-a6b9-445c0c639230, deployed2026-11-01 with strict remote-config checks and preserved dashboard variables. The old V1 version remains in deployment history. Existing BRAWL_ROOMS/BrawlRoom SQLite storage is retained.
 - Public smoke:3isolated Chrome clients created/joined a normal room, marked ready, started tournament, reconnected the same fighter seat, played Rapid Red/Green and Split Decision, finished both games, synchronized payout and advanced to the next round after each.12accepted actions,0rejected,0page/Join errors. Test-room CLOSE_ROOM sent during cleanup. Evidence:output/playwright/production-smoke.json and artifacts/v2/production-public-smoke.log.
 - Public integrity:home200, visible V2 badge/title, /api/network-info version2.0.0/protocol2. Public JS/CSS SHA-256 match the tested local deployment build exactly (artifacts/v2/production-integrity.json).
-- V1 remote branch and dereferenced tag hashes rechecked after deployment; unchanged. Final main documentation CI can be inspected in [Actions](https://github.com/RyanEid06/BET-BRAWL/actions?query=branch%3Amain).
+- V1 remote branch and dereferenced tag hashes rechecked after deployment; unchanged. Final main documentation CI can be inspected in [Actions](https://github.com/RyanEid06/BET-BRAWL/actions?query=branch%3Av2-web).
 
 ## Recovery and boundaries
 

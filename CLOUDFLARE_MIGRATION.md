@@ -1,6 +1,6 @@
 # V2 production deployment and storage
 
-Production branch: main. Production Worker/site: bet-brawl. React/Vite assets, /api/network-info and /ws share one public HTTPS origin; room-code routing uses BRAWL_ROOMS.idFromName(code). BrawlRoom keeps SQLite storage and the activeRoom key. The Worker name, exported class, binding and storage type match V1; there is no namespace recreation or destructive data migration.
+Production branch: v2-web. Production Worker/site: bet-brawl. React/Vite assets, /api/network-info and /ws share one public HTTPS origin; room-code routing uses BRAWL_ROOMS.idFromName(code). BrawlRoom keeps SQLite storage and the activeRoom key. The Worker name, exported class, binding and storage type match V1; there is no namespace recreation or destructive data migration.
 
 V2 adds optional tournamentId, gameBag and v2ActionIds fields plus per-game state. A synthetic V1 snapshot regression verifies seat identity, bankroll, private bet and schedule retention after restore, exactly-once timeout settlement, and a valid V2 next round. Runtime tests verify SQLite restart and pending alarms. No production data is exported into tests.
 

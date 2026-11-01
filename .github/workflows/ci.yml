@@ -3,12 +3,10 @@
 on:
   push:
     branches:
-      - main
-      - codex/v2-games-web
+      - v2-web
   pull_request:
     branches:
-      - main
-      - codex/v2-games-web
+      - v2-web
 
 permissions:
   contents: read

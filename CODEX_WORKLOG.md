@@ -1,3 +1,7 @@
+# Confirmed final topology correction — 2026-11-01
+
+Owner clarified main must remain Android, and Android needs the same fixes. Final branches: v1 (exact former Android main2ee6d66), v2-web (this deployed web source), main (V2 Android with matching fixes). All V1 web/frozen tags retained. Correct web docs/CI to v2-web; integrate Android candidate7fc31ab plus shared fixes/native Mirror parity into main; fully verify both; delete redundant branch aliases only after their tips are retained by the final histories/tags. Current web runtime remains deployed00b0572, version d349b03e-b847-4f13-a6b9-445c0c639230. Finalization continues; earlier main-promotion statements below are superseded by this correction.
+
 # BET & BRAWL V2 production checkpoint — 2026-11-01
 
 ## Objective / status
