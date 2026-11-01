@@ -71,7 +71,7 @@ jobs:
           signer=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -n 1)
           aapt=$(find "$ANDROID_HOME/build-tools" -name aapt | sort -V | tail -n 1)
           "$signer" verify --verbose --print-certs app/build/outputs/apk/release/app-release.apk | tee artifacts/android-release-verification/signature.txt
-          actual=$(awk '/Signer #1 certificate SHA-256 digest:/{print tolower($NF)}' artifacts/android-release-verification/signature.txt)
+          actual=$(awk '/certificate SHA-256 digest:/{print tolower($NF)}' artifacts/android-release-verification/signature.txt | sort -u)
           expected=$(tr -d '[:space:]' < app/release-signing.sha256)
           test "$actual" = "$expected"
           "$aapt" dump badging app/build/outputs/apk/release/app-release.apk > artifacts/android-release-verification/badging.txt
