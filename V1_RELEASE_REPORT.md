@@ -1,3 +1,5 @@
+> Historical V1 document. Current production/deployment instructions: [README](README.md) and [V2 release](docs/V2_RELEASE.md). Statements below describe the V1 checkpoint only.
+
 # BET & BRAWL V1 release checkpoint — 2026-10-20
 
 **GREEN** under the corrected coding scope. Both maintained source heads passed CI, including Android lint/APKs and full Cloudflare verification. Manual Android acceptance and Cloudflare deployment/public smoke are USER FOLLOW-UP.

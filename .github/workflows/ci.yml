@@ -3,11 +3,11 @@
 on:
   push:
     branches:
-      - v1-web-cloudflare-ready
+      - main
       - codex/v2-games-web
   pull_request:
     branches:
-      - v1-web-cloudflare-ready
+      - main
       - codex/v2-games-web
 
 permissions:
@@ -33,4 +33,27 @@ jobs:
         run: npm ci
 
       - name: Run full verification
-        run: npm run cf:verify
+        run: npm run lint && npm run cf:verify
+
+      - name: Install isolated browser test tooling
+        run: |
+          npm install --no-save --package-lock=false playwright@1.62.1
+          npx playwright install --with-deps chromium
+
+      - name: Verify V2 in real Chromium
+        run: |
+          npm exec vite -- --host 127.0.0.1 --port 5175 --strictPort > "$RUNNER_TEMP/brawl-vite.log" 2>&1 &
+          vite_pid=$!
+          trap 'kill "$vite_pid"' EXIT
+          for attempt in {1..60}; do
+            if curl -fsS http://127.0.0.1:5175/scripts/browser/v2.html > /dev/null; then break; fi
+            sleep 1
+          done
+          npm run test:browser
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v2-browser-verification
+          path: output/playwright/
+          retention-days: 14

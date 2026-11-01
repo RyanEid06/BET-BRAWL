@@ -14,7 +14,7 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit",
-    "test": "tsx --test src/engine/odds.test.ts src/engine/roomEngine.test.ts src/engine/gameEngine.test.ts src/engine/v2Games.test.ts src/engine/networkDiscovery.test.ts src/engine/multiplayer.test.ts src/components/PayoutRecapModal.test.tsx",
+    "test": "tsx --test src/engine/odds.test.ts src/engine/roomEngine.test.ts src/engine/gameEngine.test.ts src/engine/v2Games.test.ts src/engine/networkDiscovery.test.ts src/engine/multiplayer.test.ts src/components/PayoutRecapModal.test.tsx src/engine/clientReconciliation.test.ts",
     "verify": "npm run typecheck && npm test && npm run test:worker-core && npm run build && npm run cf:typecheck",
     "cf:typecheck": "tsc -p tsconfig.worker.json --noEmit",
     "cf:dry-run": "npm run build && wrangler deploy --dry-run --outdir .wrangler-dry-run",
@@ -22,7 +22,8 @@
     "test:cloudflare": "npm run build && tsx scripts/cloudflare-multiplayer.test.ts",
     "test:worker-core": "tsx --test worker/BrawlRoom.test.ts",
     "cf:verify": "npm run verify && npm run cf:dry-run && npm run test:cloudflare",
-    "cf:deploy": "npm run build && wrangler deploy"
+    "cf:deploy": "npm run build && wrangler deploy",
+    "test:browser": "node scripts/browser/verify.mjs && node scripts/browser/regressions.mjs"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",

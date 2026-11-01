@@ -21,6 +21,7 @@ import type {
   TournamentSchedule,
 } from './types.ts';
 import { sound } from './audio.ts';
+import { actionScope, isCurrentActionResult } from './clientReconciliation.ts';
 
 const SESSION_TOKEN_KEY = 'betnbrawl_session_token';
 const PLAYER_NAME_KEY = 'betnbrawl_player_name';
@@ -50,6 +51,7 @@ export interface BrawlClientState {
   lastRejectedBetReason: string | null;
   lastActionFeedback: { questionIndex: number; isCorrect: boolean; challengerStat: string } | null;
   lastGameActionError: string | null;
+  reconciliationEpoch: number;
   serverTimeOffset: number; // in ms
   isDebug: boolean;
 }
@@ -75,6 +77,7 @@ export function useBrawlClient() {
       lastRejectedBetReason: null,
       lastActionFeedback: null,
       lastGameActionError: null,
+      reconciliationEpoch: 0,
       serverTimeOffset: 0,
       isDebug,
     };
@@ -92,6 +95,7 @@ export function useBrawlClient() {
   roomCodeRef.current = state.roomCode;
   const sessionTokenRef = useRef<string | null>(null);
   const timeOffsetSamplesRef = useRef<number[]>([]);
+  const sentActionsRef = useRef(new Map<string, string>());
 
   // Load network info on mount
   useEffect(() => {
@@ -177,11 +181,12 @@ export function useBrawlClient() {
     const wsUrl = `${protocol}//${window.location.host}/ws${roomQuery}`;
 
     const ws = new WebSocket(wsUrl);
+    let restoringRoom = phaseRef.current !== 'ENTRY';
     wsRoomCodeRef.current = normalizedRouteCode;
     wsRef.current = ws;
 
     ws.onopen = () => {
-      setState(prev => ({ ...prev, status: 'CONNECTED', errorMessage: null }));
+      setState(prev => ({ ...prev, status: phaseRef.current === 'ENTRY' ? 'CONNECTED' : 'CONNECTING', errorMessage: null }));
       if (onConnected) onConnected();
 
       // Start ping heartbeat with timestamps for server-time synchronization
@@ -230,6 +235,7 @@ export function useBrawlClient() {
             return;
           }
           const { player, sessionToken, roomCode, isHost } = msg.payload;
+          restoringRoom = false;
           localStorage.setItem(SESSION_TOKEN_KEY, sessionToken);
           sessionTokenRef.current = sessionToken;
           setState(prev => ({
@@ -238,15 +244,27 @@ export function useBrawlClient() {
             isHost,
             roomCode,
             phase: 'LOBBY',
+            status: 'CONNECTING',
             errorMessage: null,
+            lastGameActionError: null,
+            reconciliationEpoch: prev.reconciliationEpoch + 1,
           }));
           return;
         }
 
         // 3. JOIN_ERROR
         if (msg.type === 'JOIN_ERROR') {
+          const failedRestore = restoringRoom;
+          if (failedRestore) {
+            wsRef.current = null;
+            sentActionsRef.current.clear();
+            if (heartbeatIntervalRef.current) clearInterval(heartbeatIntervalRef.current);
+            try { ws.close(); } catch { /* already closed */ }
+          }
           setState(prev => ({
             ...prev,
+            ...(failedRestore ? { status: 'ERROR' as const, phase: 'ENTRY' as const, roomCode: '',
+              currentRound: null, myPlayer: null, isHost: false, lastGameActionError: null } : {}),
             errorMessage: msg.payload.message || 'Failed to join room',
           }));
           return;
@@ -267,6 +285,7 @@ export function useBrawlClient() {
             return {
               ...prev,
               phase: payload.phase,
+              status: myUpdated && payload.players.some(p => p.id === myUpdated.id) ? 'CONNECTED' : prev.status,
               roomCode: payload.roomCode,
               players: payload.players,
               totalRounds: payload.totalRounds,
@@ -277,7 +296,7 @@ export function useBrawlClient() {
               myPlayer: myUpdated,
               myBet: preservedBet,
               lastActionFeedback: isBettingOrPlaying ? prev.lastActionFeedback : null,
-              lastGameActionError: payload.currentRound?.matchId === prev.currentRound?.matchId ? prev.lastGameActionError : null,
+              lastGameActionError: actionScope(payload.phase, payload.currentRound) === actionScope(prev.phase, prev.currentRound) ? prev.lastGameActionError : null,
             };
           });
           return;
@@ -293,7 +312,12 @@ export function useBrawlClient() {
         }
 
         if (msg.type === 'GAME_ACTION_RESULT') {
-          setState(prev => ({ ...prev, lastGameActionError: msg.payload.accepted ? null : (msg.payload.reason || 'Action rejected') }));
+          const sentScope = sentActionsRef.current.get(msg.payload.actionId);
+          sentActionsRef.current.delete(msg.payload.actionId);
+          setState(prev => isCurrentActionResult(msg.payload, sentScope, prev.phase, prev.currentRound)
+            ? { ...prev, lastGameActionError: msg.payload.accepted ? null : (msg.payload.reason || 'Action rejected'),
+              reconciliationEpoch: prev.reconciliationEpoch + (msg.payload.accepted ? 0 : 1) }
+            : prev);
           return;
         }
 
@@ -342,12 +366,14 @@ export function useBrawlClient() {
       // client to a different room route/socket.
       if (wsRef.current !== ws) return;
       wsRef.current = null;
+      sentActionsRef.current.clear();
       if (heartbeatIntervalRef.current) clearInterval(heartbeatIntervalRef.current);
       const wasInRoom = phaseRef.current !== 'ENTRY';
 
       setState(prev => ({
         ...prev,
         status: wasInRoom ? 'DISCONNECTED' : 'IDLE',
+        lastGameActionError: null,
       }));
 
       // Reconnect automatically using latest ref state
@@ -437,16 +463,23 @@ export function useBrawlClient() {
   }, [send]);
 
   const sendFighterAction = useCallback((action: FighterAction | V2Action) => {
+    if (wsRef.current?.readyState !== WebSocket.OPEN || state.status !== 'CONNECTED') return;
     const round = state.currentRound;
     const stageIndex = round && V2_GAME_IDS.includes(round.miniGame.id as V2GameId) ? round.gameState?.stageIndex : 0;
     if (!round?.matchId || !Number.isInteger(stageIndex)) {
       setState(prev => ({ ...prev, lastGameActionError: 'Game state is not ready yet.' }));
       return;
     }
+    const actionId = Array.from(crypto.getRandomValues(new Uint32Array(4)), value => value.toString(16).padStart(8, '0')).join('');
+    // Bound abandoned acknowledgements without retaining identities from earlier stages.
+    const scope = actionScope(state.phase, round);
+    for (const [id, previous] of sentActionsRef.current) if (previous !== scope) sentActionsRef.current.delete(id);
+    if (sentActionsRef.current.size >= 512) sentActionsRef.current.delete(sentActionsRef.current.keys().next().value!);
+    sentActionsRef.current.set(actionId, scope);
     send({ type: 'FIGHTER_ACTION', payload: { ...action, matchId: round.matchId,
       stageIndex: stageIndex as number,
-      actionId: Array.from(crypto.getRandomValues(new Uint32Array(4)), value => value.toString(16).padStart(8, '0')).join('') } as FighterAction });
-  }, [send, state.currentRound]);
+      actionId } as FighterAction });
+  }, [send, state.currentRound, state.phase, state.status]);
 
   const nextRound = useCallback(() => {
     send({ type: 'NEXT_ROUND' });

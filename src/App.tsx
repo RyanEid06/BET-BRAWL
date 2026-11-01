@@ -71,6 +71,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[#0b0d14] text-slate-100 flex flex-col justify-between select-none relative">
       {/* Sound toggle button in top corner */}
+      <div className="px-3 pt-2 text-[10px] font-mono tracking-wider text-slate-400">BET &amp; BRAWL V2</div>
       <div className="fixed top-3 right-3 z-50">
         <button
           onClick={toggleMute}
@@ -265,6 +266,8 @@ export default function App() {
                 fighterB={activeFighterB}
                 myPlayerId={client.myPlayer?.id || null}
                 serverTimeOffset={client.serverTimeOffset}
+                connected={client.status === 'CONNECTED'}
+                reconciliationEpoch={client.reconciliationEpoch}
                 onSendAction={client.sendFighterAction}
               />
               {client.lastGameActionError && <p role="alert" className="mt-2 text-rose-300">{client.lastGameActionError}</p>}

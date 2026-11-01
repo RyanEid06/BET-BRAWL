@@ -38,6 +38,8 @@ export default {
         candidateUrls: [url.origin],
         fullJoinUrl: url.origin,
         online: true,
+        version: '2.0.0',
+        protocolVersion: 2,
       });
     }
 

@@ -1,7 +1,7 @@
 /** Pure, JSON-persistable authority for the eight V2 games. Times are absolute milliseconds. */
 export const V2_GAME_IDS = ['memory_heist','crowd_count','mirror_trouble','safecracker','circuit_sprint','split_decision','treasure_tug','pocket_territory'] as const;
 export type V2GameId = typeof V2_GAME_IDS[number];
-export const V2_DURATIONS_SECONDS: Record<V2GameId, number> = {memory_heist:24,crowd_count:24,mirror_trouble:20,safecracker:30,circuit_sprint:30,split_decision:25,treasure_tug:24,pocket_territory:30};
+export const V2_DURATIONS_SECONDS: Record<V2GameId, number> = {memory_heist:24,crowd_count:24,mirror_trouble:25,safecracker:30,circuit_sprint:30,split_decision:25,treasure_tug:24,pocket_territory:30};
 export type V2Action =
   | {type:'MEMORY_DRAFT'; board:(number|null)[]; lock:boolean}
   | {type:'COUNT_GUESS'; value:number}
@@ -179,13 +179,12 @@ export function advanceV2Game(state:V2State,nowMs:number):void {
     else if(['memory_heist','safecracker','circuit_sprint'].includes(state.id)){finish(state,at);}
     else if(state.id==='crowd_count'&&state.phase==='view'){state.phase='answer';state.phaseEndsAt=at+5000;}
     else if(state.phase==='reveal'){
-      const d=state.data;const rounds=state.id==='split_decision'?5:state.id==='pocket_territory'?6:3;
+      const d=state.data;const rounds=state.id==='split_decision'||state.id==='mirror_trouble'?5:state.id==='pocket_territory'?6:3;
       if(state.stageIndex+1>=rounds||(d.kind==='split_decision'&&d.knockout))finish(state,at);
       else {state.stageIndex++;beginStage(state,at);}
     }else {
       resolveStage(state);
-      if(state.id==='mirror_trouble'){if(state.stageIndex===4)finish(state,at);else {state.stageIndex++;beginStage(state,at);}}
-      else {state.phase='reveal';state.phaseEndsAt=at+1000;}
+      state.phase='reveal';state.phaseEndsAt=at+1000;
     }
   }
 }

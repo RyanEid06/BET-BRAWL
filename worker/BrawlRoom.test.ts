@@ -207,6 +207,75 @@ test('restart before V2 start keeps published deadlines and catches up the saved
   }
 });
 
+test('V2 restores a V1 activeRoom snapshot, settles its legacy alarm once, then starts an identified V2 round', async () => {
+  const migrationEnv = { ...env, BRAWL_TEST_GAME_SEQUENCE: 'rapid_red_green,memory_heist' };
+  const { ctx, room, host, sockets } = await lobby(['Host', 'P2', 'P3'], false, migrationEnv);
+  await send(room, host, { type: 'START_GAME' });
+  const firstRound = host.lastState()!.currentRound!;
+  await runAlarmAt(room, firstRound.revealEndsAt!);
+
+  const bettor = sockets.find(socket =>
+    !firstRound.fighterIds.includes(socket.find('JOIN_SUCCESS')!.payload.player.id),
+  )!;
+  const bettorJoin = bettor.find('JOIN_SUCCESS')!;
+  const betTime = firstRound.revealEndsAt! + 1;
+  await sendAt(room, bettor, {
+    type: 'PLACE_BET', payload: { fighterId: firstRound.fighterIds[0], amount: 100 },
+  }, betTime);
+  assert.equal(bettor.find('BET_ACCEPTED')!.payload.myBankroll, 900);
+  await runAlarmAt(room, firstRound.bettingEndsAt!);
+  await runAlarmAt(room, firstRound.gameStartsAt!);
+
+  // V1's real PersistentRoom/RoundState schema has no matchId, tournamentId,
+  // gameBag, v2ActionIds, or scheduled-event matchId; use that serialized shape.
+  const legacySnapshot = structuredClone(ctx.storage.values.get('activeRoom')) as any;
+  delete legacySnapshot.tournamentId;
+  delete legacySnapshot.gameBag;
+  delete legacySnapshot.v2ActionIds;
+  delete legacySnapshot.currentRound.matchId;
+  for (const event of legacySnapshot.scheduledEvents) delete event.payload?.matchId;
+  await ctx.storage.put('activeRoom', legacySnapshot);
+
+  const restored = new BrawlRoomCore(ctx as unknown as DurableObjectState, migrationEnv);
+  await ctx.ready();
+  const replacement = attach(ctx, 'REGRES');
+  await send(restored, replacement, {
+    type: 'JOIN_ROOM', payload: { roomCode: 'REGRES', sessionToken: bettorJoin.payload.sessionToken },
+  });
+  const rejoined = replacement.find('JOIN_SUCCESS')!;
+  assert.equal(rejoined.payload.player.id, bettorJoin.payload.player.id);
+  assert.equal(rejoined.payload.player.coins, 900);
+  assert.equal((ctx.storage.values.get('activeRoom') as any).currentRound.bets.length, 1);
+  assert.deepEqual(replacement.lastState()!.tournamentSchedule, legacySnapshot.tournamentSchedule);
+
+  await runAlarmAt(restored, firstRound.gameEndsAt!);
+  let persisted = ctx.storage.values.get('activeRoom') as any;
+  assert.equal(replacement.lastState()!.phase, 'PAYOUT_RECAP');
+  assert.equal(persisted.roundHistory.length, 1);
+  assert.equal(persisted.tournamentSchedule.qualifiersCompleted, 1);
+  assert.equal(persisted.currentRound.bets.length, 1);
+  await runAlarmAt(restored, firstRound.gameEndsAt! + 1);
+  persisted = ctx.storage.values.get('activeRoom') as any;
+  assert.equal(persisted.roundHistory.length, 1, 'the legacy timeout must not settle the round twice');
+  assert.equal(persisted.players[bettorJoin.payload.sessionToken].coins, 1000, 'the tie refund is applied once');
+
+  const hostJoin = host.find('JOIN_SUCCESS')!;
+  const nextRoundHost = hostJoin.payload.sessionToken === bettorJoin.payload.sessionToken
+    ? replacement : attach(ctx, 'REGRES');
+  if (nextRoundHost !== replacement) {
+    await send(restored, nextRoundHost, {
+      type: 'JOIN_ROOM', payload: { roomCode: 'REGRES', sessionToken: hostJoin.payload.sessionToken },
+    });
+  }
+  await send(restored, nextRoundHost, { type: 'NEXT_ROUND' });
+  const nextRound = replacement.lastState()!.currentRound!;
+  assert.equal(nextRound.miniGame.id, 'memory_heist');
+  assert.match(nextRound.matchId!, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+  persisted = ctx.storage.values.get('activeRoom') as any;
+  assert.equal(persisted.internalGameState.v2.id, 'memory_heist');
+  assert.equal(persisted.currentRound.matchId, nextRound.matchId);
+});
+
 test('replaced socket cannot close a room or reclaim its token while closing', async () => {
   const { ctx, room, host } = await lobby();
   const token = host.find('JOIN_SUCCESS')!.payload.sessionToken;

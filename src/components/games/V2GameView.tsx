@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { PublicPlayer } from '../../engine/types.ts';
 import type { V2Action, V2GameId } from '../../engine/v2Games.ts';
+import { evaluateCircuit } from '../../engine/v2Games.ts';
+import { unconfirmedRotations } from '../../engine/clientReconciliation.ts';
 
 export interface V2GameViewProps {
   gameId: V2GameId;
@@ -11,6 +13,8 @@ export interface V2GameViewProps {
   myPlayerId: string | null;
   serverTimeOffset: number;
   onSendAction: (action: V2Action) => void;
+  connected?: boolean;
+  reconciliationEpoch?: number;
 }
 type Data = Record<string, unknown>;
 const record = (value: unknown): Data => value && typeof value === 'object' && !Array.isArray(value) ? value as Data : {};
@@ -85,12 +89,15 @@ function Count({ gameConfig: config, mine, phase, active, send }: GameProps) {
   </>;
 }
 
-function Mirror({ gameConfig: config, mine, active, send }: GameProps) {
+function Mirror({ gameConfig: config, gameState, myPlayerId, mine, phase, active, send }: GameProps) {
+  const outcome = record(gameState.outcome);
+  const reveal = phase === 'reveal';
+  const choice = record(outcome.choices)[myPlayerId ?? ''];
   return <>
-    <Notice>{mine.locked ? `Server locked choice ${Number(mine.commit) + 1}.` : 'Find the rotated match. Mirrored shapes are different.'}</Notice>
+    <Notice>{reveal ? `${myPlayerId && choice !== undefined ? choice === outcome.correct ? 'Correct!' : choice === null ? 'No answer.' : 'Wrong choice.' : 'Answer revealed.'} Correct choice: ${Number(outcome.correct) + 1}. Next puzzle follows shortly.` : mine.locked ? `Server locked choice ${Number(mine.commit) + 1}.` : 'Find the rotated match. Mirrored shapes are different.'}</Notice>
     <div className="v2-reference"><span>Target</span><Shape cells={list(config.target)} label="Target shape" /></div>
-    <div className="v2-choices">{list<number[]>(config.choices).map((choice, index) => <button type="button" key={index} disabled={!active || !!mine.locked} aria-pressed={mine.commit === index} onClick={() => send({ type: 'MIRROR_PICK', choice: index })}><Shape cells={choice} label={`Choice ${index + 1}`} /><span>Choice {index + 1}{mine.locked && mine.commit === index ? ' · Locked' : ''}</span></button>)}</div>
-    {!active && <Notice>Watch the target and choices. Fighters choose privately.</Notice>}
+    <div className="v2-choices">{list<number[]>(config.choices).map((choice, index) => <button type="button" key={index} className={reveal && outcome.correct === index ? 'v2-correct' : ''} disabled={!active || !!mine.locked} aria-pressed={mine.commit === index} onClick={() => send({ type: 'MIRROR_PICK', choice: index })}><Shape cells={choice} label={`Choice ${index + 1}`} /><span>Choice {index + 1}{reveal && outcome.correct === index ? ' · Correct' : mine.locked && mine.commit === index ? ' · Locked' : ''}</span></button>)}</div>
+    {!active && !reveal && <Notice>Watch the target and choices. Fighters choose privately.</Notice>}
   </>;
 }
 
@@ -116,13 +123,22 @@ function Pipe({ kind, rotation }: { kind: string; rotation: number }) {
   return <svg className="v2-pipe" viewBox="0 0 50 50" aria-hidden="true"><g transform={`rotate(${rotation * 90} 25 25)`}><path d={kind === 'straight' ? 'M25 0V50' : 'M25 0V25H50'} stroke="currentColor" strokeWidth="9" fill="none" /><circle cx="25" cy="25" r="5" fill="currentColor" /></g></svg>;
 }
 function Circuit({ gameConfig: config, mine, active, send }: GameProps) {
-  const rotations = list<number>(mine.rotations).length ? list<number>(mine.rotations) : list<number>(config.initialRotations);
-  const powered = list<number>(mine.powered);
+  const authoritative = list<number>(mine.rotations).length ? list<number>(mine.rotations) : list<number>(config.initialRotations);
+  const moves = Number(mine.moves ?? 0);
+  const [optimistic, setOptimistic] = useState({ baseMoves: moves, cells: [] as number[] });
+  const pending = mine.solved ? [] : unconfirmedRotations(optimistic.baseMoves, optimistic.cells, moves);
+  const rotations = [...authoritative];
+  for (const cell of pending) rotations[cell] = (rotations[cell] + 1) % 4;
   const kinds = list<string>(config.pipeKinds);
+  const powered = pending.length ? evaluateCircuit(kinds as ('straight' | 'elbow')[], rotations).powered : list<number>(mine.powered);
+  const rotate = (cell: number) => {
+    setOptimistic(previous => ({ baseMoves: moves, cells: [...unconfirmedRotations(previous.baseMoves, previous.cells, moves), cell] }));
+    send({ type: 'PIPE_ROTATE', cell });
+  };
   return <>
     <Notice>{mine.solved ? 'Connected! Your server-confirmed board is locked.' : active ? 'Tap a tile to rotate it 90° clockwise. Every rotation counts, including undoing a turn.' : 'Both fighters have the same puzzle. Their moves remain private until the result.'}</Notice>
-    <p className="v2-metrics">{active ? `Moves: ${Number(mine.moves ?? 0)} · Powered tiles: ${powered.length} / 16` : 'Preview of the starting circuit'}</p>
-    <div className="v2-grid v2-grid-4" role="group" aria-label={active ? 'Your circuit' : 'Starting circuit'}>{kinds.map((kind, cell) => <button type="button" className={`v2-tile ${powered.includes(cell) ? 'v2-powered' : ''}`} key={cell} disabled={!active || !!mine.solved} onClick={() => send({ type: 'PIPE_ROTATE', cell })} aria-label={`Row ${Math.floor(cell / 4) + 1}, column ${cell % 4 + 1}, ${kind}, rotation ${rotations[cell] * 90} degrees${powered.includes(cell) ? ', powered' : ', unpowered'}${cell === 4 ? ', source enters from left' : cell === 11 ? ', sink exits right' : ''}`}><Pipe kind={kind} rotation={rotations[cell]} />{cell === 4 && <span className="v2-port">IN →</span>}{cell === 11 && <span className="v2-port">OUT →</span>}{powered.includes(cell) && <span className="v2-power-mark">●</span>}</button>)}</div>
+    <p className="v2-metrics">{active ? `Moves: ${moves + pending.length} · Powered tiles: ${powered.length} / 16${pending.length ? ' · Confirming…' : ''}` : 'Preview of the starting circuit'}</p>
+    <div className="v2-grid v2-grid-4" role="group" aria-label={active ? 'Your circuit' : 'Starting circuit'}>{kinds.map((kind, cell) => <button type="button" className={`v2-tile ${powered.includes(cell) ? 'v2-powered' : ''}`} key={cell} disabled={!active || !!mine.solved} onClick={() => rotate(cell)} aria-label={`Row ${Math.floor(cell / 4) + 1}, column ${cell % 4 + 1}, ${kind}, rotation ${rotations[cell] * 90} degrees${powered.includes(cell) ? ', powered' : ', unpowered'}${cell === 4 ? ', source enters from left' : cell === 11 ? ', sink exits right' : ''}`}><Pipe kind={kind} rotation={rotations[cell]} />{cell === 4 && <span className="v2-port">IN →</span>}{cell === 11 && <span className="v2-port">OUT →</span>}{powered.includes(cell) && <span className="v2-power-mark">●</span>}</button>)}</div>
     <p className="v2-muted">Source: row 2, left edge → Sink: row 3, right edge. Connected tiles show a dot. Dangling branches are allowed.</p>
   </>;
 }
@@ -145,7 +161,8 @@ function Treasure({ mine, active, send }: GameProps) {
   const remaining = 10 - shown.reduce((sum, value) => sum + value, 0);
   return <>
     <Notice>{mine.locked ? 'Allocation locked by the server. Waiting for the reveal.' : active ? `Energy remaining: ${remaining} / 10. Assign all 10 before locking.` : 'Fighters secretly distribute 10 energy across three lanes.'}</Notice>
-    <div className="v2-lanes">{shown.map((value, lane) => <div key={lane}><strong>Lane {lane + 1}</strong><span>{lane + 1} {lane === 0 ? 'point' : 'points'}</span><output aria-label={`Lane ${lane + 1} energy`}>{value}</output><div className="v2-actions"><button type="button" aria-label={`Remove one energy from lane ${lane + 1}`} disabled={!active || !!mine.locked || value === 0} onClick={() => setAllocation(shown.map((old, index) => index === lane ? old - 1 : old))}>−</button><button type="button" aria-label={`Add one energy to lane ${lane + 1}`} disabled={!active || !!mine.locked || remaining === 0} onClick={() => setAllocation(shown.map((old, index) => index === lane ? old + 1 : old))}>+</button></div></div>)}</div>
+    {active && <div className="v2-actions" aria-label="Allocation presets"><button type="button" disabled={!!mine.locked} onClick={() => setAllocation([3, 3, 4])}>Balanced 3 / 3 / 4</button><button type="button" disabled={!!mine.locked} onClick={() => setAllocation([0, 0, 0])}>Clear</button></div>}
+    <div className="v2-lanes">{shown.map((value, lane) => <div key={lane}><strong>Lane {lane + 1}</strong><span>{lane + 1} {lane === 0 ? 'point' : 'points'}</span><output aria-label={`Lane ${lane + 1} energy`}>{value}</output><label className="v2-allocation-slider">Set energy<input type="range" aria-label={`Set lane ${lane + 1} energy`} min="0" max={value + remaining} step="1" value={value} disabled={!active || !!mine.locked} onChange={event => setAllocation(shown.map((old, index) => index === lane ? Number(event.target.value) : old))} /></label><div className="v2-actions"><button type="button" aria-label={`Remove one energy from lane ${lane + 1}`} disabled={!active || !!mine.locked || value === 0} onClick={() => setAllocation(shown.map((old, index) => index === lane ? old - 1 : old))}>−</button><button type="button" aria-label={`Add one energy to lane ${lane + 1}`} disabled={!active || !!mine.locked || remaining === 0} onClick={() => setAllocation(shown.map((old, index) => index === lane ? old + 1 : old))}>+</button></div></div>)}</div>
     {active && <button type="button" className="v2-primary" disabled={!!mine.locked || remaining !== 0} onClick={() => send({ type: 'TREASURE_COMMIT', allocation })}>Lock allocation {10 - remaining} / 10</button>}
     <p className="v2-muted">Equal energy ties a lane: nobody earns its points. Each round starts with fresh energy.</p>
   </>;
@@ -156,9 +173,10 @@ function Territory({ gameConfig: config, gameState: state, fighterA, fighterB, m
   const weights = list<number>(config.weights);
   const legal = list<number>(mine.legalCells);
   return <>
+    <div className="v2-player-pair" aria-label="Territory scores">{[fighterA, fighterB].map((fighter, index) => <div key={fighter.id} className={index === 0 ? 'v2-owner-a' : 'v2-owner-b'}><strong>{fighter.avatar} {fighter.name}</strong><span>{board.reduce((score, owner, cell) => score + (owner === fighter.id ? weights[cell] : 0), 0)} points</span></div>)}</div>
     <Notice>{mine.locked ? mine.commit === null ? 'Server locked your Pass.' : `Server locked tile ${Number(mine.commit) + 1}.` : active ? legal.length ? 'Tap a tile marked + to lock your claim, or Pass.' : 'No legal tiles remain. Pass or wait for the next reveal.' : 'Watch both territories grow. Secret pending claims stay hidden.'}</Notice>
-    <p className="v2-muted">A: {fighterA.name} · B: {fighterB.name} · ×: blocked · +: legal claim. Each tile shows its value.</p>
-    <div className="v2-grid v2-grid-5" role="group" aria-label="Territory board">{board.map((owner, cell) => { const marker = owner === fighterA.id ? 'A' : owner === fighterB.id ? 'B' : owner === 'blocked' ? '×' : active && legal.includes(cell) ? '+' : '·'; return <button type="button" key={cell} className={`v2-territory ${owner === fighterA.id ? 'v2-owner-a' : owner === fighterB.id ? 'v2-owner-b' : ''}`} disabled={!active || !!mine.locked || !legal.includes(cell)} onClick={() => send({ type: 'TERRITORY_COMMIT', cell })} aria-label={`Tile ${cell + 1}, row ${Math.floor(cell / 5) + 1}, column ${cell % 5 + 1}, value ${weights[cell]}, ${owner === fighterA.id ? fighterA.name : owner === fighterB.id ? fighterB.name : owner === 'blocked' ? 'permanently blocked' : legal.includes(cell) && active ? 'available to claim' : 'empty'}`}><strong>{marker}</strong><span>{weights[cell]}</span></button>; })}</div>
+    <p className="v2-muted">{fighterA.avatar}: {fighterA.name} · {fighterB.avatar}: {fighterB.name} · ×: blocked · +: legal claim. Each tile shows its value.</p>
+    <div className="v2-grid v2-grid-5" role="group" aria-label="Territory board">{board.map((owner, cell) => { const marker = owner === fighterA.id ? fighterA.avatar : owner === fighterB.id ? fighterB.avatar : owner === 'blocked' ? '×' : active && legal.includes(cell) ? '+' : '·'; return <button type="button" key={cell} className={`v2-territory ${owner === fighterA.id ? 'v2-owner-a' : owner === fighterB.id ? 'v2-owner-b' : ''}`} disabled={!active || !!mine.locked || !legal.includes(cell)} onClick={() => send({ type: 'TERRITORY_COMMIT', cell })} aria-label={`Tile ${cell + 1}, row ${Math.floor(cell / 5) + 1}, column ${cell % 5 + 1}, value ${weights[cell]}, ${owner === fighterA.id ? fighterA.name : owner === fighterB.id ? fighterB.name : owner === 'blocked' ? 'permanently blocked' : legal.includes(cell) && active ? 'available to claim' : 'empty'}`}><strong>{marker}</strong><span>{weights[cell]}</span></button>; })}</div>
     {active && <button type="button" disabled={!!mine.locked} onClick={() => send({ type: 'TERRITORY_COMMIT', cell: null })}>Pass this turn</button>}
     <p className="v2-muted">Claims must share an edge with your territory. If both fighters claim the same tile, it becomes permanently blocked.</p>
   </>;
@@ -210,6 +228,20 @@ function ActiveGame(props: GameProps) {
   }
 }
 
+
+function DeadlineClock({ deadline, offset, label, finished }: { deadline: number; offset: number; label: string; finished: boolean }) {
+  const remaining = () => Number.isFinite(deadline) ? Math.max(0, Math.ceil((deadline - Date.now() - offset) / 1000)) : null;
+  const [seconds, setSeconds] = useState(remaining);
+  useEffect(() => {
+    setSeconds(remaining());
+    if (finished) return;
+    // Absolute time prevents drift; equal integer values do not commit another render.
+    const timer = window.setInterval(() => setSeconds(remaining()), 100);
+    return () => window.clearInterval(timer);
+  }, [deadline, offset, finished]);
+  return <div className="v2-clock" aria-label={finished ? 'Finished' : `${label}, ${seconds ?? '—'} seconds remaining`}><strong>{finished ? '✓' : seconds === null ? '—' : `${seconds}s`}</strong><span>{label}</span></div>;
+}
+
 /** The caller keys this component by match ID. Only server projections confirm commitments and results. */
 export function V2GameView(props: V2GameViewProps) {
   const { gameId, gameState, fighterA, fighterB, myPlayerId, serverTimeOffset } = props;
@@ -218,23 +250,19 @@ export function V2GameView(props: V2GameViewProps) {
   const isOwner = (myPlayerId === fighterA.id || myPlayerId === fighterB.id) && !!gameState.mine;
   const finished = gameState.finished === true || phase === 'finished';
   const stageIndex = Number(gameState.stageIndex ?? 0);
-  const [now, setNow] = useState(() => Date.now());
   const [sent, setSent] = useState(false);
   const serverSnapshot = JSON.stringify(mine);
-  useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 100); return () => window.clearInterval(timer); }, []);
   useEffect(() => { setSent(false); }, [gameId, phase, stageIndex, serverSnapshot]);
-  const phaseEndsAt = Number(gameState.phaseEndsAt);
-  const seconds = Number.isFinite(phaseEndsAt) ? Math.max(0, Math.ceil((phaseEndsAt - (now + serverTimeOffset)) / 1000)) : null;
-  const active = isOwner && !finished && !['waiting', 'study', 'view', 'reveal'].includes(phase);
+  const active = props.connected !== false && isOwner && !finished && !['waiting', 'study', 'view', 'reveal'].includes(phase);
   const send = (action: V2Action) => { if (!active || mine.locked || mine.solved) return; setSent(true); props.onSendAction(action); };
   const phaseLabel: Record<string, string> = { waiting: 'Get ready', study: 'Study', draft: 'Reconstruct', view: 'Observe', answer: 'Estimate', puzzle: 'Choose', play: 'Play', commit: 'Choose privately', reveal: 'Reveal', finished: 'Final result' };
   return <section className="v2-game" aria-label={titles[gameId]}>
-    <header className="v2-header"><div><p className="v2-eyebrow">{rounds[gameId] ? `Round ${Math.min(stageIndex + 1, rounds[gameId]!)} / ${rounds[gameId]}` : 'Head to head'} · {myPlayerId === fighterA.id || myPlayerId === fighterB.id ? 'Fighter' : 'Spectating'}</p><h3>{titles[gameId]}</h3></div><div className="v2-clock" aria-label={finished ? 'Finished' : `${phaseLabel[phase] ?? phase}, ${seconds ?? '—'} seconds remaining`}><strong>{finished ? '✓' : seconds === null ? '—' : `${seconds}s`}</strong><span>{phaseLabel[phase] ?? phase}</span></div></header>
+    <header className="v2-header"><div><p className="v2-eyebrow">{rounds[gameId] ? `Round ${Math.min(stageIndex + 1, rounds[gameId]!)} / ${rounds[gameId]}` : 'Head to head'} · {myPlayerId === fighterA.id || myPlayerId === fighterB.id ? 'Fighter' : 'Spectating'}</p><h3>{titles[gameId]}</h3></div><DeadlineClock deadline={Number(gameState.phaseEndsAt)} offset={serverTimeOffset} label={phaseLabel[phase] ?? phase} finished={finished} /></header>
     <p className="v2-rules">{instructions[gameId]}</p>
     {phase === 'waiting' ? <div className="v2-watch">{fighterA.avatar} {fighterA.name} vs {fighterB.avatar} {fighterB.name}<p>The server will start the game shortly.</p></div> : finished ? <Finished {...props} /> : <>
-      <ActiveGame key={`${gameId}-${stageIndex}`} {...props} mine={mine} phase={phase} active={active} send={send} />
+      <ActiveGame key={`${gameId}-${stageIndex}-${props.reconciliationEpoch ?? 0}`} {...props} mine={mine} phase={phase} active={active} send={send} />
       <Outcome gameId={gameId} outcome={record(gameState.outcome)} fighterA={fighterA} fighterB={fighterB} />
     </>}
-    {!finished && <p className="v2-feedback" role="status">{sent ? 'Sent — waiting for server confirmation.' : mine.locked ? 'Your choice is locked.' : !isOwner ? 'Watch-only view. Private choices appear after resolution.' : phase === 'reveal' ? 'Round resolved. Preparing the next turn.' : 'The server confirms every move and controls the clock.'}</p>}
+    {!finished && <p className="v2-feedback" role="status">{props.connected === false ? 'Reconnecting — moves are paused until the server restores your board.' : sent ? 'Sent — waiting for server confirmation.' : mine.locked ? 'Your choice is locked.' : !isOwner ? 'Watch-only view. Private choices appear after resolution.' : phase === 'reveal' ? 'Round resolved. Preparing the next turn.' : 'The server confirms every move and controls the clock.'}</p>}
   </section>;
 }

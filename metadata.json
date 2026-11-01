@@ -1,5 +1,5 @@
 {
-  "name": "Bet & BRAWL",
+  "name": "BET & BRAWL V2",
   "description": "Online party game for 3-9 players on different networks, hosted by Cloudflare Workers and SQLite Durable Objects. Internet required.",
   "requestFramePermissions": [],
   "majorCapabilities": []

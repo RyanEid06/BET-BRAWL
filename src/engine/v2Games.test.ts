@@ -68,7 +68,13 @@ test('mirror puzzles have one rotation-equivalent answer and deadline-only revea
   assert.equal(s.stageIndex,0);
   assert.deepEqual(projectV2Game(s,null,start).scores,{a:0,b:0});
   advanceV2Game(s,start+4000);
-  assert.equal(s.stageIndex,1); assert.equal(s.scores.a,1);
+  assert.equal(s.stageIndex,0); assert.equal(s.phase,'reveal'); assert.equal(s.scores.a,1);
+  assert.equal(projectV2Game(s, 'a', start+4000).config.choices instanceof Array, true);
+  assert.equal(act(s,'a',{type:'MIRROR_PICK',choice:correct},start+4500).accepted,false);
+  advanceV2Game(s,start+4999); assert.equal(s.phase,'reveal');
+  advanceV2Game(s,start+5000); assert.equal(s.stageIndex,1); assert.equal(s.phase,'puzzle');
+  advanceV2Game(s,start+24000); assert.equal(s.stageIndex,4); assert.equal(s.phase,'reveal');
+  advanceV2Game(s,start+25000); assert.equal(s.finished,true);
 });
 
 test('safecracker uses duplicate-aware feedback and attempt-based victory with private history', () => {

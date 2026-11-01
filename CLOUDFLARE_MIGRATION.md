@@ -1,13 +1,11 @@
-# Cloudflare V1 architecture
+# V2 production deployment and storage
 
-Production is browser HTTPS/WSS → Worker `/ws?room=CODE` → deterministic room-code Durable Object. `wrangler.jsonc` declares `BrawlRoom` with SQLite storage and serves the Vite static asset directory. The Worker exposes `/api/network-info` with `online: true`; the UI uses a cloud/LAN mode signal and public invite URLs.
+Production branch: main. Production Worker/site: bet-brawl. React/Vite assets, /api/network-info and /ws share one public HTTPS origin; room-code routing uses BRAWL_ROOMS.idFromName(code). BrawlRoom keeps SQLite storage and the activeRoom key. The Worker name, exported class, binding and storage type match V1; there is no namespace recreation or destructive data migration.
 
-`worker/index.ts` is the platform adapter; `worker/roomCore.ts` owns persisted room state, hibernating WebSocket attachments and durable alarm events. The authoritative TypeScript engine is shared with `server.ts`, which remains a local Node reference. Exact qualifier completion lives in `src/engine/roomEngine.ts` and rejects wrong/replayed match identity.
+V2 adds optional tournamentId, gameBag and v2ActionIds fields plus per-game state. A synthetic V1 snapshot regression verifies seat identity, bankroll, private bet and schedule retention after restore, exactly-once timeout settlement, and a valid V2 next round. Runtime tests verify SQLite restart and pending alarms. No production data is exported into tests.
 
-A replacement socket revokes the old attachment before closure. Only a current open connection has seat authority. Pre-start absent seats never enter the frozen tournament roster; roster fighters who disconnect later retain their scheduled appearances and get grace/forfeit or VOID.
+V2 requires protocol 2. Existing V1 tabs must refresh; old unscoped fighter actions are rejected. Stored V1 rounds retain their data and can settle from existing alarms; reconnecting V2 clients can resume, and the next round gains current match identity. Do not promise seamless operation of an already-open V1 client during upgrade.
 
-No Android bridge, NSD/UDP discovery, brawl:// guest route, LAN host assumptions or Node production server are introduced into the cloud path. Platform networking intentionally differs from Android; game rules must agree.
+V1 remains recoverable in the preserved history branches/tags. Before deployment record the currently active Cloudflare version. Rollback changes Worker code/assets, not stored data: do not assume older V1 code can interpret an in-progress V2 game. Prefer roll-forward; if rollback is required, use the recorded V1 version during a quiet room boundary and preserve the storage namespace. See [Cloudflare rollback limitations](https://developers.cloudflare.com/workers/versions-and-deployments/rollbacks/).
 
-The frozen reference remains at `v1-web-final` / tag `v1.0.0-web-final`. Retirement is not part of this implementation and still requires explicit owner confirmation after manual acceptance.
-
-See README for exact verification/deployment commands. Live deployment/public acceptance is owner follow-up, not claimed by local tests.
+Deployment never runs automatically in CI. Follow README only after all gates pass, then record the deployed version, actual production URL and public smoke evidence in docs/V2_RELEASE.md.

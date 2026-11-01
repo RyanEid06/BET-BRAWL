@@ -855,7 +855,7 @@
           "b"
         ],
         "startsAt": 1000,
-        "endsAt": 21000,
+        "endsAt": 26000,
         "stageIndex": 0,
         "phase": "waiting",
         "phaseEndsAt": 1000,
@@ -1113,7 +1113,7 @@
             "type": "MIRROR_PICK",
             "choice": 1
           },
-          "nowMs": 5000
+          "nowMs": 6000
         },
         {
           "fighterId": "a",
@@ -1121,7 +1121,7 @@
             "type": "MIRROR_PICK",
             "choice": 1
           },
-          "nowMs": 9000
+          "nowMs": 11000
         },
         {
           "fighterId": "a",
@@ -1129,7 +1129,7 @@
             "type": "MIRROR_PICK",
             "choice": 1
           },
-          "nowMs": 13000
+          "nowMs": 16000
         },
         {
           "fighterId": "a",
@@ -1137,10 +1137,10 @@
             "type": "MIRROR_PICK",
             "choice": 1
           },
-          "nowMs": 17000
+          "nowMs": 21000
         }
       ],
-      "finalAt": 21000,
+      "finalAt": 26000,
       "expected": {
         "finished": true,
         "winnerId": "a",

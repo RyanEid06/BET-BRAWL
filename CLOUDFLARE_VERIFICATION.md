@@ -1,31 +1,14 @@
-# Cloudflare V1 verification — 2026-10-20
+# V2 verification
 
-This is the maintained online web target. Node 24/Windows local evidence is separate from GitHub CI and public deployment.
+Run npm ci, npm run lint and npm run cf:verify on the exact production source. The combined gate includes:
 
-| Executed command | Observed result |
-|---|---|
-| npm ci | PASS: 213 packages, zero reported vulnerabilities |
-| npm run typecheck | PASS |
-| npm test | PASS: 61/61 TS/Node protocol tests |
-| npm run test:worker-core | PASS: 14/14 Worker tests |
-| npm run build | PASS |
-| npm run cf:typecheck | PASS |
-| npm run cf:dry-run | PASS: Wrangler 4.151.1, SQLite BrawlRoom +ASSETS |
-| npm run test:cloudflare | PASS: actual local Wrangler/SQLite runtime |
-| npm run cf:verify | PASS: complete pipeline |
+- Shared TypeScript typecheck and engine, odds, room, Node multiplayer, payout and client-reconciliation regressions.
+- Worker authoritative handler tests, including V1 activeRoom restoration.
+- Vite production build, Worker typecheck and Wrangler deployment dry-run.
+- Actual local Wrangler/SQLite/WebSocket tournament, room isolation, replay/privacy, reconnect and restart/pending-deadline verification.
 
-The real-runtime suite checks min/max/ready/host authority, seat cleanup/replacement, all three qualifiers, secret bets/reveal/deadlines, locked finalists and a 2–1 championship with an intervening tie, podium, VOID/refund/stat invariance, offline-next-round forfeit, pre-start nonparticipant exclusion, room isolation, authenticated close, and process restart recovering SQLite room/podium plus an active bet and pending deadline. It uses isolated temporary storage and test-only timing. Production timings remain unchanged.
+Browser verification uses real Chrome at 360×640, 390×844, 768×1024 and 1366×768 with touch/mouse, fighter/spectator/finished states, focus/reduced motion/orientation, plus delayed Circuit confirmation, rejects, Memory reconnect, stale action errors, allocation presets/sliders, Mirror reveal and collapsed payout. Evidence is under ignored artifacts/v2/ and output/playwright/ in the canonical checkout. Browser automation requires an existing Playwright runtime and Chrome; it is separate from the Worker suite.
 
-Worker regressions additionally reject old closing-socket commands, repeated joins, early alarm transitions/actions, solo/two-player debug starts, and stale seats after returning to lobby. Exact-round shared qualifier tests reject replay/incorrect identity.
+Run a local Vite server with `npm exec vite -- --host 127.0.0.1 --port 5175 --strictPort`, then `npm run test:browser`. If Playwright is provided by an external runtime, set BRAWL_PLAYWRIGHT_MODULE to its absolute package.json path; set BRAWL_CHROME_EXECUTABLE to an existing Chrome executable. Otherwise the runner uses locally installed Playwright and its Chromium. CI installs pinned Playwright 1.62.1 as isolated test tooling and runs both browser scripts after the full Worker gate. No browser dependency ships in the game bundle.
 
-Verified source 51a7adf6af295a868760c37cc94ea5788797d774: [CI39485599127 SUCCESS](https://github.com/RyanEid06/BET-BRAWL/actions/runs/39485599127), running the entire gate from clean dependencies. Local evidence was preserved in canonical `artifacts/cloudflare-zero-stop-verify.log` and artifacts/cloudflare-51a7adf-ci.log in the canonical checkout. Two recap SSR regressions and a readiness barrier cover the final source changes. Final report/worklog commits are documentation only; inspect branch Actions for their reruns. No workflow deploys automatically.
-
-## Preserved history
-
-Frozen `v1-web-final` is `e1f948c6c6e46355435fd70ea9ab8ee63031ebea`, tagged `v1.0.0-web-final`. Its untouched source passed typecheck, 52/52 tests and build using repaired installed dependencies; its original lock lacks optional-platform entries. Earlier migration-only reports/hashes remain recoverable in Git at `9aa66f1`; their 46-test/4-test counts and unexecuted-Wrangler statements no longer describe current verification.
-
-## Owner follow-up
-
-Authenticate/deploy using README commands, then test public HTTPS/WSS/QR and multiple clients on different networks. No production deployment URL or success is claimed. These manual steps are USER FOLLOW-UP under the owner's corrected scope.
-
-Final boundary follow-up: timeout now uses recorded Millisecond Stop actions, so a valid0ms stop is not DNF. New regression failed before correction and passes afterward; full local cf:verify now61TS+14Worker and all actual runtime cases PASS (canonical artifacts/cloudflare-zero-stop-verify.log). Node championship tie fixture uses no actions rather than assuming sub5ms socket delivery. Earlier source CI links remain historical; final boundary source is the branch head, with its result in branch Actions and canonical artifacts/v1-closure.json. Android parity follow-up is tracked on main.
+After deployment verify the actual HTTPS site and public WSS using at least three isolated clients: create/join, ready/start tournament, launch games, perform accepted actions, reconnect with the same seat, finish, verify payout and advance. Check visible BET & BRAWL V2 and /api/network-info version 2.0.0/protocolVersion 2. Keep local, CI and public evidence distinct. Current exact results and identifiers belong in docs/V2_RELEASE.md and CODEX_WORKLOG.md.

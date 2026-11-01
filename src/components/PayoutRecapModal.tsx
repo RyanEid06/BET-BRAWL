@@ -208,6 +208,33 @@ export const PayoutRecapModal: React.FC<Props> = ({
         </div>
       )}
 
+      {/* Next Round Action */}
+      <div className="sticky top-0 z-10 bg-[#0b0d14] py-2">
+        {isHost ? (
+          <button
+            onClick={onNextRound}
+            className="w-full py-4 rounded-xl font-display font-black text-lg uppercase tracking-wider bg-gradient-to-r from-cyan-500 via-amber-500 to-rose-500 hover:from-cyan-400 hover:to-rose-400 text-slate-950 shadow-xl transition-all transform active:scale-95 glow-gold border border-amber-300 flex items-center justify-center gap-2 cursor-pointer"
+          >
+            <span>
+              {isFinalRound || tournamentSchedule?.stage === 'COMPLETE'
+                ? 'REVEAL FINAL PODIUM 🏆'
+                : tournamentSchedule?.stage === 'CHAMPIONSHIP'
+                ? `PLAY CHAMPIONSHIP GAME ${(round.championshipGameNumber ?? 1) + 1} →`
+                : isLastQualifier
+                ? 'BEGIN CHAMPIONSHIP SERIES 👑 →'
+                : `PROCEED TO QUALIFIER ${(round.qualifierIndex ?? round.roundNumber) + 1} →`}
+            </span>
+            <ArrowRight className="w-4 h-4" />
+          </button>
+        ) : (
+          <div className="p-3 bg-slate-900 rounded-xl border border-slate-800 text-center text-xs font-mono text-slate-400">
+            Waiting for the host to advance to the next round...
+          </div>
+        )}
+      </div>
+
+      <details className="rounded-xl border border-slate-700 p-3 space-y-3">
+        <summary className="cursor-pointer py-2 font-bold text-cyan-300">View details</summary>
       {/* 3. Tournament Standings */}
       <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-3.5 shadow-lg space-y-2">
         <div className="flex items-center justify-between text-xs font-mono text-slate-400 border-b border-slate-800 pb-1.5">
@@ -264,30 +291,8 @@ export const PayoutRecapModal: React.FC<Props> = ({
           serverTimeOffset={0} onSendAction={() => {}} />
       )}
 
-      {/* Next Round Action */}
-      <div className="pt-1">
-        {isHost ? (
-          <button
-            onClick={onNextRound}
-            className="w-full py-4 rounded-xl font-display font-black text-lg uppercase tracking-wider bg-gradient-to-r from-cyan-500 via-amber-500 to-rose-500 hover:from-cyan-400 hover:to-rose-400 text-slate-950 shadow-xl transition-all transform active:scale-95 glow-gold border border-amber-300 flex items-center justify-center gap-2 cursor-pointer"
-          >
-            <span>
-              {isFinalRound || tournamentSchedule?.stage === 'COMPLETE'
-                ? 'REVEAL FINAL PODIUM 🏆'
-                : tournamentSchedule?.stage === 'CHAMPIONSHIP'
-                ? `PLAY CHAMPIONSHIP GAME ${(round.championshipGameNumber ?? 1) + 1} →`
-                : isLastQualifier
-                ? 'BEGIN CHAMPIONSHIP SERIES 👑 →'
-                : `PROCEED TO QUALIFIER ${(round.qualifierIndex ?? round.roundNumber) + 1} →`}
-            </span>
-            <ArrowRight className="w-4 h-4" />
-          </button>
-        ) : (
-          <div className="p-3 bg-slate-900 rounded-xl border border-slate-800 text-center text-xs font-mono text-slate-400">
-            Waiting for the host to advance to the next round...
-          </div>
-        )}
-      </div>
+      </details>
+
     </div>
   );
 };

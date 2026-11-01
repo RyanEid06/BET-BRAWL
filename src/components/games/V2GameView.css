@@ -106,3 +106,7 @@
 }
 
 
+
+.v2-allocation-slider{font-size:.7rem;text-align:center;width:100%}
+.v2-allocation-slider input{display:block;width:100%;min-height:44px;accent-color:#22d3ee}
+.v2-game .v2-correct:disabled{border:3px solid #34d399;background:#064e3b;opacity:1}

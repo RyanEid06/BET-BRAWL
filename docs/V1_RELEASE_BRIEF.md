@@ -1,3 +1,5 @@
+> Historical V1 document. Current production/deployment instructions: [README](../README.md) and [V2 release](V2_RELEASE.md). Statements below describe the V1 checkpoint only.
+
 You are the FINAL RELEASE ENGINEER for BET & BRAWL V1.
 
 This is not an audit-only task. Inspect the real repository, perform the required fixes, run the real verification gates, clean the repository/environment, and leave me with two trustworthy V1 production targets:
