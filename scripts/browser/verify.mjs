@@ -40,6 +40,3 @@ for(const [width,height] of [[360,640],[390,844],[768,1024],[1366,768]]){
 }
 } catch(error){issues.push({type:'assertion',error:String(error),stack:error.stack});process.exitCode=1}
 finally {await browser.close();fs.writeFileSync('output/playwright/results.json',JSON.stringify({results,issues,consoleErrors},null,2));console.log(JSON.stringify({cases:results.length,issues,consoleErrors},null,2))}
-
-
-

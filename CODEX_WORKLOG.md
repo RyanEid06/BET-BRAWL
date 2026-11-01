@@ -24,7 +24,11 @@ Owner authorized the ten fixes, full green local/CI/browser verification, V1 his
 - Review caught socket-open-before-seat-restore gap, fixed by CONNECTING until authoritative ROOM_STATE. Focused browser regression passes. Final review also found rejected-rejoin CONNECTING hang; fixed by returning to entry with an explicit error and closing that unauthenticated socket. Negative browser reconnect regression passes. No unresolved review blocker.
 - CI now includes lint/full cf:verify plus the committed real Chromium matrix/regressions, using isolated pinned Playwright tooling. No production dependency added.
 - Automatic approval review rejected direct credential-file access for custom Cloudflare API metadata; no credential read performed. Native Wrangler whoami/version/deployment commands succeeded. Continue through native Wrangler.
-- Pending: exact-source CI; V1 preservation anchors and main integration; deploy; public smoke; final evidence.
+- Exact-source CI41309586042 SUCCESS at453c02836add4a0b5223de92f43dd97f471171fb: clean npm ci, lint/full cf:verify and full Chromium matrix/regressions.
+- Published annotated recovery tags: v1.0.0-production-web -> a60a79d007b6c93acb49d49483b9f1c343f76d76; v1.0.0-pre-v2-main ->2ee6d66f4ecd49a66bf31530413919d550055f11. Remote dereferenced tags and unchanged existing V1 branches/frozen tag verified.
+- Production promotion retains the V2 web tree and links prior main as a merge parent (ours strategy), then fast-forwards main. This intentionally keeps Android/LAN separate rather than importing stale V1 native code into web production. No history rewrite or force push.
+- Prepared explicit public three-browser smoke script scripts/browser/production-smoke.ts (requires exact HTTPS URL, validates version before creating synthetic room, normal controls/reconnect/payout/next round, closes only its room).
+- Pending: main integration CI; deploy; public smoke; final evidence.
 
 ## Exact next action
-Commit/push reviewed web source for full CI. Preserve exact V1 main/web refs, integrate web production tree into main without rewriting either history, wait for green main CI, then deploy existing bet-brawl and smoke three public clients. Record all identifiers. Production mutation authorized; do not deploy with red checks.
+Commit public smoke/support docs, integrate preserved main history into web tree, fast-forward production main and wait for green main CI. Then deploy existing bet-brawl and smoke three public clients. Record all identifiers. Production mutation authorized; do not deploy with red checks.

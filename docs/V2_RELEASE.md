@@ -18,7 +18,10 @@ V2 is the production web version on main, targeting the existing Cloudflare Work
 ## Verification and deployment record
 
 - Pre-upgrade live Worker version: e95923d1-b1e4-4566-9b90-c1cf2fddb49b (2026-10-20), retrieved through Wrangler. BRAWL_ROOMS/BrawlRoom and ASSETS confirmed.
-- Final local full suite, browser checks, exact-source CI, commit, preserved refs, deployment URL/version and public smoke: pending completion in this session. See CODEX_WORKLOG.md for the current stage.
+- Local lint/full cf:verify PASS:98 shared +20 Worker, typechecks/build/dry-run and actual Wrangler SQLite/WebSocket tournament/restart. Real Chrome matrix32cases and8 focused regression groups PASS; zero page errors.
+- Exact-source [CI41309586042 SUCCESS](https://github.com/RyanEid06/BET-BRAWL/actions/runs/41309586042) at453c02836add4a0b5223de92f43dd97f471171fb includes clean-install full gate and Chromium matrix/regressions.
+- Published recovery tags: v1.0.0-production-web at a60a79d007b6c93acb49d49483b9f1c343f76d76; v1.0.0-pre-v2-main at2ee6d66f4ecd49a66bf31530413919d550055f11. Existing V1 branches/frozen tag verified unchanged.
+- Main integration CI, deployment URL/version and public smoke: pending. See CODEX_WORKLOG.md.
 
 ## Recovery and boundaries
 

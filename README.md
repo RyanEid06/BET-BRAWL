@@ -42,6 +42,6 @@ Use the existing authenticated Cloudflare account. If login is needed, run `npm 
 
 ## Preserved V1 history
 
-V1 is historical and recoverable: `v1-web-cloudflare-ready` at `a60a79d007b6c93acb49d49483b9f1c343f76d76`, `v1-web-final` at `e1f948c6c6e46355435fd70ea9ab8ee63031ebea`, and tag `v1.0.0-web-final`. The former Android/LAN main is `2ee6d66f4ecd49a66bf31530413919d550055f11`; production promotion adds dedicated preservation refs. These histories must not be deleted or rewritten. Historical V1 reports are not current deployment instructions.
+V1 is historical and recoverable: `v1-web-cloudflare-ready` at `a60a79d007b6c93acb49d49483b9f1c343f76d76`, `v1-web-final` at `e1f948c6c6e46355435fd70ea9ab8ee63031ebea`, and tag `v1.0.0-web-final`. The former Android/LAN main is `2ee6d66f4ecd49a66bf31530413919d550055f11`; preserved as tag `v1.0.0-pre-v2-main`. The online V1 source also has tag `v1.0.0-production-web`. These histories must not be deleted or rewritten. Historical V1 reports are not current deployment instructions.
 
 Natural Earth map geometry used by Blind Pinpoint is public domain.
