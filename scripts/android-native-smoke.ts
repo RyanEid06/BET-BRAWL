@@ -101,7 +101,7 @@ function bounds(node: UiNode): [number, number, number, number] | null {
 
 function tapNode(node: UiNode, label: string): void {
   let target = node;
-  for (let parent = node.parent; parent; parent = parent.parent) {
+  for (let parent: UiNode | undefined = node; parent; parent = parent.parent) {
     if (parent.attrs.clickable === 'true') { target = parent; break; }
   }
   const box = bounds(target);
@@ -158,7 +158,10 @@ function saveUi(label: string, xml: string): void {
 }
 
 function findNode(roots: UiNode[], query: string | RegExp): UiNode | undefined {
-  return allNodes(roots).find(node => node.attrs.enabled !== 'false' && matches(node, query));
+  return allNodes(roots).find(node => {
+    const box = bounds(node);
+    return node.attrs.enabled !== 'false' && box && box[2] > box[0] && box[3] > box[1] && matches(node, query);
+  });
 }
 
 async function clickText(query: string | RegExp, label: string, timeout = 20_000): Promise<void> {
@@ -344,14 +347,14 @@ async function hostWithDeniedNotifications(): Promise<void> {
   shell('pm', 'clear-permission-flags', PACKAGE, 'android.permission.POST_NOTIFICATIONS', 'user-fixed');
   hostStarted = true;
   await clickText(/HOST NEW GAME/i, 'Host new game');
-  const prompt = await waitForText(/Don't allow|Not now|Allow/i, 'notification permission dialog', 15_000);
+  const prompt = await waitForText(/Don['’]t allow|Not now|Allow/i, 'notification permission dialog', 15_000);
   saveUi('notification-permission', prompt.xml);
   const service = await waitFor(() => {
     const status = hostServiceStatus();
     return status.running && status.foreground ? status : null;
   }, 'foreground HostService started before permission result', 10_000);
   event('foreground-service-started-while-notification-prompt-open', { foreground: service.foreground });
-  await clickText(/Don't allow|Not now/i, 'deny notification permission', 15_000);
+  await clickText(/Don['’]t allow|Not now/i, 'deny notification permission', 15_000);
   await waitFor(() => notificationPermission().includes('denied'), 'notification permission denied');
   await waitFor(() => hostServiceRunning(), 'native HostService remains running after denial');
   event('hosting-started-with-notifications-denied', { permission: 'denied', serviceRunning: true });
@@ -462,7 +465,7 @@ async function cleanup(): Promise<void> {
           shell('input', 'keyevent', '4');
           await waitForText(/Close room and leave/i, 'owned room cleanup confirmation', 10_000);
         }
-        await clickText(/Close room and leave/i, 'close owned test room', 10_000);
+        await clickText('Close room and leave', 'close owned test room', 10_000);
         await waitForText(/HOST NEW GAME/i, 'host room closed', 15_000);
         await waitFor(() => !hostServiceRunning(), 'HostService stop requested by host UI', 5_000);
         event('owned-room-closed-through-host-ui');

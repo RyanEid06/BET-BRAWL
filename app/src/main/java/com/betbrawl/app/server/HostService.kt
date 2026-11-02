@@ -54,7 +54,7 @@ class HostService : Service() {
             this,
             NOTIFICATION_ID,
             createNotification(serverInstance != null),
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE else 0
         )
         if (serverInstance == null && startingServer == null) {
             lateinit var server: BrawlWebSocketServer
