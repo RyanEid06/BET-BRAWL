@@ -10,7 +10,9 @@ Focused TS/Kotlin timing, Quick Draw arena/one-shot/false-start clarity, dynamic
 
 Observed local: typecheck PASS;115sharedtests PASS; browser32cases+11existinggroups+4viewportpolishmatrices+8mapgroups PASS, including actual CDP pinch/cancel and orientationclamp. Bundled build/sync PASS before final minor map guard/touch-target updates (CI will rebuild exact source). Snapshot screenshots in output/playwright; logs artifacts/v2.1-*.log. Local exact Android wrapper8.7 download stalled; portable Kotlin runtime attempted existingGradle9.3.1 withJDK17/21, both failed before task execution due Windows PipeImpl UnixDomainSockets invalid argument. No local Kotlin/Android pass claimed; require exact Linux CI. Existing owned API37 AVD running serialemulator-5580 (process2208), installed pinnedV2code3 still intact, not uninstalled/reset. New upgrade verifier scripts/android-upgrade-smoke.py syntax/help PASS with real Python313; actual signedupgrade still pending.
 
-Next: commit/push main runtime, record exactCI, port sharedchanges to existingv2-web while CI runs; require build/nativeCI+webCIgreen, retrieve signedAPK, runupgradeverifier on5580 and native smoke, thenwebproductiondeploy. No physical device touched.
+Runtime source b8cf80a8a2421ad1ff41c922e8ec090341302702 pushed to main with explicit owner approval (auto-review initially required exact main/v2-web push consent; approval received). Android CI41505327748 in progress. Upgrade preflight on5580 saved real V2 name/avatar throughUI, closed itsownroom normally, and captured10 actual WebView/SharedPreferencesfiles in memory; corrected API37 appId label and adb archive quoting. Helper corrections do not alter APK runtime.
+
+Next: push helper/checkpoint correction then port sharedchanges to existingv2-web while CI runs; require build/nativeCI+webCIgreen, retrieve exact signedAPK, run fullupgradeverifier on5580 and native smoke, thenwebproductiondeploy. No physical device touched.
 
 ## Previous V2 release checkpoint
 

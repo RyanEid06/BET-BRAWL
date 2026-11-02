@@ -8,6 +8,7 @@ import json
 import os
 import re
 import shutil
+import shlex
 import subprocess
 import sys
 import tarfile
@@ -213,11 +214,11 @@ def seed_identity():
 
 def snapshot():
     for relative in (LOCAL_STORAGE, PREFS):
-        result = adb(["shell", "test", "-d", f"{APP_DATA}/{relative}"], check=False)
+        result = adb(["shell", "test", "-d", shlex.quote(f"{APP_DATA}/{relative}")], check=False)
         if result.returncode:
             raise RuntimeError(f"Required app data directory is missing: {relative}")
     command = f"tar -cf - -C {APP_DATA} '{LOCAL_STORAGE}' '{PREFS}'"
-    packed = adb(["exec-out", "sh", "-c", command], timeout=60, binary=True).stdout
+    packed = adb(["exec-out", command], timeout=60, binary=True).stdout
     if not packed:
         raise RuntimeError("Device returned an empty app data snapshot.")
     files = {}
