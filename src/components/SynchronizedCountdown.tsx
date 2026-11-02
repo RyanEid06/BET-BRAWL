@@ -11,12 +11,14 @@ interface Props {
   gameStartsAt: number;
   serverTimeOffset: number;
   miniGameName: string;
+  targetSeconds?: number;
 }
 
 export const SynchronizedCountdown: React.FC<Props> = ({
   gameStartsAt,
   serverTimeOffset,
   miniGameName,
+  targetSeconds,
 }) => {
   const [displayText, setDisplayText] = useState<string>('3');
 
@@ -64,6 +66,7 @@ export const SynchronizedCountdown: React.FC<Props> = ({
       <p className="text-base font-display font-bold text-slate-300">
         {miniGameName}
       </p>
+      {typeof targetSeconds === 'number' && <p className="text-xl font-mono font-bold text-cyan-300">Target: {targetSeconds.toFixed(3)}s</p>}
     </div>
   );
 };

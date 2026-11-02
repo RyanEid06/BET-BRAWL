@@ -87,7 +87,8 @@ class ServerProtocolTest {
             val winner = fighter(winnerId)
             when (round.miniGame.id) {
                 "millisecond_stop" -> {
-                    until(round.gameStartsAt + 5000)
+                    val targetSeconds = (round.gameConfig?.get("targetSeconds") as Number).toDouble()
+                    until(round.gameStartsAt + (targetSeconds * 1000).toLong())
                     action(winner, mapOf("type" to "STOP"))
                     advance(1000)
                     action(fighter(round.fighterIds.first { it != winnerId }), mapOf("type" to "STOP"))
@@ -442,7 +443,8 @@ class ServerProtocolTest {
     fun concurrentDuplicateFighterMessagesPayOutExactlyOnce() = Room().use { room ->
         room.join(); room.join(); room.readyStart(); room.startActive()
         val round = room.state().currentRound!!
-        room.until(round.gameStartsAt + 5000)
+        val targetSeconds = (round.gameConfig?.get("targetSeconds") as Number).toDouble()
+        room.until(round.gameStartsAt + (targetSeconds * 1000).toLong())
         room.action(room.fighter(round.fighterIds[0]), mapOf("type" to "STOP"))
         room.advance(1000)
         val second = room.fighter(round.fighterIds[1])

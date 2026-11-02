@@ -9,6 +9,7 @@ import React, { useEffect, useState } from 'react';
 import type { PublicPlayer, MiniGameMeta } from '../engine/types.ts';
 import { sound } from '../engine/audio.ts';
 import { HelpCircle, Clock } from 'lucide-react';
+import { FighterInstructions } from './FighterInstructions.tsx';
 
 interface Props {
   roundNumber: number;
@@ -16,6 +17,8 @@ interface Props {
   fighterA: PublicPlayer;
   fighterB: PublicPlayer;
   miniGame: MiniGameMeta;
+  isPlayerFighter?: boolean;
+  gameConfig?: Record<string, unknown>;
   revealEndsAt?: number;
   serverTimeOffset?: number;
   isChampionship?: boolean;
@@ -31,6 +34,8 @@ export const FighterAnnouncement: React.FC<Props> = ({
   fighterA,
   fighterB,
   miniGame,
+  isPlayerFighter = false,
+  gameConfig,
   revealEndsAt,
   serverTimeOffset = 0,
   isChampionship = false,
@@ -137,7 +142,7 @@ export const FighterAnnouncement: React.FC<Props> = ({
       </div>
 
       {/* Essential 2-3 Step How to Play Guide */}
-      <div className="w-full bg-slate-900/90 p-4 rounded-2xl border border-slate-800 text-left space-y-2">
+      {isPlayerFighter ? <FighterInstructions miniGame={miniGame} gameConfig={gameConfig} /> : <div className="w-full bg-slate-900/90 p-4 rounded-2xl border border-slate-800 text-left space-y-2">
         <div className="flex items-center gap-1.5 text-xs font-mono font-bold text-amber-400">
           <HelpCircle className="w-4 h-4" />
           <span>HOW TO PLAY:</span>
@@ -150,7 +155,7 @@ export const FighterAnnouncement: React.FC<Props> = ({
             </li>
           ))}
         </ul>
-      </div>
+      </div>}
 
       {/* Timed Betting Transition Indicator */}
       <div className="w-full">

@@ -6,12 +6,15 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import type { PublicPlayer, FighterOdds, SecretBet } from '../engine/types.ts';
+import type { PublicPlayer, FighterOdds, SecretBet, MiniGameMeta } from '../engine/types.ts';
+import { FighterInstructions } from './FighterInstructions.tsx';
 import { sound } from '../engine/audio.ts';
 import { calculatePotentialReturn } from '../engine/odds.ts';
 import { Clock, CheckCircle, Flame, AlertCircle } from 'lucide-react';
 
 interface Props {
+  miniGame: MiniGameMeta;
+  gameConfig?: Record<string, unknown>;
   fighterA: PublicPlayer;
   fighterB: PublicPlayer;
   odds: Record<string, FighterOdds>;
@@ -25,6 +28,8 @@ interface Props {
 }
 
 export const BettingScreen: React.FC<Props> = ({
+  miniGame,
+  gameConfig,
   fighterA,
   fighterB,
   odds,
@@ -83,9 +88,9 @@ export const BettingScreen: React.FC<Props> = ({
       {/* Top Header: Countdown & Info */}
       <div className="bg-slate-900/90 border border-slate-700 rounded-2xl p-3 sm:p-4 shadow-xl flex items-center justify-between">
         <div>
-          <div className="text-[11px] font-mono text-slate-400 uppercase">15s SECRET WAGER</div>
+          <div className="text-[11px] font-mono text-slate-400 uppercase">{isFighter ? 'YOUR NEXT GAME' : '15s SECRET WAGER'}</div>
           <h2 className="text-lg sm:text-xl font-black font-display text-white">
-            {myBet ? 'WAGER LOCKED IN' : 'PLACE YOUR BET'}
+            {isFighter ? miniGame.name : myBet ? 'WAGER LOCKED IN' : 'PLACE YOUR BET'}
           </h2>
         </div>
 
@@ -110,6 +115,8 @@ export const BettingScreen: React.FC<Props> = ({
           <span>{lastRejectedBetReason}</span>
         </div>
       )}
+
+      {isFighter && <FighterInstructions miniGame={miniGame} gameConfig={gameConfig} />}
 
       {/* Simplified Mobile-Friendly Fighter Cards */}
       <div className="grid grid-cols-2 gap-3">

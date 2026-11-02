@@ -1,4 +1,18 @@
-# BET & BRAWL V2 production release — complete 2026-11-02
+# BET & BRAWL V2.1 focused polish — in progress 2026-11-02
+
+## Active objective / exact next action
+User authorizes focused V2.1 gameplay polish, full shared/Worker/Android/browser verification, permanent-key signed APK, V2 code3 → V2.1 in-place update with data retained, green CI, then existing Cloudflare production deployment. No physical-device operations or uninstall/data reset. New version 2.1.0/code4, same com.betbrawl.app and pinned certificate. No persisted schema changes planned. User requests no progress commentary unless asked or input needed.
+
+Start state: main at 0ba2e59, clean; one canonical worktree. v2-web is separate production branch; preserve main/v2-web/v1 arrangement. Plan: docs/superpowers/plans/2026-11-02-v2.1-polish.md. Next: implement paired TS/Kotlin randomized timing; focused UI/instructions/results/map regressions; check full suites; commit and CI; verify signed upgrade on owned emulator; port shared changes to v2-web and verify/deploy only after all gates. Keep previous V2 APK immutable as upgrade baseline.
+
+## V2.1 implementation checkpoint
+Focused TS/Kotlin timing, Quick Draw arena/one-shot/false-start clarity, dynamic Millisecond UI/countdown, full-world bounded pan/pinch/zoom with editable local draft then Lock, visible result errors/reasons, fighter-only reveal+betting instructions for all14 games implemented. No persisted Android schema/storage/package/signing changes. Existing web Millisecond checkpoints without new internal target retain fixed5-second scoring through explicit fallback+regression. Version2.1.0/code4. Independent Luna-high review found no important regressions; all later delegated work used Luna high at owner's request.
+
+Observed local: typecheck PASS;115sharedtests PASS; browser32cases+11existinggroups+4viewportpolishmatrices+8mapgroups PASS, including actual CDP pinch/cancel and orientationclamp. Bundled build/sync PASS before final minor map guard/touch-target updates (CI will rebuild exact source). Snapshot screenshots in output/playwright; logs artifacts/v2.1-*.log. Local exact Android wrapper8.7 download stalled; portable Kotlin runtime attempted existingGradle9.3.1 withJDK17/21, both failed before task execution due Windows PipeImpl UnixDomainSockets invalid argument. No local Kotlin/Android pass claimed; require exact Linux CI. Existing owned API37 AVD running serialemulator-5580 (process2208), installed pinnedV2code3 still intact, not uninstalled/reset. New upgrade verifier scripts/android-upgrade-smoke.py syntax/help PASS with real Python313; actual signedupgrade still pending.
+
+Next: commit/push main runtime, record exactCI, port sharedchanges to existingv2-web while CI runs; require build/nativeCI+webCIgreen, retrieve signedAPK, runupgradeverifier on5580 and native smoke, thenwebproductiondeploy. No physical device touched.
+
+## Previous V2 release checkpoint
 
 ## Objective / result
 Finished shared V2 fixes and Android-specific Back/IME/lifecycle/reconnect/foreground hosting/notification/LAN/deep-link review, permanent signing, verification and signed APK delivery. Existing React WebView/native authoritative Kotlin LAN architecture, protocol2, scoring and data compatibility retained. No PWA/iPhone scope or physical-device mutation. Owner authorized production pushes/deployment and exactly3branches; local and remote branches are now main (Android V2), v2-web (production web), v1 (history).

@@ -41,13 +41,12 @@ object MiniGamesCatalog {
             id = "millisecond_stop",
             name = "Millisecond Stop",
             tagline = "Internal Clock Showdown",
-            durationSeconds = 9,
-            description = "The timer counts toward 05.000s. At 03.000s the display blinds out into ??.??? Tap as close to 05.000s as you can.",
+            durationSeconds = 13,
+            description = "Each game chooses a 3, 5, 7 or 9 second target. Stop closest to the target after the timer becomes hidden.",
             rules = listOf(
-                "Watch the live counter until 03.000s",
-                "At 03.000s the clock blinds out into ??.??? for all players",
-                "Tap SLAM as close to 05.000s as possible",
-                "Closest tap to 5.000s wins the Brawl"
+                "Read this game’s target before the countdown.",
+                "Watch the timer, then keep counting when it becomes hidden.",
+                "Tap SLAM once; closest stop to the target wins."
             )
         ),
         "rapid_red_green" to MiniGameMeta(

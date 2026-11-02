@@ -6,7 +6,7 @@
  * Bundles an offline, geographically aligned equirectangular world map projection (Natural Earth Public Domain standard).
  */
 
-import React, { useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import type { PublicPlayer } from '../../engine/types.ts';
 import { sound } from '../../engine/audio.ts';
 import { CityLocation } from '../../engine/miniGamesCatalog.ts';
@@ -40,30 +40,126 @@ export const BlindPinpointGame: React.FC<Props> = ({
   const revealedTarget = gameState?.revealedCity as CityLocation | undefined;
   const pins = (gameState?.pins as Record<string, { normX: number; normY: number; km: number }>) || {};
 
-  const distKmA = fighterScores[fighterA.id] !== undefined ? fighterScores[fighterA.id] : null;
-  const distKmB = fighterScores[fighterB.id] !== undefined ? fighterScores[fighterB.id] : null;
-
   const pinA = pins[fighterA.id] || null;
   const pinB = pins[fighterB.id] || null;
+  const distKmA = pinA && fighterScores[fighterA.id] !== undefined ? fighterScores[fighterA.id] : null;
+  const distKmB = pinB && fighterScores[fighterB.id] !== undefined ? fighterScores[fighterB.id] : null;
 
   const mapContainerRef = useRef<HTMLDivElement>(null);
+  const activePointers = useRef(new Map<number, { x: number; y: number }>());
+  const gesture = useRef<{ x: number; y: number; mapX: number; mapY: number; moved: boolean } | null>(null);
+  const pinch = useRef<{ distance: number; zoom: number; anchorX: number; anchorY: number } | null>(null);
+  const suppressTap = useRef(false);
+  const lockSent = useRef(false);
+  const [view, setView] = useState({ zoom: 1, x: 0, y: 0 });
+  const [draft, setDraft] = useState<{ normX: number; normY: number } | null>(null);
+  const [isSubmitted, setIsSubmitted] = useState(false);
 
-  const hasPinned = (playerFighterSlot === 'A' && pinA !== null) ||
-                    (playerFighterSlot === 'B' && pinB !== null);
-
-  const handleMapClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!isPlayerFighter || hasPinned || !mapContainerRef.current) return;
-
-    const rect = mapContainerRef.current.getBoundingClientRect();
-    const clickX = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    const clickY = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
-
+  const lockedPin = playerFighterSlot === 'A' ? pinA : playerFighterSlot === 'B' ? pinB : null;
+  const hasLocked = lockedPin !== null;
+  const submitted = hasLocked || isSubmitted;
+  useEffect(() => {
+    const resize = () => {
+      const map = mapContainerRef.current;
+      if (map) setView(current => ({...current,
+        x: Math.max(map.clientWidth * (1 - current.zoom), Math.min(0, current.x)),
+        y: Math.max(map.clientHeight * (1 - current.zoom), Math.min(0, current.y)),
+      }));
+    };
+    window.addEventListener('resize', resize);
+    return () => window.removeEventListener('resize', resize);
+  }, []);
+  const boundedView = (zoom: number, x: number, y: number) => {
+    const rect = mapContainerRef.current?.getBoundingClientRect();
+    const scale = Math.max(1, Math.min(4, zoom));
+    return {
+      zoom: scale,
+      x: rect ? Math.max(mapContainerRef.current!.clientWidth * (1 - scale), Math.min(0, x)) : 0,
+      y: rect ? Math.max(mapContainerRef.current!.clientHeight * (1 - scale), Math.min(0, y)) : 0,
+    };
+  };
+  const zoomAt = (clientX: number, clientY: number, zoom: number) => {
+    const rect = mapContainerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const nextZoom = Math.max(1, Math.min(4, zoom));
+    const left = rect.left + mapContainerRef.current!.clientLeft, top = rect.top + mapContainerRef.current!.clientTop;
+    const mapX = (clientX - left - view.x) / view.zoom;
+    const mapY = (clientY - top - view.y) / view.zoom;
+    setView(boundedView(nextZoom, clientX - left - mapX * nextZoom, clientY - top - mapY * nextZoom));
+  };
+  const zoomMap = (zoom: number) => {
+    const rect = mapContainerRef.current?.getBoundingClientRect();
+    if (rect && mapContainerRef.current) zoomAt(rect.left + mapContainerRef.current.clientLeft + mapContainerRef.current.clientWidth / 2, rect.top + mapContainerRef.current.clientTop + mapContainerRef.current.clientHeight / 2, zoom);
+  };
+  const pointInMap = (clientX: number, clientY: number) => {
+    const rect = mapContainerRef.current?.getBoundingClientRect();
+    if (!rect) return null;
+    return {
+      normX: Math.max(0, Math.min(1, (clientX - rect.left - mapContainerRef.current!.clientLeft - view.x) / (mapContainerRef.current!.clientWidth * view.zoom))),
+      normY: Math.max(0, Math.min(1, (clientY - rect.top - mapContainerRef.current!.clientTop - view.y) / (mapContainerRef.current!.clientHeight * view.zoom))),
+    };
+  };
+  const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    event.currentTarget.setPointerCapture(event.pointerId);
+    activePointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (activePointers.current.size > 1) {
+      suppressTap.current = true;
+      const [a, b] = [...activePointers.current.values()];
+      const rect = mapContainerRef.current!.getBoundingClientRect();
+      const midX = (a.x + b.x) / 2, midY = (a.y + b.y) / 2;
+      pinch.current = {
+        distance: Math.hypot(a.x - b.x, a.y - b.y), zoom: view.zoom,
+        anchorX: (midX - rect.left - mapContainerRef.current!.clientLeft - view.x) / view.zoom,
+        anchorY: (midY - rect.top - mapContainerRef.current!.clientTop - view.y) / view.zoom,
+      };
+      gesture.current = null;
+    } else {
+      gesture.current = { x: event.clientX, y: event.clientY, mapX: view.x, mapY: view.y, moved: false };
+    }
+  };
+  const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!activePointers.current.has(event.pointerId)) return;
+    activePointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (activePointers.current.size > 1 && pinch.current && mapContainerRef.current) {
+      const [a, b] = [...activePointers.current.values()];
+      const rect = mapContainerRef.current.getBoundingClientRect();
+      const distance = Math.hypot(a.x - b.x, a.y - b.y);
+      const midX = (a.x + b.x) / 2 - rect.left - mapContainerRef.current.clientLeft, midY = (a.y + b.y) / 2 - rect.top - mapContainerRef.current.clientTop;
+      const zoom = Math.max(1, Math.min(4, pinch.current.zoom * distance / Math.max(1, pinch.current.distance)));
+      setView(boundedView(zoom, midX - pinch.current.anchorX * zoom, midY - pinch.current.anchorY * zoom));
+    } else if (activePointers.current.size === 1 && gesture.current) {
+      const dx = event.clientX - gesture.current.x, dy = event.clientY - gesture.current.y;
+      if (Math.hypot(dx, dy) > 6) gesture.current.moved = true;
+      if (gesture.current.moved) setView(boundedView(view.zoom, gesture.current.mapX + dx, gesture.current.mapY + dy));
+    }
+  };
+  const handlePointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
+    const wasPinching = suppressTap.current;
+    const pointer = activePointers.current.get(event.pointerId);
+    const wasTap = gesture.current && !gesture.current.moved && pointer && activePointers.current.size === 1;
+    activePointers.current.delete(event.pointerId);
+    gesture.current = null;
+    if (activePointers.current.size === 0) {
+      pinch.current = null;
+      suppressTap.current = false;
+    }
+    if (wasTap && !wasPinching && isPlayerFighter && !hasLocked && !lockSent.current) {
+      const next = pointInMap(event.clientX, event.clientY);
+      if (next) { setDraft(next); sound.playTap(true); }
+    }
+  };
+  const handlePointerCancel = (event: React.PointerEvent<HTMLDivElement>) => {
+    activePointers.current.delete(event.pointerId);
+    gesture.current = null;
+    suppressTap.current = true;
+    if (activePointers.current.size === 0) { pinch.current = null; suppressTap.current = false; }
+  };
+  const lockGuess = () => {
+    if (!draft || submitted || !isPlayerFighter || lockSent.current) return;
+    lockSent.current = true;
+    setIsSubmitted(true);
     sound.playTap(true);
-    onSendAction({
-      type: 'PIN',
-      normX: clickX,
-      normY: clickY,
-    });
+    onSendAction({ type: 'PIN', normX: draft.normX, normY: draft.normY });
   };
 
   // Convert revealed target to normalized coordinates
@@ -85,11 +181,21 @@ export const BlindPinpointGame: React.FC<Props> = ({
       {/* Geographically Aligned Equirectangular World Map Canvas */}
       <div
         ref={mapContainerRef}
-        onClick={handleMapClick}
-        className={`relative w-full aspect-[2/1] max-h-72 bg-[#050814] rounded-2xl border-2 border-slate-700 overflow-hidden shadow-2xl flex items-center justify-center select-none ${
-          !hasPinned && isPlayerFighter ? 'cursor-crosshair' : 'cursor-default'
+        data-testid="pinpoint-map"
+        aria-label="Interactive world map"
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerCancel}
+        onWheel={(event) => { event.preventDefault(); zoomAt(event.clientX, event.clientY, view.zoom * (event.deltaY < 0 ? 1.2 : 1 / 1.2)); }}
+        className={`relative w-full aspect-[2/1] bg-[#050814] rounded-2xl border-2 border-slate-700 overflow-hidden shadow-2xl select-none touch-none ${
+          isPlayerFighter && !submitted ? 'cursor-crosshair' : 'cursor-grab'
         }`}
       >
+        <div
+          data-testid="pinpoint-world"
+          style={{ width: '100%', height: '100%', position: 'absolute', left: 0, top: 0, transformOrigin: '0 0', transform: `translate(${view.x}px, ${view.y}px) scale(${view.zoom})`, '--bp-zoom': String(view.zoom), '--bp-x': `${view.x}px`, '--bp-y': `${view.y}px` } as React.CSSProperties}
+        >
         {/* Lat/Lon Grid lines every 30 degrees (Equator & Prime Meridian highlighted) */}
         <div className="absolute inset-0 pointer-events-none">
           <svg viewBox="0 0 360 180" className="w-full h-full stroke-slate-800/80 stroke-[0.4] fill-none">
@@ -193,9 +299,26 @@ export const BlindPinpointGame: React.FC<Props> = ({
           </div>
         )}
 
+        {draft && !hasLocked && (
+          <div
+            data-testid="draft-pin"
+            aria-label={submitted ? 'Locked draft pin' : 'Draft pin, not submitted'}
+            className={`absolute w-7 h-7 -ml-3.5 -mt-3.5 rounded-full border-2 border-white shadow-lg flex items-center justify-center text-xs font-black z-20 pointer-events-none ${submitted ? 'bg-emerald-500' : 'bg-fuchsia-500'}`}
+            style={{ left: `${draft.normX * 100}%`, top: `${draft.normY * 100}%` }}
+          >{playerFighterSlot}</div>
+        )}
+
         <div className="absolute bottom-1.5 left-2.5 text-[9px] font-mono text-slate-400 bg-slate-950/80 px-2 py-0.5 rounded border border-slate-800 pointer-events-none">
           Equirectangular Map (-180° to +180° Lon · +90° to -90° Lat)
         </div>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center justify-center gap-2 w-full" aria-label="Map controls">
+        <button type="button" aria-label="Zoom out" onClick={() => zoomMap(view.zoom / 1.5)} disabled={view.zoom <= 1} className="min-h-11 min-w-11 rounded-lg border border-slate-600 bg-slate-900 px-3 font-bold disabled:opacity-40">−</button>
+        <button type="button" aria-label="Zoom in" onClick={() => zoomMap(view.zoom * 1.5)} disabled={view.zoom >= 4} className="min-h-11 min-w-11 rounded-lg border border-slate-600 bg-slate-900 px-3 font-bold disabled:opacity-40">+</button>
+        <button type="button" aria-label="Reset map" onClick={() => setView({ zoom: 1, x: 0, y: 0 })} disabled={view.zoom === 1 && view.x === 0 && view.y === 0} className="min-h-11 rounded-lg border border-slate-600 bg-slate-900 px-3 text-sm disabled:opacity-40">Reset</button>
+        {isPlayerFighter && !hasLocked && <button type="button" aria-label="Lock guess" onClick={lockGuess} disabled={!draft || submitted} className="min-h-11 rounded-lg border border-emerald-400 bg-emerald-700 px-4 text-sm font-bold text-white disabled:opacity-40">Lock guess</button>}
       </div>
 
       {/* Haversine Distance Scoreboard */}
@@ -218,9 +341,11 @@ export const BlindPinpointGame: React.FC<Props> = ({
       <div className="w-full text-center">
         {isPlayerFighter ? (
           <div className="text-xs font-mono text-slate-300">
-            {hasPinned
-              ? '✓ Your pin is locked in! Waiting for opponent...'
-              : 'Tap the world map where you think the city is located!'}
+            {submitted
+              ? '✓ Guess locked. Waiting for opponent...'
+              : draft
+                ? 'Draft pin · Tap the map to move it, then lock your guess.'
+                : 'Drag to explore · Tap to place a draft pin · Lock guess to submit.'}
           </div>
         ) : (
           <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 text-center w-full">

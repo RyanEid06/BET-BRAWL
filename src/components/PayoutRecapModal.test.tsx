@@ -83,3 +83,53 @@ test('V2 forfeit and VOID recaps never show a recomputed played result after the
     assert.doesNotMatch(render(), /Final result confirmed by the server/);
   }
 });
+
+test('Millisecond recap shows selected target, both stops, absolute errors and winning reason', () => {
+  const { round, players, render } = recap();
+  round.miniGame = MINI_GAMES.millisecond_stop;
+  round.gameConfig = { targetSeconds: 9, blindSeconds: 4 };
+  round.fighterScores = { [players[0].id]: 8.9, [players[1].id]: 9.25 };
+  round.winnerId = players[0].id;
+  const text = render();
+  assert.match(text, /Target: 9\.000s/);
+  assert.match(text, /8\.900s.*0\.100s error/);
+  assert.match(text, /9\.250s.*0\.250s error/);
+  assert.match(text, /A wins.*closer to the target/);
+});
+
+test('Quick Draw recap shows both reactions, zero milliseconds and explicit false-start loss', () => {
+  const { round, players, render } = recap();
+  round.miniGame = MINI_GAMES.quick_draw;
+  round.winnerId = players[0].id;
+  round.fighterScores = { [players[0].id]: 0, [players[1].id]: 240 };
+  round.gameState = { reactions: { [players[0].id]: 0, [players[1].id]: 240 } };
+  assert.match(render(), /A.*0 ms.*B.*240 ms/);
+  assert.match(render(), /A wins.*faster reaction/);
+  round.winnerId = players[1].id;
+  round.gameState = { fouls: { [players[0].id]: true } };
+  round.fighterScores = { [players[0].id]: 0 };
+  assert.match(render(), /B wins.*A.*false start.*caused the loss/);
+  assert.match(render(), /No reaction/);
+});
+
+test('Pinpoint recap shows both distance errors and explains distance, tie or missing guess', () => {
+  const { round, players, render } = recap();
+  round.miniGame = MINI_GAMES.blind_pinpoint;
+  round.fighterScores = { [players[0].id]: 0, [players[1].id]: 812 };
+  round.gameState = { pins: { [players[0].id]: {}, [players[1].id]: {} } };
+  round.winnerId = players[0].id;
+  assert.match(render(), /A.*0 km error.*B.*812 km error/);
+  assert.match(render(), /A wins.*closer to the city/);
+  round.fighterScores = { [players[0].id]: 25, [players[1].id]: 29 };
+  round.winnerId = null;
+  round.tieResult = true;
+  assert.match(render(), /Tie.*within 10 km/);
+  round.tieResult = false;
+  round.winnerId = players[0].id;
+  delete round.fighterScores[players[1].id];
+  round.gameState = { pins: { [players[0].id]: {} } };
+  assert.match(render(), /B.*No guess/);
+  assert.match(render(), /A wins.*only fighter.*guess/);
+  round.resolutionReason = 'DISCONNECT_FORFEIT';
+  assert.doesNotMatch(render(), /closer to the city|only fighter.*guess/);
+});

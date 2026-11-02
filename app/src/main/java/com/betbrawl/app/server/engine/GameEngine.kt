@@ -17,6 +17,7 @@ data class InternalGameState(
     val gameStartsAt: Long,
     var v2: JsonObject? = null,
     var millisecondStopStopped: MutableMap<String, Boolean> = mutableMapOf(),
+    var millisecondStopTargetSeconds: Double = 5.0,
     var redGreenSchedule: List<LightScheduleStep> = emptyList(),
     var redGreenLastTapAt: MutableMap<String, Long> = mutableMapOf(),
     var speedMathCorrectAnswers: List<Int> = emptyList(),
@@ -62,7 +63,8 @@ object GameEngine {
     fun initMiniGameServerState(
         miniGameId: String,
         fighterIds: List<String>,
-        gameStartsAt: Long
+        gameStartsAt: Long,
+        random: () -> Double = { Random.nextDouble() }
     ): Pair<InternalGameState, Map<String, Any?>> {
         val f1 = fighterIds[0]
         val f2 = fighterIds[1]
@@ -80,9 +82,11 @@ object GameEngine {
 
         when (miniGameId) {
             "millisecond_stop" -> {
+                val (targetSeconds, blindSeconds) = listOf(3.0 to 1.5, 5.0 to 3.0, 7.0 to 3.0, 9.0 to 4.0)[(random() * 4).toInt()]
                 internal.millisecondStopStopped = mutableMapOf(f1 to false, f2 to false)
-                publicConfig["targetSeconds"] = 5.0
-                publicConfig["blindSeconds"] = 3.0
+                internal.millisecondStopTargetSeconds = targetSeconds
+                publicConfig["targetSeconds"] = targetSeconds
+                publicConfig["blindSeconds"] = blindSeconds
             }
             "rapid_red_green" -> {
                 val sequence = mutableListOf<LightScheduleStep>()
@@ -90,9 +94,10 @@ object GameEngine {
                 var currentLight = "GREEN"
                 while (accumulatedMs < 16000) {
                     val dur = if (currentLight == "GREEN") {
-                        Random.nextInt(1400, 2600)
+                        val (min, max) = listOf(200 to 450, 500 to 1_000, 2_000 to 3_000)[(random() * 3).toInt()]
+                        min + (random() * (max - min + 1)).toInt()
                     } else {
-                        Random.nextInt(800, 1600)
+                        350 + (random() * 1_851).toInt()
                     }
                     sequence.add(LightScheduleStep(currentLight, dur))
                     accumulatedMs += dur
@@ -199,17 +204,20 @@ object GameEngine {
                 if (internal.millisecondStopStopped[f1] == true && internal.millisecondStopStopped[f2] == true) {
                     val s1 = fighterScores[f1]?.toDouble() ?: 0.0
                     val s2 = fighterScores[f2]?.toDouble() ?: 0.0
-                    val delta1 = abs(s1 - 5.0)
-                    val delta2 = abs(s2 - 5.0)
+                    val delta1 = abs(s1 - internal.millisecondStopTargetSeconds)
+                    val delta2 = abs(s2 - internal.millisecondStopTargetSeconds)
 
                     if (abs(delta1 - delta2) < 0.005) {
-                        return GameActionResult(resolved = true, winnerId = null, isTie = true, scoreUpdate = fighterScores)
+                        return GameActionResult(resolved = true, winnerId = null, isTie = true, scoreUpdate = fighterScores,
+                            gameStatePatch = mapOf("stopped" to internal.millisecondStopStopped.toMap()))
                     }
                     val winnerId = if (delta1 < delta2) f1 else f2
-                    return GameActionResult(resolved = true, winnerId = winnerId, isTie = false, scoreUpdate = fighterScores)
+                    return GameActionResult(resolved = true, winnerId = winnerId, isTie = false, scoreUpdate = fighterScores,
+                        gameStatePatch = mapOf("stopped" to internal.millisecondStopStopped.toMap()))
                 }
 
-                return GameActionResult(resolved = false, winnerId = null, isTie = false, scoreUpdate = fighterScores)
+                return GameActionResult(resolved = false, winnerId = null, isTie = false, scoreUpdate = fighterScores,
+                    gameStatePatch = mapOf("stopped" to internal.millisecondStopStopped.toMap()))
             }
 
             "rapid_red_green" -> {
@@ -545,17 +553,18 @@ object GameEngine {
 
         when (internal.miniGameId) {
             "millisecond_stop" -> {
+                val patch = mapOf("stopped" to internal.millisecondStopStopped.toMap())
                 val has1 = internal.millisecondStopStopped[f1] == true
                 val has2 = internal.millisecondStopStopped[f2] == true
                 if (has1 && has2) {
-                    val d1 = abs(s1!!.toDouble() - 5.0)
-                    val d2 = abs(s2!!.toDouble() - 5.0)
-                    if (abs(d1 - d2) < 0.005) return Triple(null, true, null)
-                    return Triple(if (d1 < d2) f1 else f2, false, null)
+                    val d1 = abs(s1!!.toDouble() - internal.millisecondStopTargetSeconds)
+                    val d2 = abs(s2!!.toDouble() - internal.millisecondStopTargetSeconds)
+                    if (abs(d1 - d2) < 0.005) return Triple(null, true, patch)
+                    return Triple(if (d1 < d2) f1 else f2, false, patch)
                 }
-                if (has1 && !has2) return Triple(f1, false, null)
-                if (!has1 && has2) return Triple(f2, false, null)
-                return Triple(null, true, null)
+                if (has1 && !has2) return Triple(f1, false, patch)
+                if (!has1 && has2) return Triple(f2, false, patch)
+                return Triple(null, true, patch)
             }
 
             "rapid_red_green", "speed_math", "higher_lower" -> {
@@ -585,18 +594,19 @@ object GameEngine {
             }
 
             "quick_draw" -> {
-                if (internal.quickDrawFouls[f1] == true) return Triple(f2, false, null)
-                if (internal.quickDrawFouls[f2] == true) return Triple(f1, false, null)
+                val patch = mapOf("reactions" to internal.quickDrawReactions.toMap(), "fouls" to internal.quickDrawFouls.toMap())
+                if (internal.quickDrawFouls[f1] == true) return Triple(f2, false, patch)
+                if (internal.quickDrawFouls[f2] == true) return Triple(f1, false, patch)
 
                 val r1 = internal.quickDrawReactions[f1]
                 val r2 = internal.quickDrawReactions[f2]
                 if (r1 != null && r2 != null) {
-                    if (abs(r1 - r2) < 5L) return Triple(null, true, null)
-                    return Triple(if (r1 < r2) f1 else f2, false, null)
+                    if (abs(r1 - r2) < 5L) return Triple(null, true, patch)
+                    return Triple(if (r1 < r2) f1 else f2, false, patch)
                 }
-                if (r1 != null && r2 == null) return Triple(f1, false, null)
-                if (r1 == null && r2 != null) return Triple(f2, false, null)
-                return Triple(null, true, null)
+                if (r1 != null && r2 == null) return Triple(f1, false, patch)
+                if (r1 == null && r2 != null) return Triple(f2, false, patch)
+                return Triple(null, true, patch)
             }
         }
 

@@ -21,6 +21,51 @@ interface Props {
   tournamentSchedule?: TournamentSchedule | null;
 }
 
+function FocusedGameResult({ round, fighters }: { round: RoundState; fighters: PublicPlayer[] }) {
+  const id = round.miniGame.id;
+  if (!['quick_draw', 'millisecond_stop', 'blind_pinpoint'].includes(id) ||
+      ['VOID', 'DISCONNECT_FORFEIT'].includes(round.resolutionReason || '')) return null;
+  const winner = fighters.find(player => player.id === round.winnerId);
+  const fouls = (round.gameState?.fouls || {}) as Record<string, boolean>;
+  const reactions = (round.gameState?.reactions || {}) as Record<string, number>;
+  const stopped = (round.gameState?.stopped || {}) as Record<string, boolean>;
+  const pins = (round.gameState?.pins || {}) as Record<string, unknown>;
+  const target = typeof round.gameConfig?.targetSeconds === 'number' ? round.gameConfig.targetSeconds : 5;
+  const values = fighters.map(player => {
+    const score = round.fighterScores[player.id];
+    if (id === 'quick_draw') return reactions[player.id];
+    if (id === 'millisecond_stop') return stopped[player.id] || score > 0 ? score : undefined;
+    return pins[player.id] ? score : undefined;
+  });
+  const falseStarter = fighters.find(player => fouls[player.id]);
+  const submitted = values.filter(value => value !== undefined).length;
+  let reason: string;
+  if (id === 'quick_draw' && falseStarter) {
+    reason = `${winner?.name || 'Opponent'} wins: ${falseStarter.name}’s false start caused the loss.`;
+  } else if (round.tieResult) {
+    reason = submitted === 0 ? 'Tie: neither fighter submitted a valid attempt.'
+      : id === 'quick_draw' ? 'Tie: reaction times were within 5 ms.'
+      : id === 'millisecond_stop' ? 'Tie: errors were within 0.005s.' : 'Tie: distance errors were within 10 km.';
+  } else if (submitted === 1) {
+    reason = `${winner?.name} wins: the only fighter to submit a valid ${id === 'blind_pinpoint' ? 'guess' : id === 'quick_draw' ? 'reaction' : 'stop'}.`;
+  } else {
+    reason = `${winner?.name} wins: ${id === 'quick_draw' ? 'faster reaction' : id === 'millisecond_stop' ? 'closer to the target' : 'closer to the city'}.`;
+  }
+  return <section aria-label="Game result" className="rounded-xl border border-cyan-500/40 bg-slate-900 p-3 space-y-2 text-sm">
+    <h3 className="font-bold text-cyan-300">{round.miniGame.name} · Result</h3>
+    {id === 'millisecond_stop' && <p className="font-mono text-white">Target: {target.toFixed(3)}s</p>}
+    {fighters.map((player, index) => <p key={player.id} className="text-slate-200 break-words">
+      <strong>{player.name}:</strong>{' '}
+      {fouls[player.id] ? 'False start — no valid reaction' : values[index] === undefined
+        ? id === 'quick_draw' ? 'No reaction' : id === 'blind_pinpoint' ? 'No guess' : 'No stop'
+        : id === 'quick_draw' ? `${values[index]} ms`
+        : id === 'blind_pinpoint' ? `${values[index].toLocaleString()} km error`
+        : `${values[index].toFixed(3)}s · ${Math.abs(values[index] - target).toFixed(3)}s error`}
+    </p>)}
+    <p className="font-bold text-amber-300">{reason}</p>
+  </section>;
+}
+
 export const PayoutRecapModal: React.FC<Props> = ({
   round,
   players,
@@ -232,6 +277,8 @@ export const PayoutRecapModal: React.FC<Props> = ({
           </div>
         )}
       </div>
+
+      {fA && fB && <FocusedGameResult round={round} fighters={[fA, fB]} />}
 
       <details className="rounded-xl border border-slate-700 p-3 space-y-3">
         <summary className="cursor-pointer py-2 font-bold text-cyan-300">View details</summary>

@@ -11,22 +11,21 @@ export const MINI_GAMES: Record<MiniGameId, MiniGameMeta> = {
   memory_heist: { id: 'memory_heist', name: 'Memory Heist', tagline: 'Remember the loot', durationSeconds: 24, description: 'Study six symbols, then rebuild their positions.', rules: ['Study the 3×3 board for four seconds', 'Place the six symbols in their original cells', 'Most correct positions wins'] },
   crowd_count: { id: 'crowd_count', name: 'Crowd Count', tagline: 'Count through the chaos', durationSeconds: 24, description: 'Estimate the number of targets in three fast scenes.', rules: ['Study each scene for two seconds', 'Submit one estimate for each scene', 'Lowest total error wins'] },
   mirror_trouble: { id: 'mirror_trouble', name: 'Mirror Trouble', tagline: 'Spot the real match', durationSeconds: 25, description: 'Find the true rotated match among lookalikes.', rules: ['Inspect the target shape', 'Choose the matching rotated shape', 'Most correct picks across five puzzles wins'] },
-  safecracker: { id: 'safecracker', name: 'Safecracker', tagline: 'Crack the code', durationSeconds: 30, description: 'Use five guesses and position clues to deduce a secret code.', rules: ['Guess a three-symbol code', 'Use exact and misplaced clues', 'Solve in the fewest guesses'] },
+  safecracker: { id: 'safecracker', name: 'Safecracker', tagline: 'Crack the code', durationSeconds: 30, description: 'Use five guesses and position clues to deduce a secret code.', rules: ['Guess the 3-symbol code in up to five guesses.', 'Exact = correct symbol and position; Misplaced = correct symbol in the wrong position.', 'Solve in fewer guesses to win.'] },
   circuit_sprint: { id: 'circuit_sprint', name: 'Circuit Sprint', tagline: 'Power the path', durationSeconds: 30, description: 'Rotate pipes to connect the source to the sink.', rules: ['Tap tiles to rotate them clockwise', 'Connect the left source to the right sink', 'Solved boards beat unfinished boards; fewer moves wins'] },
   split_decision: { id: 'split_decision', name: 'Split Decision', tagline: 'Read your rival', durationSeconds: 25, description: 'Secretly attack, guard or charge across five exchanges.', rules: ['Pick one secret move each exchange', 'Attack spends energy; guard blocks; charge gains energy', 'Knock out your rival or finish with more health'] },
-  treasure_tug: { id: 'treasure_tug', name: 'Treasure Tug', tagline: 'Spend energy wisely', durationSeconds: 24, description: 'Allocate energy across three treasure lanes.', rules: ['Secretly split ten energy across three lanes', 'Outbid your opponent to capture lane points', 'Most points after three skirmishes wins'] },
+  treasure_tug: { id: 'treasure_tug', name: 'Treasure Tug', tagline: 'Spend energy wisely', durationSeconds: 24, description: 'Allocate energy across three treasure lanes.', rules: ['Split 10 energy across three lanes.', 'Higher energy wins that lane’s points.', 'Highest total after 3 rounds wins.'] },
   pocket_territory: { id: 'pocket_territory', name: 'Pocket Territory', tagline: 'Claim the board', durationSeconds: 30, description: 'Expand from your corner while anticipating your opponent.', rules: ['Choose an adjacent free square each turn', 'Contested squares become blocked', 'Claim the highest-value territory'] },
   millisecond_stop: {
     id: 'millisecond_stop',
     name: 'Millisecond Stop',
     tagline: 'Internal Clock Showdown',
-    durationSeconds: 9,
-    description: 'The timer counts toward 05.000s. At 03.000s the display blinds out into ??.??? Tap as close to 05.000s as you can.',
+    durationSeconds: 13,
+    description: 'Each game chooses a 3, 5, 7 or 9 second target. Watch the timer, then keep time when it disappears. Stop closest to the target.',
     rules: [
-      'Watch the live counter until 03.000s',
-      'At 03.000s the clock blinds out into ??.??? for all players',
-      'Tap SLAM as close to 05.000s as possible',
-      'Closest tap to 5.000s wins the Brawl'
+      'Read this game’s target before the countdown.',
+      'Watch the timer, then keep counting when it becomes hidden.',
+      'Tap SLAM once; closest stop to the target wins.'
     ],
   },
   rapid_red_green: {
@@ -36,10 +35,9 @@ export const MINI_GAMES: Record<MiniGameId, MiniGameMeta> = {
     durationSeconds: 15,
     description: 'Screens flip between Green and Red unpredictably. Mash on Green (+1), freeze on Red (-3). First to 40 or leader at 15s wins.',
     rules: [
-      'Tap rapidly while GREEN (+1 point)',
-      'FREEZE immediately when RED appears',
-      'Tapping on RED deducts 3 points!',
-      'First to 40 points or highest score at timeout wins; tie if equal'
+      'Tap rapidly on GREEN (+1); stop immediately on RED (−3).',
+      'Timing varies; your score cannot drop below 0.',
+      'First to 40 or highest score at timeout wins; equal scores tie.'
     ],
   },
   speed_math: {
@@ -49,10 +47,9 @@ export const MINI_GAMES: Record<MiniGameId, MiniGameMeta> = {
     durationSeconds: 16,
     description: 'A rapid 3-question arithmetic race. Fastest fighter to lock 3 correct answers wins.',
     rules: [
-      'Solve 3 mental math problems back to back',
-      'Pick from 4 answer choices',
-      'Mistakes trigger an authoritative 1.5s freeze penalty',
-      'First fighter to 3 correct answers or highest at timeout wins'
+      'Solve each problem by tapping one of four answers.',
+      'A wrong answer freezes you for 1.5 seconds.',
+      'First to 3 correct or highest score at timeout wins.'
     ],
   },
   higher_lower: {
@@ -74,10 +71,9 @@ export const MINI_GAMES: Record<MiniGameId, MiniGameMeta> = {
     durationSeconds: 15,
     description: 'A target city is displayed on an equirectangular world map. Tap where you think it is located. Closest distance in km wins.',
     rules: [
-      'Read the target world city and country',
-      'Tap your pin on the accurate equirectangular world map',
-      'Distance error is calculated with the Haversine formula in genuine km',
-      'Smallest distance error wins'
+      'Find the named city on the world map.',
+      'Pan or pinch to zoom; tap to move your guess, then Lock guess.',
+      'The smallest distance error in km wins.'
     ],
   },
   quick_draw: {
@@ -87,10 +83,9 @@ export const MINI_GAMES: Record<MiniGameId, MiniGameMeta> = {
     durationSeconds: 10,
     description: 'Watch the screen closely. When "DRAW!" flashes, tap instantly! Tapping before "DRAW!" is an instant false-start disqualification.',
     rules: [
-      'Wait on high alert during the "WAIT..." phase',
-      'DO NOT tap early (instant false-start foul!)',
-      'When "DRAW!" flashes, tap as fast as humanly possible',
-      'Fastest valid reaction time wins'
+      'Wait for DRAW, then tap the arena once as fast as possible.',
+      'Tapping early is a false start and loses the game.',
+      'Fastest valid reaction wins.'
     ],
   },
 };

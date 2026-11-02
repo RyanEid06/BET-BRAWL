@@ -34,6 +34,7 @@ export interface InternalGameState {
   // Mini-game specific private variables
   millisecondStop?: {
     stopped: Record<string, boolean>;
+    targetSeconds?: number; // V2 persisted rounds used the fixed 5-second target.
   };
   redGreen?: {
     schedule: LightScheduleStep[];
@@ -93,7 +94,8 @@ export function getLightAtServerTime(schedule: LightScheduleStep[], elapsedMs: n
 export function initMiniGameServerState(
   miniGameId: MiniGameId,
   fighterIds: [string, string],
-  gameStartsAt: number
+  gameStartsAt: number,
+  random: () => number = Math.random
 ): { internal: InternalGameState; publicConfig: Record<string, unknown> } {
   const [f1, f2] = fighterIds;
   const internal: InternalGameState = {
@@ -109,11 +111,13 @@ export function initMiniGameServerState(
   }
 
   if (miniGameId === 'millisecond_stop') {
+    const [targetSeconds, blindSeconds] = [[3, 1.5], [5, 3], [7, 3], [9, 4]][Math.floor(random() * 4)];
     internal.millisecondStop = {
       stopped: { [f1]: false, [f2]: false },
+      targetSeconds,
     };
-    publicConfig.targetSeconds = 5.0;
-    publicConfig.blindSeconds = 3.0;
+    publicConfig.targetSeconds = targetSeconds;
+    publicConfig.blindSeconds = blindSeconds;
   } else if (miniGameId === 'rapid_red_green') {
     const sequence: LightScheduleStep[] = [];
     let accumulatedMs = 0;
@@ -121,8 +125,12 @@ export function initMiniGameServerState(
 
     while (accumulatedMs < 16000) {
       const dur = currentLight === 'GREEN'
-        ? Math.floor(1400 + Math.random() * 1200)
-        : Math.floor(800 + Math.random() * 800);
+        ? (() => {
+            const band = Math.floor(random() * 3);
+            const [min, max] = [[200, 450], [500, 1000], [2000, 3000]][band];
+            return min + Math.floor(random() * (max - min + 1));
+          })()
+        : 350 + Math.floor(random() * 1851);
       sequence.push({ light: currentLight, durationMs: dur });
       accumulatedMs += dur;
       currentLight = currentLight === 'GREEN' ? 'RED' : 'GREEN';
@@ -244,17 +252,18 @@ export function processFighterAction(
     if (stopState.stopped[f1] && stopState.stopped[f2]) {
       const s1 = fighterScores[f1];
       const s2 = fighterScores[f2];
-      const delta1 = Math.abs(s1 - 5.0);
-      const delta2 = Math.abs(s2 - 5.0);
+      const targetSeconds = stopState.targetSeconds ?? 5;
+      const delta1 = Math.abs(s1 - targetSeconds);
+      const delta2 = Math.abs(s2 - targetSeconds);
 
       if (Math.abs(delta1 - delta2) < 0.005) {
-        return { resolved: true, isTie: true, winnerId: null, scoreUpdate: { ...fighterScores } };
+        return { resolved: true, isTie: true, winnerId: null, scoreUpdate: { ...fighterScores }, gameStatePatch: { stopped: { ...stopState.stopped } } };
       }
       const winnerId = delta1 < delta2 ? f1 : f2;
-      return { resolved: true, isTie: false, winnerId, scoreUpdate: { ...fighterScores } };
+      return { resolved: true, isTie: false, winnerId, scoreUpdate: { ...fighterScores }, gameStatePatch: { stopped: { ...stopState.stopped } } };
     }
 
-    return { resolved: false, isTie: false, winnerId: null, scoreUpdate: { ...fighterScores } };
+    return { resolved: false, isTie: false, winnerId: null, scoreUpdate: { ...fighterScores }, gameStatePatch: { stopped: { ...stopState.stopped } } };
   }
 
   // 2. RAPID RED LIGHT, GREEN LIGHT
@@ -577,17 +586,19 @@ export function resolveGameTimeout(
   const s2 = fighterScores[f2];
 
   if (internal.miniGameId === 'millisecond_stop') {
+    const gameStatePatch = { stopped: { ...internal.millisecondStop!.stopped } };
     const has1 = internal.millisecondStop!.stopped[f1];
     const has2 = internal.millisecondStop!.stopped[f2];
     if (has1 && has2) {
-      const d1 = Math.abs(s1 - 5.0);
-      const d2 = Math.abs(s2 - 5.0);
-      if (Math.abs(d1 - d2) < 0.005) return { winnerId: null, isTie: true };
-      return { winnerId: d1 < d2 ? f1 : f2, isTie: false };
+      const targetSeconds = internal.millisecondStop!.targetSeconds ?? 5;
+      const d1 = Math.abs(s1 - targetSeconds);
+      const d2 = Math.abs(s2 - targetSeconds);
+      if (Math.abs(d1 - d2) < 0.005) return { winnerId: null, isTie: true, gameStatePatch };
+      return { winnerId: d1 < d2 ? f1 : f2, isTie: false, gameStatePatch };
     }
-    if (has1 && !has2) return { winnerId: f1, isTie: false };
-    if (!has1 && has2) return { winnerId: f2, isTie: false };
-    return { winnerId: null, isTie: true }; // Neither stopped
+    if (has1 && !has2) return { winnerId: f1, isTie: false, gameStatePatch };
+    if (!has1 && has2) return { winnerId: f2, isTie: false, gameStatePatch };
+    return { winnerId: null, isTie: true, gameStatePatch }; // Neither stopped
   }
 
   if (internal.miniGameId === 'rapid_red_green' || internal.miniGameId === 'speed_math' || internal.miniGameId === 'higher_lower') {
@@ -614,18 +625,19 @@ export function resolveGameTimeout(
 
   if (internal.miniGameId === 'quick_draw') {
     const qd = internal.quickDraw!;
-    if (qd.fouls[f1]) return { winnerId: f2, isTie: false };
-    if (qd.fouls[f2]) return { winnerId: f1, isTie: false };
+    const gameStatePatch = { reactions: { ...qd.reactions }, fouls: { ...qd.fouls } };
+    if (qd.fouls[f1]) return { winnerId: f2, isTie: false, gameStatePatch };
+    if (qd.fouls[f2]) return { winnerId: f1, isTie: false, gameStatePatch };
 
     const r1 = qd.reactions[f1];
     const r2 = qd.reactions[f2];
     if (r1 !== undefined && r2 !== undefined) {
-      if (Math.abs(r1 - r2) < 5) return { winnerId: null, isTie: true };
-      return { winnerId: r1 < r2 ? f1 : f2, isTie: false };
+      if (Math.abs(r1 - r2) < 5) return { winnerId: null, isTie: true, gameStatePatch };
+      return { winnerId: r1 < r2 ? f1 : f2, isTie: false, gameStatePatch };
     }
-    if (r1 !== undefined && r2 === undefined) return { winnerId: f1, isTie: false };
-    if (r1 === undefined && r2 !== undefined) return { winnerId: f2, isTie: false };
-    return { winnerId: null, isTie: true };
+    if (r1 !== undefined && r2 === undefined) return { winnerId: f1, isTie: false, gameStatePatch };
+    if (r1 === undefined && r2 !== undefined) return { winnerId: f2, isTie: false, gameStatePatch };
+    return { winnerId: null, isTie: true, gameStatePatch };
   }
 
   return { winnerId: null, isTie: true };
