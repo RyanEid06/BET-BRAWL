@@ -71,7 +71,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[#0b0d14] text-slate-100 flex flex-col justify-between select-none relative">
       {/* Sound toggle button in top corner */}
-      <div className="px-3 pt-2 text-[10px] font-mono tracking-wider text-slate-400">BET &amp; BRAWL V2</div>
+      <div className="px-3 pt-2 text-[10px] font-mono tracking-wider text-slate-400">BET &amp; BRAWL V2.1</div>
       <div className="fixed top-3 right-3 z-50">
         <button
           onClick={toggleMute}
@@ -133,6 +133,8 @@ export default function App() {
             fighterA={activeFighterA}
             fighterB={activeFighterB}
             miniGame={client.currentRound.miniGame}
+            isPlayerFighter={playerFighterSlot !== 'spectator'}
+            gameConfig={client.currentRound.gameConfig}
             revealEndsAt={client.currentRound.revealEndsAt}
             serverTimeOffset={client.serverTimeOffset}
             isChampionship={client.currentRound.isChampionship}
@@ -148,6 +150,8 @@ export default function App() {
       {client.phase === 'BETTING_WINDOW' && activeFighterA && activeFighterB && client.currentRound && client.myPlayer && (
         <div className="flex-1 flex flex-col justify-center items-center p-3 sm:p-4">
           <BettingScreen
+            miniGame={client.currentRound.miniGame}
+            gameConfig={client.currentRound.gameConfig}
             fighterA={activeFighterA}
             fighterB={activeFighterB}
             odds={client.currentRound.odds}
@@ -168,6 +172,7 @@ export default function App() {
           gameStartsAt={client.currentRound.gameStartsAt || Date.now() + 3500}
           serverTimeOffset={client.serverTimeOffset}
           miniGameName={client.currentRound.miniGame.name}
+          targetSeconds={client.currentRound.miniGame.id === 'millisecond_stop' ? client.currentRound.gameConfig?.targetSeconds as number : undefined}
         />
       )}
 
@@ -176,6 +181,8 @@ export default function App() {
         <div className="flex-1 flex flex-col justify-center items-center p-3 sm:p-4 w-full">
           {client.currentRound.miniGame.id === 'millisecond_stop' && (
             <MillisecondStopGame
+              gameConfig={client.currentRound.gameConfig}
+              gameState={client.currentRound.gameState}
               fighterA={activeFighterA}
               fighterB={activeFighterB}
               isPlayerFighter={playerFighterSlot !== 'spectator'}

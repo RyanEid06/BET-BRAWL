@@ -1,8 +1,8 @@
-# BET & BRAWL V2
+# BET & BRAWL V2.1
 
 Play at **[bet-brawl.northstack-labs.workers.dev](https://bet-brawl.northstack-labs.workers.dev)**.
 
-Production web version **2.0.0**, protocol **2**, with 14 games for 3–9 players. The eight V2 games are Memory Heist, Crowd Count, Mirror Trouble, Safecracker, Circuit Sprint, Split Decision, Treasure Tug and Pocket Territory. Tournament, betting, championship and bankroll rules are unchanged.
+Web version **2.1.0**, protocol **2**, with 14 games for 3–9 players. The eight V2 games are Memory Heist, Crowd Count, Mirror Trouble, Safecracker, Circuit Sprint, Split Decision, Treasure Tug and Pocket Territory. Tournament, betting, championship and bankroll rules are unchanged.
 
 The production branch is `v2-web`. Cloudflare Worker **bet-brawl** serves React/Vite assets and authoritative SQLite Durable Objects over the same HTTPS/WSS origin. Internet is required; players can join from different networks. `server.ts` is the local Node/LAN reference, not the production backend. Android/LAN V2 is maintained on `main`; `v1` preserves the former V1 Android main.
 
@@ -12,7 +12,7 @@ The production branch is `v2-web`. Cloudflare Worker **bet-brawl** serves React/
 
 Host a room and share its code, link or QR. Have at least three players join and mark ready, then start the tournament. Each player fights two qualifiers; the top two play a best-of-series championship requiring two decisive wins. Spectators bet privately. The host advances after payout. All clients must use V2; refresh an old V1 tab before joining.
 
-Circuit rotations respond locally and reconcile with the server. Treasure allocation has sliders and a balanced preset, still requiring exactly ten energy. Mirror shows a one-second answer reveal after each four-second puzzle. Results keep your outcome and host continuation visible; expand **View details** for standings and full game results. Pocket Territory shows fighter avatars, names and weighted scores. The visible **BET & BRAWL V2** badge identifies this version.
+Circuit rotations respond locally and reconcile with the server. Treasure allocation has sliders and a balanced preset, still requiring exactly ten energy. Mirror shows a one-second answer reveal after each four-second puzzle. Results keep your outcome and host continuation visible; expand **View details** for standings and full game results. Pocket Territory shows fighter avatars, names and weighted scores. The visible **BET & BRAWL V2.1** badge identifies this version.
 
 ## Verify
 

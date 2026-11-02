@@ -7,7 +7,7 @@ assert.ok(origin.startsWith('https://'), 'Supply the exact public HTTPS producti
 const require = createRequire(process.env.BRAWL_PLAYWRIGHT_MODULE || import.meta.url);
 const { chromium } = require('playwright');
 const info = await fetch(`${origin}/api/network-info`).then(r => r.json()) as any;
-assert.equal(info.version, '2.0.0'); assert.equal(info.protocolVersion, 2); assert.equal(info.online, true);
+assert.equal(info.version, '2.1.0'); assert.equal(info.protocolVersion, 2); assert.equal(info.online, true);
 mkdirSync('output/playwright', { recursive: true });
 const report: any = { origin, version: info.version, roomsCreated: 0, rounds: [], errors: [] };
 const browser = await chromium.launch({ executablePath: process.env.BRAWL_CHROME_EXECUTABLE, headless: true });
@@ -37,7 +37,7 @@ try {
       if (message.type === 'JOIN_ERROR') report.errors.push(`Client ${index}: ${message.payload.code}`);
     }));
     await page.goto(index ? `${origin}/?room=${clients[0].state.roomCode}` : origin);
-    await page.getByText('BET & BRAWL V2', { exact: true }).waitFor();
+    await page.getByText('BET & BRAWL V2.1', { exact: true }).waitFor();
     await page.getByLabel('YOUR NAME / ALIAS').fill(`V2 Smoke ${index === 0 ? 'Host' : `Guest ${index}`}`);
     if (index === 0) { await page.getByRole('button', { name: 'HOST NEW GAME', exact: true }).click(); report.roomsCreated++; }
     else {
@@ -87,7 +87,7 @@ try {
         if (game === 'split_decision' && state.phase === 'commit') control = page.getByRole('button', { name: /^GUARD/ });
         if (game === 'treasure_tug' && state.phase === 'commit') { await page.getByRole('button', { name: 'Balanced 3 / 3 / 4', exact: true }).click(); control = page.getByRole('button', { name: /^Lock allocation/ }); }
         if (game === 'pocket_territory' && state.phase === 'commit') control = page.getByRole('button', { name: 'Pass this turn', exact: true });
-        if (game === 'millisecond_stop') control = page.getByRole('button', { name: /^STOP/ });
+        if (game === 'millisecond_stop') control = page.getByRole('button', { name: /SLAM AT/ });
         if (game === 'rapid_red_green') control = page.getByRole('button', { name: /TAP! TAP! TAP!/ });
         if (game === 'higher_lower') control = page.getByRole('button', { name: /^HIGHER/ });
         if (control && await control.count() && await control.isEnabled()) { await control.click(); attempted.add(key); summary.actions++; }

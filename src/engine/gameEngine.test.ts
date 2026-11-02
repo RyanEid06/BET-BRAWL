@@ -36,7 +36,7 @@ test('V2 actions resolve through the shared authoritative engine', () => {
 // ---------------------------------------------------------------------------
 test('Millisecond Stop: calculates elapsed time from gameStartsAt and resolves when both stop', () => {
   const gameStartsAt = 10000;
-  const { internal } = initMiniGameServerState('millisecond_stop', ['f1', 'f2'], gameStartsAt);
+  const { internal } = initMiniGameServerState('millisecond_stop', ['f1', 'f2'], gameStartsAt, () => 0.3);
   const scores: Record<string, number> = { f1: 0, f2: 0 };
 
   // Fighter 1 stops at 5.050s
@@ -53,7 +53,7 @@ test('Millisecond Stop: calculates elapsed time from gameStartsAt and resolves w
 
 test('Millisecond Stop: declares explicit tie if stop delta difference < 0.005s', () => {
   const gameStartsAt = 10000;
-  const { internal } = initMiniGameServerState('millisecond_stop', ['f1', 'f2'], gameStartsAt);
+  const { internal } = initMiniGameServerState('millisecond_stop', ['f1', 'f2'], gameStartsAt, () => 0.3);
   const scores: Record<string, number> = { f1: 0, f2: 0 };
 
   processFighterAction(internal, scores, 'f1', { type: 'STOP' }, gameStartsAt + 5002);
@@ -84,9 +84,42 @@ test('Millisecond Stop: timeout awards win to the fighter who stopped if opponen
 test('Millisecond Stop: a stop at exactly zero is an action, not a DNF', () => {
   const { internal } = initMiniGameServerState('millisecond_stop', ['f1', 'f2'], 10000);
   const scores: Record<string, number> = { f1: 0, f2: 0 };
-  processFighterAction(internal, scores, 'f1', { type: 'STOP' }, 10000);
+  const stopResult = processFighterAction(internal, scores, 'f1', { type: 'STOP' }, 10000);
   assert.equal(scores.f1, 0);
-  assert.deepEqual(resolveGameTimeout(internal, scores), { winnerId: 'f1', isTie: false });
+  assert.deepEqual(stopResult.gameStatePatch, { stopped: { f1: true, f2: false } });
+  assert.deepEqual(resolveGameTimeout(internal, scores), { winnerId: 'f1', isTie: false, gameStatePatch: { stopped: { f1: true, f2: false } } });
+});
+
+test('Millisecond Stop and Quick Draw timeouts expose acted-state flags', () => {
+  const { internal: stopState } = initMiniGameServerState('millisecond_stop', ['f1', 'f2'], 0);
+  const stopScores: Record<string, number> = {};
+  processFighterAction(stopState, stopScores, 'f1', { type: 'STOP' }, 0);
+  assert.deepEqual(resolveGameTimeout(stopState, stopScores).gameStatePatch, { stopped: { f1: true, f2: false } });
+
+  const { internal: drawState } = initMiniGameServerState('quick_draw', ['f1', 'f2'], 0);
+  processFighterAction(drawState, {}, 'f1', { type: 'DRAW_TAP' }, drawState.quickDraw!.drawAt);
+  const drawTimeout = resolveGameTimeout(drawState, {});
+  assert.deepEqual(drawTimeout.gameStatePatch, { reactions: { f1: 0 }, fouls: { f1: false, f2: false } });
+});
+
+test('Millisecond Stop: randomized target controls scoring and exposes its blind interval', () => {
+  const cases = [
+    { target: 3, blind: 1.5, stops: [2.9, 4], winner: 'f1' },
+    { target: 5, blind: 3, stops: [4.9, 6], winner: 'f1' },
+    { target: 7, blind: 3, stops: [6, 7.1], winner: 'f2' },
+    { target: 9, blind: 4, stops: [8, 9.1], winner: 'f2' },
+  ] as const;
+  cases.forEach(({ target, blind, stops, winner }, index) => {
+    const gameStartsAt = 10000;
+    const { internal, publicConfig } = initMiniGameServerState('millisecond_stop', ['f1', 'f2'], gameStartsAt, () => index / 4);
+    assert.equal(publicConfig.targetSeconds, target);
+    assert.equal(publicConfig.blindSeconds, blind);
+    const scores: Record<string, number> = {};
+    processFighterAction(internal, scores, 'f1', { type: 'STOP' }, gameStartsAt + stops[0] * 1000);
+    const actionResult = processFighterAction(internal, scores, 'f2', { type: 'STOP' }, gameStartsAt + stops[1] * 1000);
+    assert.equal(actionResult.winnerId, winner);
+    assert.equal(resolveGameTimeout(internal, scores).winnerId, winner);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -104,6 +137,24 @@ test('Red Light Green Light: correctly tracks green and red at schedule boundari
   assert.equal(getLightAtServerTime(schedule, 2000), 'RED');
   assert.equal(getLightAtServerTime(schedule, 2999), 'RED');
   assert.equal(getLightAtServerTime(schedule, 3000), 'GREEN');
+});
+
+test('Red Light Green Light: generated schedule covers sudden, short, and long greens with varied reds', () => {
+  const values = [0, 0, .34, 0, .67, .999, .999, .999];
+  const { publicConfig } = initMiniGameServerState('rapid_red_green', ['f1', 'f2'], 0, () => values.shift() ?? .5);
+  const schedule = publicConfig.lightSchedule as LightScheduleStep[];
+  const greens = schedule.filter(step => step.light === 'GREEN').map(step => step.durationMs);
+  const reds = schedule.filter(step => step.light === 'RED').map(step => step.durationMs);
+  assert.ok(greens.some(ms => ms >= 200 && ms <= 450));
+  assert.ok(greens.some(ms => ms >= 500 && ms <= 1000));
+  assert.ok(greens.some(ms => ms >= 2000 && ms <= 3000));
+  assert.ok(reds.every(ms => ms >= 350 && ms <= 2200));
+
+  const quickSchedule = initMiniGameServerState('rapid_red_green', ['f1', 'f2'], 0, () => 0).publicConfig.lightSchedule;
+  const steadySchedule = initMiniGameServerState('rapid_red_green', ['f1', 'f2'], 0, () => .5).publicConfig.lightSchedule;
+  assert.notDeepEqual(quickSchedule, steadySchedule);
+  assert.notEqual((quickSchedule as LightScheduleStep[])[0].durationMs, (steadySchedule as LightScheduleStep[])[0].durationMs);
+  assert.notEqual((quickSchedule as LightScheduleStep[])[1].durationMs, (steadySchedule as LightScheduleStep[])[1].durationMs);
 });
 
 test('Red Light Green Light: tap on green increments +1, tap on red subtracts -3 (min 0)', () => {
@@ -413,4 +464,13 @@ test('Quick Draw: does NOT resolve on first valid reaction; lowest reaction time
   assert.equal(res2.resolved, true);
   assert.equal(res2.winnerId, 'f2'); // f2 was faster (220ms < 350ms)
   assert.equal(res2.isTie, false);
+});
+
+test('V2 stored Millisecond checkpoints without selected target retain their original 5-second scoring', () => {
+  const { internal } = initMiniGameServerState('millisecond_stop', ['f1','f2'], 0, () => 0.3);
+  delete (internal.millisecondStop as any).targetSeconds;
+  const scores = { f1:0, f2:0 };
+  processFighterAction(internal,scores,'f1',{type:'STOP'},4900);
+  assert.equal(processFighterAction(internal,scores,'f2',{type:'STOP'},7000).winnerId,'f1');
+  assert.equal(resolveGameTimeout(internal,scores).winnerId,'f1');
 });

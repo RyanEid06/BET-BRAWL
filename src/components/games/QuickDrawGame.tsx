@@ -5,7 +5,7 @@
  * Bet & BRAWL: Mini-Game 6 - Quick Draw (Authoritative Reaction Showdown)
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import type { PublicPlayer } from '../../engine/types.ts';
 import { sound } from '../../engine/audio.ts';
 
@@ -34,13 +34,17 @@ export const QuickDrawGame: React.FC<Props> = ({
 }) => {
   const drawAt = typeof gameConfig?.drawAt === 'number' ? gameConfig.drawAt : Date.now() + 3000;
   const [phase, setPhase] = useState<'WAIT' | 'DRAW'>('WAIT');
+  const sent = useRef(false);
+  const [localActed, setLocalActed] = useState(false);
 
   const fouls = (gameState?.fouls as Record<string, boolean>) || {};
   const foulA = !!fouls[fighterA.id];
   const foulB = !!fouls[fighterB.id];
 
-  const scoreA = fighterScores[fighterA.id];
-  const scoreB = fighterScores[fighterB.id];
+  // Initial fighterScores are zero even before either fighter acts.
+  const reactions = (gameState?.reactions as Record<string, number>) || {};
+  const scoreA = reactions[fighterA.id];
+  const scoreB = reactions[fighterB.id];
 
   // Synchronized WAIT vs DRAW transition based on authoritative drawAt
   useEffect(() => {
@@ -58,11 +62,13 @@ export const QuickDrawGame: React.FC<Props> = ({
     return () => clearInterval(interval);
   }, [drawAt, serverTimeOffset]);
 
-  const hasMyPlayerActed = (playerFighterSlot === 'A' && (scoreA !== undefined || foulA)) ||
+  const hasMyPlayerActed = localActed || foulA || foulB || (playerFighterSlot === 'A' && (scoreA !== undefined || foulA)) ||
                            (playerFighterSlot === 'B' && (scoreB !== undefined || foulB));
 
   const handleTap = () => {
-    if (!isPlayerFighter || hasMyPlayerActed) return;
+    if (!isPlayerFighter || hasMyPlayerActed || sent.current) return;
+    sent.current = true;
+    setLocalActed(true);
 
     if (phase === 'WAIT') {
       sound.playBuzzer();
@@ -76,7 +82,7 @@ export const QuickDrawGame: React.FC<Props> = ({
   // Keyboard shortcut (Space / Enter)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.code === 'Space' || e.code === 'Enter') {
+      if (!e.repeat && (e.code === 'Space' || e.code === 'Enter')) {
         e.preventDefault();
         handleTap();
       }
@@ -98,7 +104,11 @@ export const QuickDrawGame: React.FC<Props> = ({
       </div>
 
       {/* Main Flash Arena */}
-      <div
+      <button
+        type="button"
+        aria-label="Quick Draw arena"
+        onClick={handleTap}
+        disabled={!isPlayerFighter || hasMyPlayerActed}
         className={`w-full py-12 px-6 rounded-3xl flex flex-col items-center justify-center transition-all duration-100 border-4 shadow-2xl ${
           foulA || foulB
             ? 'bg-red-950 border-red-500 text-red-300'
@@ -107,17 +117,17 @@ export const QuickDrawGame: React.FC<Props> = ({
             : 'bg-slate-900 border-amber-500/50 text-amber-300'
         }`}
       >
-        <div className="text-6xl font-black font-display tracking-wider">
-          {foulA || foulB ? '💥 FALSE START!' : phase === 'DRAW' ? '⚡ DRAW! ⚡' : 'WAIT...'}
-        </div>
-        <div className="text-xs uppercase font-mono tracking-widest mt-2 font-bold opacity-80">
+        <span className="text-3xl sm:text-4xl font-black font-display tracking-wide">
+          {foulA || foulB ? '💥 FALSE START!' : phase === 'DRAW' ? 'DRAW — TAP ONCE!' : 'WAIT — DO NOT TAP'}
+        </span>
+        <span className="text-xs uppercase font-mono tracking-wide mt-2 font-bold opacity-80">
           {foulA || foulB
-            ? 'Early tap disqualification!'
+            ? `${foulA ? fighterA.name : fighterB.name} tapped early — false start caused the loss.`
             : phase === 'DRAW'
             ? 'TAP NOW AS FAST AS HUMANLY POSSIBLE!'
             : 'Do not tap yet! Wait for DRAW'}
-        </div>
-      </div>
+        </span>
+      </button>
 
       {/* Fighters Dual Scoreboard */}
       <div className="grid grid-cols-2 gap-4 w-full">
@@ -127,7 +137,7 @@ export const QuickDrawGame: React.FC<Props> = ({
           <div className="text-lg font-mono font-black text-white mt-1">
             {foulA ? (
               <span className="text-rose-400 text-sm">FOUL (Early Tap)</span>
-            ) : scoreA !== undefined && scoreA > 0 ? (
+            ) : scoreA !== undefined ? (
               <span className="text-cyan-300">{scoreA} ms</span>
             ) : (
               <span className="text-xs text-slate-500">Waiting for trigger...</span>
@@ -141,7 +151,7 @@ export const QuickDrawGame: React.FC<Props> = ({
           <div className="text-lg font-mono font-black text-white mt-1">
             {foulB ? (
               <span className="text-rose-400 text-sm">FOUL (Early Tap)</span>
-            ) : scoreB !== undefined && scoreB > 0 ? (
+            ) : scoreB !== undefined ? (
               <span className="text-amber-300">{scoreB} ms</span>
             ) : (
               <span className="text-xs text-slate-500">Waiting for trigger...</span>

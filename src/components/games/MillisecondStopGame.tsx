@@ -3,10 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  * 
  * Bet & BRAWL: Mini-Game 1 - Millisecond Stop (Authoritative Precision Timer)
- * Strict blind enforcement: No client sees live clock once 3.000s is reached.
+ * The selected target and blind interval come from the authoritative game config.
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import type { PublicPlayer } from '../../engine/types.ts';
 import { sound } from '../../engine/audio.ts';
 
@@ -16,6 +16,8 @@ interface Props {
   isPlayerFighter: boolean;
   playerFighterSlot: 'A' | 'B' | 'spectator';
   fighterScores: Record<string, number>;
+  gameConfig?: Record<string, unknown>;
+  gameState?: Record<string, unknown>;
   gameStartsAt?: number;
   serverTimeOffset?: number;
   onSendAction: (action: { type: 'STOP' }) => void;
@@ -27,17 +29,22 @@ export const MillisecondStopGame: React.FC<Props> = ({
   isPlayerFighter,
   playerFighterSlot,
   fighterScores,
+  gameConfig,
+  gameState,
   gameStartsAt = Date.now(),
   serverTimeOffset = 0,
   onSendAction,
 }) => {
   const [elapsed, setElapsed] = useState<number>(0);
   const [localStopped, setLocalStopped] = useState<boolean>(false);
+  const sent = useRef(false);
 
-  const stoppedA = fighterScores[fighterA.id] || null;
-  const stoppedB = fighterScores[fighterB.id] || null;
+  const stopped = gameState?.stopped as Record<string, boolean> | undefined;
+  const stoppedA = (stopped?.[fighterA.id] || fighterScores[fighterA.id] > 0) ? fighterScores[fighterA.id] : null;
+  const stoppedB = (stopped?.[fighterB.id] || fighterScores[fighterB.id] > 0) ? fighterScores[fighterB.id] : null;
 
-  const TARGET_TIME = 5.0;
+  const targetTime = typeof gameConfig?.targetSeconds === 'number' ? gameConfig.targetSeconds : 5;
+  const blindTime = typeof gameConfig?.blindSeconds === 'number' ? gameConfig.blindSeconds : 3;
 
   // Real-time animation loop synchronized to gameStartsAt
   useEffect(() => {
@@ -48,24 +55,25 @@ export const MillisecondStopGame: React.FC<Props> = ({
       const currentElapsed = Math.max(0, (now - gameStartsAt) / 1000);
       setElapsed(currentElapsed);
 
-      if (currentElapsed < 8.0) {
+      if (currentElapsed < targetTime + 4) {
         animFrame = requestAnimationFrame(tick);
       }
     };
 
     animFrame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(animFrame);
-  }, [gameStartsAt, serverTimeOffset]);
+  }, [gameStartsAt, serverTimeOffset, targetTime]);
 
-  // Once elapsed reaches 3.000s, ALL clients enter the blind zone.
+  // Once the selected blind interval passes, ALL clients enter the blind zone.
   // NO CLIENT (neither fighters nor spectators) may see the live continuing clock!
-  const isBlinded = elapsed >= 3.0;
+  const isBlinded = elapsed >= blindTime;
 
   const hasMyPlayerStopped = (playerFighterSlot === 'A' && (stoppedA !== null || localStopped)) ||
                              (playerFighterSlot === 'B' && (stoppedB !== null || localStopped));
 
   const handleStop = () => {
-    if (!isPlayerFighter || hasMyPlayerStopped) return;
+    if (!isPlayerFighter || hasMyPlayerStopped || sent.current) return;
+    sent.current = true;
     setLocalStopped(true);
     sound.playTap(true);
     onSendAction({ type: 'STOP' });
@@ -74,7 +82,7 @@ export const MillisecondStopGame: React.FC<Props> = ({
   // Keyboard shortcut (Space / Enter)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.code === 'Space' || e.code === 'Enter') {
+      if (!e.repeat && (e.code === 'Space' || e.code === 'Enter')) {
         e.preventDefault();
         handleStop();
       }
@@ -89,8 +97,8 @@ export const MillisecondStopGame: React.FC<Props> = ({
     <div className="flex flex-col items-center justify-between w-full max-w-xl mx-auto p-4 py-6 bg-slate-950/90 rounded-3xl border border-cyan-500/30 text-white min-h-[460px]">
       {/* Top Banner */}
       <div className="text-center space-y-1">
-        <span className="px-3 py-1 bg-cyan-950 text-cyan-300 border border-cyan-700/60 rounded-full text-xs font-mono font-bold tracking-wider">
-          TARGET: 05.000s (BLINDS AT 03.000s FOR EVERYONE)
+        <span className="inline-block px-3 py-1 bg-cyan-950 text-cyan-300 border border-cyan-700/60 rounded-full text-xs font-mono font-bold">
+          TARGET: {targetTime.toFixed(3)}s · HIDDEN AT {blindTime.toFixed(3)}s
         </span>
         <h3 className="text-xl font-black font-display tracking-wide text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-amber-400">
           MILLISECOND STOP
@@ -117,7 +125,7 @@ export const MillisecondStopGame: React.FC<Props> = ({
         </div>
 
         <div className="mt-2 text-xs font-mono text-slate-400">
-          Target: <span className="text-white font-bold">05.000s</span>
+          Target: <span className="text-white font-bold">{targetTime.toFixed(3)}s</span>
         </div>
       </div>
 
@@ -198,7 +206,7 @@ export const MillisecondStopGame: React.FC<Props> = ({
                 : 'bg-gradient-to-r from-red-600 via-rose-500 to-amber-500 text-white shadow-red-500/30 glow-crimson border-2 border-red-400'
             }`}
           >
-            {hasMyPlayerStopped ? 'LOCKED IN!' : '⚡ SLAM AT 05.000s! ⚡'}
+            {hasMyPlayerStopped ? 'LOCKED IN!' : `⚡ SLAM AT ${targetTime.toFixed(3)}s! ⚡`}
           </button>
         ) : (
           <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 text-center w-full">
