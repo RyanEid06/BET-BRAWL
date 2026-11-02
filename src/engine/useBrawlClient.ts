@@ -777,7 +777,7 @@ const hostGame = useCallback((playerName: string, avatar: string) => {
     localStorage.removeItem(SESSION_TOKEN_KEY);
     localStorage.removeItem(RECONNECT_KEY);
     if (state.isHost) (window as unknown as { BetBrawlAndroid?: { stopHosting?: () => void } }).BetBrawlAndroid?.stopHosting?.();
-    setState(prev => ({ ...prev, status: 'IDLE', phase: 'ENTRY', roomCode: '', isHost: false, myPlayer: null,
+    setState(prev => ({ ...prev, status: 'IDLE', phase: 'ENTRY', roomCode: '', networkInfo: null, isHost: false, myPlayer: null,
       myBet: null, currentRound: null, players: [], tournamentSchedule: null, roundHistory: [], awards: [],
       lastActionFeedback: null, lastGameActionError: null, errorMessage: null, serverTimeOffset: 0,
       reconciliationEpoch: prev.reconciliationEpoch + 1 }));

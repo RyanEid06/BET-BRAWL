@@ -85,6 +85,13 @@ try {
   await run(() => window.__regression.remount()); await settle();
   await run(() => window.__regression.client.hostGame('Alexandra', '🦊'));
   await run(() => { const a = window.__regression; a.open(); a.reset('memory_heist'); a.join(); }); await settle();
+  await run(() => window.onHostDiscovered({ host: '192.168.1.20', port: 8080, roomCode: 'UITEST' })); await settle();
+  assert.equal(await run(() => window.__regression.client.networkInfo?.roomCode), 'UITEST');
+  await run(() => window.__regression.client.leaveRoom()); await settle();
+  assert.equal(await run(() => window.__regression.client.networkInfo), null, 'Explicit leave retained the old native room');
+  checks.push('Explicit leave clears stale native room discovery');
+  await run(() => window.__regression.client.hostGame('Alexandra', '🦊'));
+  await run(() => { const a = window.__regression; a.open(); a.reset('memory_heist'); a.join(); }); await settle();
   for (const width of [360, 390, 1366]) {
     await page.setViewportSize({ width, height: width === 360 ? 640 : 844 });
     await run(() => { window.__regression.reset('memory_heist'); window.__regression.payout(); }); await settle();
@@ -102,6 +109,7 @@ try {
   await run(() => window.__regression.showApp()); await settle();
   await page.getByRole('button', {name: 'HOST NEW GAME', exact: true}).click();
   await run(() => { const a = window.__regression; a.open(); a.reset('memory_heist'); a.join(); }); await settle();
+  await run(() => window.onHostDiscovered({ host: '192.168.1.20', port: 8080, roomCode: 'UITEST' })); await settle();
   assert.equal(await run(() => window.onAndroidBackPressed()), true); await settle();
   assert.equal(await page.getByRole('dialog').isVisible(), true);
   await page.getByRole('button', {name: 'Keep playing', exact: true}).click();
